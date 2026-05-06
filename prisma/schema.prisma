@@ -1,0 +1,364 @@
+// This is your Prisma schema file.
+// Database connection is configured in prisma.config.ts (Prisma v6).
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── User (broker) ──────────────────────────────────────────────────────────────
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  fullName      String
+  phone         String?
+  licenseNumber String?   @unique  // nullable in DB; required at API/UI layer
+  idNumber      String?            // nullable in DB; required at API/UI layer
+  logoUrl       String?            // optional; upload not implemented yet
+
+  // ── Auth.js fields ────────────────────────────────────────────────────────
+  passwordHash    String?    // bcrypt hash; null for OAuth-only accounts
+  emailVerified   DateTime?
+  image           String?    // avatar URL from Google / Apple
+  profileComplete Boolean    @default(false) // true once phone+license+idNumber filled
+
+  createdAt  DateTime    @default(now())
+
+  // ── Relations ─────────────────────────────────────────────────────────────
+  contracts  Contract[]
+  activities Activity[]
+  properties Property[]
+  messages   Message[]
+  clients    Client[]
+
+  // ── Auth.js adapter relations ─────────────────────────────────────────────
+  accounts   Account[]
+  sessions   Session[]
+}
+
+// ── Client ─────────────────────────────────────────────────────────────────────
+model Client {
+  id        String     @id @default(cuid())
+  userId    String                           // owning broker; required after backfill
+  user      User       @relation(fields: [userId], references: [id])
+  name      String
+  phone     String
+  email     String
+  idNumber  String
+  createdAt DateTime   @default(now())
+  contracts Contract[]
+  messages  Message[]
+}
+
+// ── ContractTemplate ───────────────────────────────────────────────────────────
+
+enum ContractTemplateKey {
+  INTERESTED_BUYER   // החתמת מתעניין
+  OWNER_EXCLUSIVE    // החתמת בעל נכס / בלעדיות
+  BROKER_COOP        // הסכם שיתוף פעולה בין מתווכים
+}
+
+enum ContractTemplateLanguage {
+  HE   // עברית   — default; required for every templateKey
+  EN   // English
+  FR   // Français
+  RU   // Русский
+  AR   // العربية
+}
+
+model ContractTemplate {
+  id          String                   @id @default(cuid())
+  title       String
+  templateKey ContractTemplateKey?              // null = unassigned; set to auto-match by contract type
+  language    ContractTemplateLanguage @default(HE)  // resolved together with templateKey
+  content     String                   @db.Text // legal text with {{placeholder}} syntax
+  isActive    Boolean                  @default(true)
+  version     Int                      @default(1)
+  createdAt   DateTime                 @default(now())
+  updatedAt   DateTime                 @updatedAt
+
+  contracts Contract[]
+}
+
+// ── Contract ───────────────────────────────────────────────────────────────────
+model Contract {
+  id              String          @id @default(cuid())
+  contractType    String
+  dealType        DealType
+  status          SignatureStatus @default(DRAFT)
+
+  // Property
+  propertyAddress String
+  propertyCity    String
+  propertyPrice   Int             // stored in agorot (smallest currency unit)
+  commission      Int             // stored in agorot
+
+  // Dates
+  createdAt       DateTime        @default(now())
+  sentAt          DateTime?
+  signedAt        DateTime?
+  dealClosedAt    DateTime?
+
+  // Deal state
+  dealClosed                Boolean @default(false)
+  hideFullAddressFromClient Boolean @default(false)
+
+  // Signing audit (used in public /contracts/sign/[token] URL)
+  signatureToken  String?         @unique
+  signatureIp     String?
+  signatureData   String?         // base64 PNG of drawn signature
+  signatureHash   String?         // SHA-256(signatureData) — tamper detection
+  userAgent       String?         // browser/device string at signing time
+
+  // Template snapshot (frozen at creation time; immutable after that)
+  language        String          @default("HE")   // "HE"|"EN"|"FR"|"RU"|"AR" — language used at creation
+  templateId      String?
+  template        ContractTemplate? @relation(fields: [templateId], references: [id])
+  generatedText   String?         @db.Text
+
+  // Relations
+  userId          String
+  user            User            @relation(fields: [userId], references: [id])
+  clientId        String
+  client          Client          @relation(fields: [clientId], references: [id])
+  propertyId      String?
+  property        Property?       @relation(fields: [propertyId], references: [id])
+  activities      Activity[]
+  payment         Payment?
+  messages        Message[]
+}
+
+// ── Payment ────────────────────────────────────────────────────────────────────
+model Payment {
+  id                String        @id @default(cuid())
+  contractId        String        @unique
+  contract          Contract      @relation(fields: [contractId], references: [id])
+  status            PaymentStatus @default(PENDING)
+  amount            Int           // stored in agorot
+  provider          String?       // "cardcom" | "meshulam" | "tranzila"
+  providerPaymentId String?       // external ID filled by webhook in Phase 2
+  paymentUrl        String?       // hosted payment page URL sent to client
+  paidAt            DateTime?
+
+  // ── Fee breakdown (computed at payment-request creation time) ──────────────
+  grossAmount   Int?       // total charged to customer, in agorot
+  processorFee  Int?       // payment-processor cut, in agorot
+  platformFee   Int?       // SignDeal platform cut, in agorot
+  netAmount     Int?       // broker net after fees, in agorot
+  feePaidBy     FeePaidBy? // BROKER | CLIENT | SPLIT — who absorbs which fees
+
+  // ── Fee config snapshot (stored at creation for auditability) ──────────────
+  providerFeePercent Float @default(0)  // e.g. 1.7 = 1.7%; used to compute processorFee
+  platformFeePercent Float @default(0)  // e.g. 0.5 = 0.5%; used to compute platformFee
+  // feeMode is persisted via feePaidBy (BROKER | CLIENT | SPLIT)
+
+  createdAt         DateTime      @default(now())
+  messages          Message[]
+}
+
+// ── Activity log ───────────────────────────────────────────────────────────────
+model Activity {
+  id         String   @id @default(cuid())
+  contractId String
+  contract   Contract @relation(fields: [contractId], references: [id])
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  message    String
+  createdAt  DateTime @default(now())
+}
+
+// ── Enums ──────────────────────────────────────────────────────────────────────
+enum SignatureStatus {
+  DRAFT           // טיוטה — created, not yet sent
+  SENT            // נשלח — signing link delivered to client
+  OPENED          // נפתח — client opened the signing link
+  SIGNED          // נחתם — client signed; no payment expected
+  PAYMENT_PENDING // ממתין לתשלום — signed; broker sent a payment request
+  PAID            // שולם — payment confirmed by provider webhook
+  EXPIRED         // פג תוקף — link expired without signature
+  CANCELED        // בוטל
+}
+
+enum DealType {
+  RENTAL    // שכירות
+  SALE      // מכירה
+}
+
+enum PaymentStatus {
+  PENDING   // ממתין לתשלום
+  PAID      // שולם
+  FAILED    // נכשל
+  CANCELED  // בוטל
+}
+
+enum FeePaidBy {
+  BROKER   // מתווך נושא בעלויות
+  CLIENT   // לקוח משלם עמלת נוחות
+  SPLIT    // חלוקה מותאמת אישית
+}
+
+enum PropertyType {
+  APARTMENT  // דירה
+  HOUSE      // בית פרטי
+  OFFICE     // משרד
+  LAND       // קרקע
+  PARKING    // חניה
+  OTHER      // אחר
+}
+
+enum PropertyListingType {
+  RENTAL  // להשכרה
+  SALE    // למכירה
+  BOTH    // גם וגם
+}
+
+model Property {
+  id          String              @id @default(cuid())
+  userId      String
+  user        User                @relation(fields: [userId], references: [id])
+
+  address     String
+  city        String
+  type        PropertyType        @default(APARTMENT)
+  listingType PropertyListingType @default(RENTAL)
+  rooms       Float?              // 3, 3.5, 4 …
+  floor       Int?
+  sizeSqm     Float?       // square metres
+  askingPrice Int?         // agorot — optional starting price
+
+  contracts   Contract[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// ── Auth.js adapter models ─────────────────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ── Messaging enums ────────────────────────────────────────────────────────────
+
+enum MessageChannel {
+  SMS
+  WHATSAPP
+  EMAIL
+}
+
+enum MessageStatus {
+  PENDING    // נוצר, טרם נשלח
+  SENT       // נשלח לספק, ממתין לאישור מסירה
+  DELIVERED  // אושרה מסירה על ידי הספק
+  FAILED     // נכשל לאחר כל ניסיונות השליחה
+  CANCELED   // בוטל לפני השליחה
+}
+
+enum MessageType {
+  CONTRACT_SIGNING_LINK    // שליחת קישור חתימה ללקוח
+  PAYMENT_REQUEST_LINK     // שליחת קישור תשלום ללקוח
+  SIGNING_REMINDER         // תזכורת לחתימה ללקוח
+  PAYMENT_REMINDER         // תזכורת לתשלום ללקוח
+  BROKER_CONTRACT_SIGNED   // התראה למתווך: לקוח חתם
+  BROKER_PAYMENT_RECEIVED  // התראה למתווך: תשלום התקבל
+}
+
+// ── MessageTemplate ────────────────────────────────────────────────────────────
+model MessageTemplate {
+  id        String         @id @default(cuid())
+  type      MessageType
+  channel   MessageChannel
+  nameHe    String         // Hebrew label for UI, e.g. "קישור חתימה — WhatsApp"
+  subject   String?        // email subject line; null for SMS / WhatsApp
+  body      String         // template body with {{placeholders}}
+                           // e.g. "שלום {{clientName}}, לחץ לחתימה: {{signingUrl}}"
+  isActive  Boolean        @default(true)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  messages  Message[]
+
+  @@unique([type, channel]) // one active template per type+channel combination
+}
+
+// ── Message (send log + delivery tracking) ─────────────────────────────────────
+model Message {
+  id String @id @default(cuid())
+
+  // Who triggered the send (null = system-triggered, e.g. post-signing broker alert)
+  userId         String?
+  user           User?            @relation(fields: [userId], references: [id])
+
+  // Recipient — denormalized so the record survives if client is later deleted
+  clientId       String?
+  client         Client?          @relation(fields: [clientId], references: [id])
+  recipientPhone String?
+  recipientEmail String?
+
+  // Context — what triggered this message
+  contractId     String?
+  contract       Contract?        @relation(fields: [contractId], references: [id])
+  paymentId      String?
+  payment        Payment?         @relation(fields: [paymentId], references: [id])
+
+  // Content
+  type           MessageType
+  channel        MessageChannel
+  templateId     String?
+  template       MessageTemplate? @relation(fields: [templateId], references: [id])
+  body           String           // fully-rendered body after placeholder substitution
+  subject        String?          // email subject (null for SMS / WhatsApp)
+
+  // Provider tracking
+  provider          String        // "infobip" | "resend" | "twilio"
+  providerMessageId String?       // provider's own message ID — used to match webhooks
+  providerResponse  String?       // raw JSON response from provider (for debugging)
+
+  // Delivery status + retry
+  status        MessageStatus @default(PENDING)
+  attempts      Int           @default(0)   // number of send attempts so far
+  lastAttemptAt DateTime?
+  nextRetryAt   DateTime?     // non-null when scheduled for automatic retry
+  deliveredAt   DateTime?
+  failureReason String?       // provider error string on FAILED status
+
+  // Timestamps
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

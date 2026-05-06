@@ -1,0 +1,277 @@
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { Prisma } from "@/generated/prisma";
+import { sendSms } from "@/lib/messaging/sms-provider";
+import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
+
+// ── GET /api/contracts/sign/[token] ──────────────────────────────────────────
+// Public endpoint — returns signing-safe contract fields for the client.
+// Does NOT expose userId, signatureToken, or broker-private metadata.
+
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ token: string }> }
+) {
+  try {
+    const { token } = await params;
+
+    const contract = await prisma.contract.findUnique({
+      where:   { signatureToken: token },
+      include: { client: true, payment: true },
+    });
+
+    if (!contract) {
+      return NextResponse.json({ error: "Contract not found" }, { status: 404 });
+    }
+
+    // ── OPENED transition ─────────────────────────────────────────────────────
+    // Advance SENT → OPENED the first time the client opens the link.
+    // updateMany silently no-ops when count=0, so repeated refreshes are safe.
+    // Errors are swallowed so a DB hiccup never breaks the signing-page response.
+    if (contract.status === "SENT") {
+      await prisma.contract.updateMany({
+        where: { id: contract.id, status: "SENT" },
+        data:  { status: "OPENED" },
+      }).catch((err) => console.error("[sign GET] OPENED transition failed:", err));
+    }
+
+    // Return ApiContractResponse-compatible shape — no broker-private fields
+    return NextResponse.json({
+      id:              contract.id,
+      contractType:    contract.contractType,
+      dealType:        contract.dealType,
+      status:          contract.status,
+      propertyAddress: contract.propertyAddress,
+      propertyCity:    contract.propertyCity,
+      propertyPrice:   contract.propertyPrice,
+      commission:      contract.commission,
+      dealClosed:      contract.dealClosed,
+      sentAt:          contract.sentAt?.toISOString()       ?? null,
+      signedAt:        contract.signedAt?.toISOString()     ?? null,
+      dealClosedAt:    contract.dealClosedAt?.toISOString() ?? null,
+      createdAt:       contract.createdAt.toISOString(),
+      client: {
+        name:     contract.client.name,
+        phone:    contract.client.phone,
+        email:    contract.client.email,
+        idNumber: contract.client.idNumber,
+      },
+      payment: contract.payment ? {
+        status:     contract.payment.status,
+        paidAt:     contract.payment.paidAt?.toISOString() ?? null,
+        paymentUrl: contract.payment.paymentUrl ?? null,
+        provider:   contract.payment.provider   ?? null,
+      } : null,
+      signatureData:             contract.signatureData ?? null,
+      signatureHash:             contract.signatureHash ?? null,
+      userAgent:                 contract.userAgent     ?? null,
+      propertyId:                contract.propertyId    ?? null,
+      hideFullAddressFromClient: contract.hideFullAddressFromClient,
+      generatedText:             contract.generatedText ?? null,
+      templateId:                contract.templateId    ?? null,
+      language:                  contract.language      ?? "HE",
+    });
+  } catch (error) {
+    console.error("[GET /api/contracts/sign/:token]", error);
+    return NextResponse.json({ error: "Failed to fetch contract" }, { status: 500 });
+  }
+}
+
+// ── Broker notification — fire-and-forget ────────────────────────────────────
+// Notifies the broker by SMS when their client signs. Never throws or blocks.
+
+async function sendBrokerSignedSms(
+  contract: { id: string; userId: string; clientId: string },
+  clientName: string,
+): Promise<void> {
+  try {
+    const broker = await prisma.user.findUnique({ where: { id: contract.userId } });
+    if (!broker?.phone) return;
+
+    const testPhone       = process.env.SMS_TEST_PHONE?.trim() || "";
+    const normalizedPhone = normalizeIsraeliPhone(broker.phone);
+    const normalizedTest  = testPhone ? normalizeIsraeliPhone(testPhone) : "";
+
+    const body = `SignDeal — הלקוח ${clientName} חתם על החוזה. היכנס למערכת לפרטים.`;
+
+    if (normalizedTest && normalizedPhone !== normalizedTest) {
+      console.log(`[sendBrokerSignedSms] skipped — ${normalizedPhone} is not SMS_TEST_PHONE`);
+      await prisma.message.create({
+        data: {
+          type:           "BROKER_CONTRACT_SIGNED",
+          channel:        "SMS",
+          provider:       "infobip",
+          body,
+          contractId:     contract.id,
+          clientId:       contract.clientId,
+          userId:         contract.userId,
+          recipientPhone: normalizedPhone,
+          status:         "CANCELED",
+          failureReason:  "skipped: phone does not match SMS_TEST_PHONE",
+          attempts:       0,
+        },
+      });
+      return;
+    }
+
+    const message = await prisma.message.create({
+      data: {
+        type:           "BROKER_CONTRACT_SIGNED",
+        channel:        "SMS",
+        provider:       "infobip",
+        body,
+        contractId:     contract.id,
+        clientId:       contract.clientId,
+        userId:         contract.userId,
+        recipientPhone: normalizedPhone,
+        status:         "PENDING",
+        attempts:       0,
+      },
+    });
+
+    const result = await sendSms({ to: normalizedPhone, body });
+
+    await prisma.message.update({
+      where: { id: message.id },
+      data: result.ok
+        ? { status: "SENT", providerMessageId: result.messageId, attempts: 1, lastAttemptAt: new Date() }
+        : { status: "FAILED", failureReason: result.reason, attempts: 1, lastAttemptAt: new Date() },
+    });
+
+    if (!result.ok) {
+      console.error(`[sendBrokerSignedSms] SMS failed for contract ${contract.id}:`, result.reason);
+    }
+  } catch (err) {
+    console.error("[sendBrokerSignedSms] unexpected error:", err);
+  }
+}
+
+// ── PATCH /api/contracts/sign/[token] ─────────────────────────────────────────
+// Public endpoint — only permits client info updates and signing.
+// Broker-only operations (dealClosed, status overrides, etc.) are rejected.
+
+const SIGNING_ALLOWED_FIELDS = new Set([
+  "signatureStatus", "signedAt",
+  "clientEmail", "clientIdNumber",
+  "signatureData", "signatureHash",
+]);
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ token: string }> }
+) {
+  try {
+    const { token } = await params;
+    const body = await request.json();
+
+    // Reject any field that isn't in the signing-safe allowlist
+    const disallowed = Object.keys(body).filter(k => !SIGNING_ALLOWED_FIELDS.has(k));
+    if (disallowed.length > 0) {
+      return NextResponse.json({ error: "Operation not permitted" }, { status: 403 });
+    }
+
+    const { signatureStatus, signedAt, clientEmail, clientIdNumber, signatureData, signatureHash } = body;
+
+    if (signatureData !== undefined && typeof signatureData === "string" && signatureData.length > 500_000) {
+      return NextResponse.json({ error: "Signature data too large" }, { status: 400 });
+    }
+
+    const contract = await prisma.contract.findUnique({
+      where: { signatureToken: token },
+    });
+
+    if (!contract) {
+      return NextResponse.json({ error: "Contract not found" }, { status: 404 });
+    }
+    if (contract.status === "CANCELED") {
+      return NextResponse.json({ error: "Contract is canceled" }, { status: 400 });
+    }
+    if (signatureStatus === "SIGNED" && contract.status === "SIGNED") {
+      return NextResponse.json({ error: "Contract already signed" }, { status: 400 });
+    }
+
+    const data: Record<string, unknown> = {};
+
+    // Client info fields
+    const clientData: Record<string, string> = {};
+    if (clientEmail    !== undefined) clientData.email    = clientEmail;
+    if (clientIdNumber !== undefined) clientData.idNumber = clientIdNumber;
+    if (Object.keys(clientData).length > 0) data.client = { update: clientData };
+
+    // Signing
+    if (signatureStatus === "SIGNED") {
+      const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim()
+               ?? request.headers.get("x-real-ip")
+               ?? null;
+      const ua = request.headers.get("user-agent") ?? null;
+
+      data.status      = "SIGNED";
+      data.signedAt    = new Date(); // G3.2: server controls timestamp, client value ignored
+      data.signatureIp = ip;
+      data.userAgent   = ua;
+      if (typeof signatureData === "string") data.signatureData = signatureData;
+      if (typeof signatureHash === "string") data.signatureHash = signatureHash;
+
+      console.log("[SIGN AUDIT]", {
+        contractId:       contract.id,
+        signatureIp:      ip,
+        userAgent:        ua,
+        hasSignatureData: !!signatureData,
+        signatureHash,
+      });
+    }
+
+    if (Object.keys(data).length === 0) {
+      return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
+    }
+
+    const updated = await prisma.contract.update({
+      where:   { signatureToken: token },
+      data,
+      include: { client: true, payment: true },
+    });
+
+    // G3.3: Persist activity + G3.4: notify broker — only on signing
+    if (signatureStatus === "SIGNED") {
+      await prisma.activity.create({
+        data: {
+          contractId: contract.id,
+          message:    "הלקוח חתם על החוזה",
+          userId:     contract.userId,
+        },
+      });
+      void sendBrokerSignedSms(
+        { id: contract.id, userId: contract.userId, clientId: contract.clientId },
+        updated.client.name,
+      );
+    }
+
+    // G3.1: Return only signing-safe fields — no signatureToken, userId, signatureIp
+    return NextResponse.json({
+      id:            updated.id,
+      contractType:  updated.contractType,
+      status:        updated.status,
+      signedAt:      updated.signedAt?.toISOString()     ?? null,
+      signatureData: updated.signatureData               ?? null,
+      signatureHash: updated.signatureHash               ?? null,
+      client: {
+        name:     updated.client.name,
+        phone:    updated.client.phone,
+        email:    updated.client.email,
+        idNumber: updated.client.idNumber,
+      },
+      payment: updated.payment ? {
+        status:     updated.payment.status,
+        paidAt:     updated.payment.paidAt?.toISOString() ?? null,
+        paymentUrl: updated.payment.paymentUrl             ?? null,
+        provider:   updated.payment.provider               ?? null,
+      } : null,
+    });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+      return NextResponse.json({ error: "Contract not found" }, { status: 404 });
+    }
+    console.error("[PATCH /api/contracts/sign/:token]", error);
+    return NextResponse.json({ error: "Failed to update contract" }, { status: 500 });
+  }
+}
