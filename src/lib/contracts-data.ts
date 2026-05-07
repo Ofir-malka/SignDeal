@@ -33,6 +33,10 @@ export interface Contract {
   createdDate:      string;
   signedDate:       string | null;
   paidDate:         string | null;
+  // Raw ISO strings — used for sorting/filtering without re-parsing formatted strings
+  createdAtRaw:     string;
+  signedAtRaw:      string | null;
+  paidAtRaw:        string | null;
   signatureData?:   string | null;
   propertyId?:      string | null;
   paymentUrl?:      string | null;

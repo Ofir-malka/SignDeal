@@ -1,38 +1,43 @@
+import type { ReactNode } from "react";
+
 interface StatsCardProps {
-  title: string;
-  value: string;
-  subtitle: string;
-  trend?: "up" | "down" | "neutral";
-  icon: React.ReactNode;
+  title:       string;
+  value:       string;
+  subtitle:    string;
+  trend?:      "up" | "down" | "neutral";
+  icon:        ReactNode;
   accentColor: "indigo" | "amber" | "orange" | "emerald";
-  featured?: boolean;
+  featured?:   boolean;
+  loading?:    boolean;
 }
 
 const colorMap = {
-  indigo: {
-    bg: "bg-indigo-50",
-    icon: "text-indigo-600",
-    badge: "bg-indigo-100 text-indigo-700",
-  },
-  amber: {
-    bg: "bg-amber-50",
-    icon: "text-amber-600",
-    badge: "bg-amber-100 text-amber-700",
-  },
-  orange: {
-    bg: "bg-orange-50",
-    icon: "text-orange-600",
-    badge: "bg-orange-100 text-orange-700",
-  },
-  emerald: {
-    bg: "bg-emerald-50",
-    icon: "text-emerald-600",
-    badge: "bg-emerald-100 text-emerald-700",
-  },
+  indigo:  { bg: "bg-indigo-50",  icon: "text-indigo-600"  },
+  amber:   { bg: "bg-amber-50",   icon: "text-amber-600"   },
+  orange:  { bg: "bg-orange-50",  icon: "text-orange-600"  },
+  emerald: { bg: "bg-emerald-50", icon: "text-emerald-600" },
 };
 
-export function StatsCard({ title, value, subtitle, trend = "neutral", icon, accentColor, featured }: StatsCardProps) {
+export function StatsCard({
+  title, value, subtitle, trend = "neutral",
+  icon, accentColor, featured, loading,
+}: StatsCardProps) {
   const colors = colorMap[accentColor];
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 animate-pulse">
+        <div className="flex items-start justify-between">
+          <div className="flex-1">
+            <div className="h-4 bg-gray-100 rounded w-28 mb-2.5" />
+            <div className="h-7 bg-gray-200 rounded w-16" />
+          </div>
+          <div className="w-10 h-10 rounded-lg bg-gray-100 shrink-0" />
+        </div>
+        <div className="mt-3 h-3 bg-gray-100 rounded w-36" />
+      </div>
+    );
+  }
 
   return (
     <div className={`bg-white rounded-xl border p-5 transition-shadow hover:shadow-md ${featured ? "border-orange-300 shadow-md ring-1 ring-orange-100" : "border-gray-200 shadow-sm"}`}>
