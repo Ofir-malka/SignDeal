@@ -119,17 +119,18 @@ export function ContractTemplate({
   contract:     Contract;
   hideAddress?: boolean;
 }) {
-  const isSigned = c.signatureStatus === "נחתם";
   const labels   = getLabels(c.language);
   const isRtl    = isRtlLang(c.language);
   const dir      = isRtl ? "rtl" : "ltr";
 
-  // Address reveal: show full address once client has signed (any post-signature
-  // status), or when the broker has not enabled the hide-address toggle.
+  // True once the client has signed — covers SIGNED, PAYMENT_PENDING, and PAID.
+  // Used for both the address reveal and the signature image display.
   const isSignedOrBeyond =
     c.signatureStatus === "נחתם"           ||
     c.signatureStatus === "ממתין לתשלום"  ||
     c.signatureStatus === "שולם";
+
+  // Address reveal: show full address once signed, or when broker hasn't hidden it.
   const revealFullAddress = isSignedOrBeyond || !hideAddress;
 
   // ── HatimaTova-style layout (when real legal text exists) ──────────────────
@@ -193,7 +194,7 @@ export function ContractTemplate({
         {/* ── Signature ──────────────────────────────────────────────────── */}
         <div className="px-6 py-5">
           <p className="text-xs font-semibold text-gray-500 mb-4">{labels.clientSignature}</p>
-          {isSigned && c.signatureData ? (
+          {isSignedOrBeyond && c.signatureData ? (
             <div className="border border-gray-200 rounded-lg overflow-hidden bg-white mb-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -209,9 +210,9 @@ export function ContractTemplate({
           )}
           <div className="flex justify-between items-center mt-2 text-xs text-gray-500">
             <span>{c.client}</span>
-            {isSigned && c.signedDate && <span>{labels.date}: {c.signedDate}</span>}
+            {isSignedOrBeyond && c.signedDate && <span>{labels.date}: {c.signedDate}</span>}
           </div>
-          {isSigned && c.signedDate && (
+          {isSignedOrBeyond && c.signedDate && (
             <p className="text-[11px] text-gray-400 mt-3 text-center">
               {labels.signedNote(c.signedDate)}
             </p>
@@ -314,7 +315,7 @@ export function ContractTemplate({
         <Section title={labels.signature}>
           <div className="mt-2 space-y-1.5">
             <p className="text-xs font-medium text-gray-500">{labels.clientSignature}</p>
-            {isSigned && c.signatureData ? (
+            {isSignedOrBeyond && c.signatureData ? (
               <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
@@ -328,11 +329,11 @@ export function ContractTemplate({
                 <span className="text-xs text-gray-400">{labels.notYetSigned}</span>
               </div>
             )}
-            {isSigned && c.signedDate && (
+            {isSignedOrBeyond && c.signedDate && (
               <p className="text-xs text-gray-400">{labels.date}: {c.signedDate}</p>
             )}
           </div>
-          {isSigned && c.signedDate && (
+          {isSignedOrBeyond && c.signedDate && (
             <p className="text-[11px] text-gray-400 mt-3 text-center">
               {labels.signedNote(c.signedDate)}
             </p>

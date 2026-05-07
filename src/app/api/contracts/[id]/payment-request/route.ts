@@ -21,16 +21,28 @@ export async function POST(
       where:  { id, userId },
       select: {
         id:              true,
+        status:          true,
         commission:      true,
         propertyAddress: true,
         propertyCity:    true,
         client: {
           select: { name: true, phone: true, email: true },
         },
+        payment:         true,   // needed for the PAID early-return
       },
     });
     if (!contract) {
       return NextResponse.json({ error: "Contract not found" }, { status: 404 });
+    }
+
+    // ── Guard: do not reset a payment that has already been collected ─────────
+    // Re-creating a payment request on a PAID contract would wipe providerPaymentId,
+    // paidAt, and paymentUrl — corrupting the audit trail.
+    if (contract.status === "PAID") {
+      return NextResponse.json(
+        { error: "Contract is already paid", payment: contract.payment },
+        { status: 409 },
+      );
     }
 
     // ── Step 1: calculate fee breakdown ──────────────────────────────────────

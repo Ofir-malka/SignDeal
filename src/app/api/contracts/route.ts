@@ -181,7 +181,13 @@ export async function POST(request: Request) {
       client = await prisma.client.findFirst({ where: { phone: clientPhone, userId: user.id } });
       if (!client) {
         client = await prisma.client.create({
-          data: { name: clientName, phone: clientPhone, email: clientEmail || "", idNumber: clientIdNumber || "", userId: user.id },
+          data: {
+            name:     clientName,
+            phone:    clientPhone,
+            email:    clientEmail?.trim() || null,   // "" → null so downstream email callers get null, not ""
+            idNumber: clientIdNumber || "",
+            userId:   user.id,
+          },
         });
       }
     }
@@ -247,9 +253,10 @@ export async function POST(request: Request) {
       include: { client: true, payment: true },
     });
 
-    // Send signing-link SMS — fire and forget, never blocks or affects the response
-    // signatureToken is always set on newly created contracts (randomUUID above)
-    void sendContractSms(
+    // Send signing-link SMS — awaited so Vercel doesn't kill the promise on response return.
+    // sendContractSms catches all errors internally; failures never affect contract creation.
+    // signatureToken is always set on newly created contracts (randomUUID above).
+    await sendContractSms(
       { ...contract, signatureToken: contract.signatureToken! },
       client.phone,
       client.name,
