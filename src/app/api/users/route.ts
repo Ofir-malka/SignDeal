@@ -4,14 +4,21 @@ import bcrypt from "bcryptjs";
 import { sendEmail } from "@/lib/messaging/email-provider";
 
 async function sendWelcomeEmail(fullName: string, email: string): Promise<void> {
-  const result = await sendEmail({
-    to:      email,
-    subject: "ברוך הבא ל-SignDeal!",
-    text:    `שלום ${fullName},\n\nחשבונך ב-SignDeal נוצר בהצלחה.\nמעכשיו תוכל לנהל חוזים, לקוחות ותשלומים בקלות.\n\nצוות SignDeal`,
-    html:    `<p>שלום ${fullName},</p><p>חשבונך ב-SignDeal נוצר בהצלחה.<br>מעכשיו תוכל לנהל חוזים, לקוחות ותשלומים בקלות.</p><p>צוות SignDeal</p>`,
-  });
-  if (!result.ok) {
-    console.error("[sendWelcomeEmail] failed:", result.reason);
+  console.log(`[sendWelcomeEmail] sending to=${email}`);
+  try {
+    const result = await sendEmail({
+      to:      email,
+      subject: "ברוך הבא ל-SignDeal!",
+      text:    `שלום ${fullName},\n\nחשבונך ב-SignDeal נוצר בהצלחה.\nמעכשיו תוכל לנהל חוזים, לקוחות ותשלומים בקלות.\n\nצוות SignDeal`,
+      html:    `<p>שלום ${fullName},</p><p>חשבונך ב-SignDeal נוצר בהצלחה.<br>מעכשיו תוכל לנהל חוזים, לקוחות ותשלומים בקלות.</p><p>צוות SignDeal</p>`,
+    });
+    if (result.ok) {
+      console.log(`[sendWelcomeEmail] sent ok — messageId=${result.messageId ?? "n/a"}`);
+    } else {
+      console.error(`[sendWelcomeEmail] failed — reason=${result.reason}`);
+    }
+  } catch (err) {
+    console.error("[sendWelcomeEmail] unexpected error:", err);
   }
 }
 
@@ -87,7 +94,9 @@ export async function POST(request: Request) {
 
     // await (not void) — Vercel may kill the container before a detached promise runs.
     // sendWelcomeEmail catches all errors internally, so this never blocks the 201.
+    console.log(`[POST /api/users] user created id=${user.id} — calling sendWelcomeEmail`);
     await sendWelcomeEmail(fullName!.trim(), email!.trim());
+    console.log(`[POST /api/users] sendWelcomeEmail returned — responding 201`);
 
     return NextResponse.json(user, { status: 201 });
 

@@ -18,13 +18,18 @@ export interface SendEmailParams {
 }
 
 export async function sendEmail(params: SendEmailParams): Promise<EmailResult> {
-  const apiKey = process.env.RESEND_API_KEY?.trim();
+  const apiKey  = process.env.RESEND_API_KEY?.trim();
+  const from    = process.env.EMAIL_FROM?.trim() ?? "SignDeal <noreply@signdeal.co.il>";
+
+  console.log(
+    `[sendEmail] RESEND_API_KEY=${apiKey ? `set (${apiKey.length} chars)` : "MISSING"} ` +
+    `EMAIL_FROM="${from}" to="${params.to}"`,
+  );
 
   if (!apiKey) {
     // Stub — log and return success so callers never fail because of missing key.
     console.log(
-      `[sendEmail] STUB (no RESEND_API_KEY) — would send:\n` +
-      `  to:      ${params.to}\n` +
+      `[sendEmail] STUB — no RESEND_API_KEY, skipping send:\n` +
       `  subject: ${params.subject}\n` +
       `  body:    ${params.text.slice(0, 120).replace(/\n/g, "\\n")}`,
     );
@@ -32,6 +37,8 @@ export async function sendEmail(params: SendEmailParams): Promise<EmailResult> {
   }
 
   try {
+    console.log(`[sendEmail] calling Resend API — subject="${params.subject}"`);
+
     const res = await fetch("https://api.resend.com/emails", {
       method:  "POST",
       headers: {
@@ -39,7 +46,7 @@ export async function sendEmail(params: SendEmailParams): Promise<EmailResult> {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        from:    process.env.EMAIL_FROM ?? "SignDeal <noreply@signdeal.co.il>",
+        from,
         to:      [params.to],
         subject: params.subject,
         text:    params.text,
@@ -47,15 +54,22 @@ export async function sendEmail(params: SendEmailParams): Promise<EmailResult> {
       }),
     });
 
+    const rawBody = await res.text().catch(() => "");
+
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      return { ok: false, reason: `Resend ${res.status}: ${body.slice(0, 200)}` };
+      console.error(`[sendEmail] Resend error — status=${res.status} body=${rawBody.slice(0, 300)}`);
+      return { ok: false, reason: `Resend ${res.status}: ${rawBody.slice(0, 200)}` };
     }
 
-    const data = (await res.json()) as { id?: string };
+    let data: { id?: string } = {};
+    try { data = JSON.parse(rawBody); } catch { /* ignore */ }
+
+    console.log(`[sendEmail] Resend accepted — id=${data.id ?? "n/a"}`);
     return { ok: true, messageId: data.id };
 
   } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error(`[sendEmail] network error — ${reason}`);
+    return { ok: false, reason: `Network error calling Resend: ${reason}` };
   }
 }
