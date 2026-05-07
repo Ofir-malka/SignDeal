@@ -946,7 +946,7 @@ function ContractPreview({ data }: { data: FormData }) {
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-md overflow-hidden" dir={dir}>
       {/* Document header */}
-      <div className="bg-gray-50 border-b border-gray-200 px-8 py-6">
+      <div className="bg-gray-50 border-b border-gray-200 px-4 sm:px-8 py-4 sm:py-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center shrink-0">
@@ -968,14 +968,14 @@ function ContractPreview({ data }: { data: FormData }) {
       </div>
 
       {/* Document body */}
-      <div className="px-8 py-6 space-y-6 text-sm leading-relaxed">
+      <div className="px-4 sm:px-8 py-4 sm:py-6 space-y-6 text-sm leading-relaxed">
 
         {/* Parties */}
         <section>
           <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest pb-2 border-b border-gray-100 mb-3">
             {L.parties}
           </h3>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
             <div>
               <p className="text-xs text-gray-400 mb-0.5">{L.fullName}</p>
               <p className="font-medium text-gray-900">{data.clientName || "—"}</p>
@@ -1198,8 +1198,8 @@ function SuccessScreen({
   }
 
   return (
-    <div className="flex-1 flex items-center justify-center px-8 py-16">
-      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 max-w-md w-full">
+    <div className="flex-1 flex items-center justify-center px-4 sm:px-8 py-8 sm:py-16">
+      <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-10 max-w-md w-full">
         {/* Check icon + title */}
         <div className="flex flex-col items-center text-center mb-8">
           <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mb-5">
@@ -1347,21 +1347,21 @@ async function handleSendContract() {
   return (
     <>
       {/* Page header */}
-      <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center gap-4 shrink-0">
-        <Link href="/contracts" className="text-gray-400 hover:text-gray-600 transition-colors">
+      <header className="bg-white border-b border-gray-200 px-4 sm:px-8 py-4 flex items-center gap-4 shrink-0">
+        <Link href="/contracts" className="text-gray-400 hover:text-gray-600 transition-colors shrink-0">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <line x1="19" y1="12" x2="5" y2="12" />
             <polyline points="12 19 5 12 12 5" />
           </svg>
         </Link>
         <div>
-          <h1 className="text-xl font-bold text-gray-900">חוזה חדש</h1>
-          <p className="text-sm text-gray-500 mt-0.5">יצירת חוזה תיווך ושליחה ללקוח</p>
+          <h1 className="text-lg sm:text-xl font-bold text-gray-900">חוזה חדש</h1>
+          <p className="text-xs sm:text-sm text-gray-500 mt-0.5 hidden sm:block">יצירת חוזה תיווך ושליחה ללקוח</p>
         </div>
       </header>
 
       {/* Wizard body */}
-      <main className="flex-1 overflow-y-auto px-8 py-8">
+      <main className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 sm:py-8">
         <div className="max-w-xl mx-auto">
           <StepIndicator current={step} />
 

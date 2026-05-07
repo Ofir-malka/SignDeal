@@ -150,7 +150,7 @@ export function SigningPage({ token }: { token: string }) {
   if (canceled) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4" dir={dir}>
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 max-w-md w-full text-center space-y-5">
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-10 max-w-md w-full text-center space-y-5">
           <Logo />
           <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center mx-auto">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#dc2626" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -171,7 +171,7 @@ export function SigningPage({ token }: { token: string }) {
   if (signed) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4" dir={dir}>
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 max-w-md w-full text-center space-y-5">
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-10 max-w-md w-full text-center space-y-5">
           <Logo />
           <div className="w-16 h-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#059669" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
