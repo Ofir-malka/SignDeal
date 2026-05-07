@@ -56,6 +56,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     ...(process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET
       ? [
           Google({
+            allowDangerousEmailAccountLinking: true,
             profile(profile) {
               return {
                 id:            profile.sub,
