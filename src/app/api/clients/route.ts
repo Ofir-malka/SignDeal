@@ -44,7 +44,15 @@ export async function POST(req: NextRequest) {
     }
 
     const client = await prisma.client.create({
-      data: { name, phone, email, idNumber, userId },
+      data: {
+        name,
+        phone,
+        // email/idNumber are non-nullable String in schema — keep as "" when empty
+        email:    email    || "",
+        idNumber: idNumber || "",
+        // Use Prisma relation connect instead of scalar userId to satisfy v7 validation
+        user: { connect: { id: userId } },
+      },
     });
     return NextResponse.json(client, { status: 201 });
   } catch (error) {

@@ -184,9 +184,11 @@ export async function POST(request: Request) {
           data: {
             name:     clientName,
             phone:    clientPhone,
-            email:    clientEmail?.trim() || null,   // "" → null so downstream email callers get null, not ""
-            idNumber: clientIdNumber || "",
-            userId:   user.id,
+            // email/idNumber are non-nullable String in schema — use "" not null
+            email:    clientEmail?.trim() || "",
+            idNumber: clientIdNumber?.trim() || "",
+            // Use Prisma relation connect instead of scalar userId to satisfy v7 validation
+            user: { connect: { id: user.id } },
           },
         });
       }
@@ -265,6 +267,17 @@ export async function POST(request: Request) {
     return NextResponse.json(contract, { status: 201 });
   } catch (error) {
     console.error("[POST /api/contracts]", error);
-    return NextResponse.json({ error: "Failed to create contract" }, { status: 500 });
+    // Surface Prisma validation errors explicitly so the UI can show a useful message
+    // rather than the generic fallback.
+    if (
+      error instanceof Error &&
+      error.constructor.name === "PrismaClientValidationError"
+    ) {
+      return NextResponse.json(
+        { error: "שגיאת אימות נתונים — בדוק את פרטי החוזה ונסה שוב" },
+        { status: 422 },
+      );
+    }
+    return NextResponse.json({ error: "שגיאה ביצירת החוזה — אנא נסה שוב" }, { status: 500 });
   }
 }
