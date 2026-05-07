@@ -28,13 +28,21 @@ export async function POST(request: Request) {
   const headers = Object.fromEntries(request.headers.entries());
 
   // ── Step 0: log receipt so we know the webhook is arriving ───────────────────
+  // Log every header name (not values) so we can confirm Rapyd is sending
+  // salt / timestamp / signature without leaking credentials in logs.
   console.log("[PAYMENT WEBHOOK] ▶ received", {
-    contentType:   headers["content-type"],
-    hasSalt:       !!headers["salt"],
-    hasSignature:  !!headers["signature"],
-    hasTimestamp:  !!headers["timestamp"],
-    bodyLength:    rawBody.length,
-    bodyPreview:   rawBody.slice(0, 300),
+    contentType:    headers["content-type"],
+    hasSalt:        !!headers["salt"],
+    hasSignature:   !!headers["signature"],
+    hasTimestamp:   !!headers["timestamp"],
+    saltValue:      headers["salt"]      ? `${headers["salt"].slice(0, 6)}…` : "(missing)",
+    timestampValue: headers["timestamp"] ? headers["timestamp"]               : "(missing)",
+    sigPrefix:      headers["signature"] ? `${headers["signature"].slice(0, 8)}…` : "(missing)",
+    allHeaderKeys:  Object.keys(headers).sort().join(", "),
+    bodyLength:     rawBody.length,
+    bodyPreview:    rawBody.slice(0, 300),
+    skipSigEnvVar:  process.env.RAPYD_SKIP_SIGNATURE_VERIFICATION === "true" ? "SET" : "not set",
+    webhookPath:    process.env.RAPYD_WEBHOOK_URL_PATH?.trim() || "/api/payments/webhook (default)",
   });
 
   let payload: Record<string, unknown>;
@@ -56,11 +64,19 @@ export async function POST(request: Request) {
     // webhook URL path (part of the signature base string).  We inject both as
     // synthetic headers so the provider can access them without coupling to the
     // Next.js Request object.
+    //
+    // RAPYD_WEBHOOK_URL_PATH must match the path registered in the Rapyd dashboard
+    // (Settings → Webhooks).  The default "/api/payments/webhook" is correct for
+    // https://www.signdeal.co.il/api/payments/webhook.  Override when your ngrok
+    // or staging URL has a different path.
+    const webhookUrlPath =
+      process.env.RAPYD_WEBHOOK_URL_PATH?.trim() || "/api/payments/webhook";
+
     const provider = getPaymentProvider();
     const enrichedHeaders = {
       ...headers,
       "x-rapyd-raw-body":  rawBody,
-      "x-rapyd-url-path":  "/api/payments/webhook",
+      "x-rapyd-url-path":  webhookUrlPath,
     };
     const result = await provider.verifyWebhook(payload, enrichedHeaders);
 
