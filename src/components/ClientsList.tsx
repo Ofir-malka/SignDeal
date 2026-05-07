@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { Contract } from "@/lib/contracts-data";
 import { type ApiContractResponse, apiToContract } from "@/lib/api-contracts";
+import { AddClientModal, type NewClient } from "@/components/AddClientModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -95,6 +96,9 @@ export function ClientsList() {
   const [search, setSearch]           = useState("");
   const [deleting, setDeleting]       = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [toast, setToast]               = useState<string | null>(null);
+  const toastTimerRef                   = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -136,6 +140,25 @@ export function ClientsList() {
     }
   }
 
+  function showToast(msg: string) {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToast(msg);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3000);
+  }
+
+  function handleClientAdded(client: NewClient) {
+    // Optimistic insert — slot in alphabetical order
+    setClients((prev) => {
+      const next = [
+        ...prev,
+        { id: client.id, name: client.name, phone: client.phone, email: client.email, idNumber: client.idNumber },
+      ];
+      return next.sort((a, b) => a.name.localeCompare(b.name, "he"));
+    });
+    setShowAddModal(false);
+    showToast(`הלקוח "${client.name}" נוסף בהצלחה`);
+  }
+
   const rows = buildRows(clients, contracts);
   const q = search.trim();
   const filtered = q === ""
@@ -154,18 +177,39 @@ export function ClientsList() {
           <h1 className="text-xl font-bold text-gray-900">לקוחות</h1>
           <p className="text-sm text-gray-500 mt-0.5 hidden sm:block">ניהול כל הלקוחות שלך במקום אחד</p>
         </div>
-        <Link
-          href="/contracts/new"
+        <button
+          type="button"
+          onClick={() => setShowAddModal(true)}
           className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-4 sm:px-5 py-2.5 rounded-lg shadow-sm shadow-indigo-200 transition-all"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <line x1="12" y1="5" x2="12" y2="19" />
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
-          <span className="hidden sm:inline">חוזה חדש</span>
-          <span className="sm:hidden">חדש</span>
-        </Link>
+          <span className="hidden sm:inline">הוסף לקוח</span>
+          <span className="sm:hidden">הוסף</span>
+        </button>
       </header>
+
+      {/* Add-client modal */}
+      {showAddModal && (
+        <AddClientModal
+          onClose={() => setShowAddModal(false)}
+          onSuccess={handleClientAdded}
+        />
+      )}
+
+      {/* Success toast */}
+      {toast && (
+        <div className="fixed bottom-6 inset-x-4 sm:inset-x-auto sm:right-6 sm:left-auto sm:max-w-sm z-50 pointer-events-none">
+          <div className="flex items-center gap-3 bg-gray-900 text-white text-sm font-medium px-4 py-3 rounded-xl shadow-lg">
+            <svg className="shrink-0 text-emerald-400" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            {toast}
+          </div>
+        </div>
+      )}
 
       <main className="flex-1 overflow-y-auto px-3 sm:px-8 py-4 sm:py-8">
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">

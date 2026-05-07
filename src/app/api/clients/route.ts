@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
 
@@ -16,5 +16,39 @@ export async function GET() {
   } catch (error) {
     console.error("[GET /api/clients]", error);
     return NextResponse.json({ error: "Failed to fetch clients" }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const result = await requireUserId();
+    if (result instanceof NextResponse) return result;
+    const { userId } = result;
+
+    const body = await req.json();
+    const name     = String(body.name     ?? "").trim();
+    const phone    = String(body.phone    ?? "").trim();
+    const email    = String(body.email    ?? "").trim();
+    const idNumber = String(body.idNumber ?? "").trim();
+
+    if (!name)  return NextResponse.json({ error: "שם הוא שדה חובה"    }, { status: 400 });
+    if (!phone) return NextResponse.json({ error: "טלפון הוא שדה חובה" }, { status: 400 });
+
+    // Application-level uniqueness: one client per phone per broker
+    const existing = await prisma.client.findFirst({ where: { phone, userId } });
+    if (existing) {
+      return NextResponse.json(
+        { error: "לקוח עם מספר טלפון זה כבר קיים במערכת" },
+        { status: 409 },
+      );
+    }
+
+    const client = await prisma.client.create({
+      data: { name, phone, email, idNumber, userId },
+    });
+    return NextResponse.json(client, { status: 201 });
+  } catch (error) {
+    console.error("[POST /api/clients]", error);
+    return NextResponse.json({ error: "שגיאה ביצירת הלקוח" }, { status: 500 });
   }
 }
