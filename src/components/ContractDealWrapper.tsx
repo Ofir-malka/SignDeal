@@ -334,7 +334,13 @@ export function ContractDealWrapper({
 
         <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
           {!localCanceled && (c.signatureStatus === "נשלח" || c.signatureStatus === "נפתח") && (
-            <ReminderModal clientName={c.client} clientPhone={c.clientPhone} onSend={handleReminderSent} />
+            <ReminderModal
+              contractId={String(c.id)}
+              signatureToken={c.signatureToken ?? ""}
+              clientName={c.client}
+              clientPhone={c.clientPhone}
+              onSend={handleReminderSent}
+            />
           )}
           {reminderSent && (
             <span className="text-xs font-medium text-emerald-600 whitespace-nowrap">התזכורת נשלחה ✓</span>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getPaymentProvider } from "@/lib/payments";
+import { sendNotification } from "@/lib/messaging/notify";
 
 /**
  * POST /api/payments/webhook
@@ -129,6 +130,10 @@ export async function POST(request: Request) {
       if (contractId) {
         console.log("[PAYMENT WEBHOOK] falling back to contractId lookup:", contractId);
         await processPaymentUpdate(contractId, result.providerPaymentId, result.status, result.paidAt);
+        if (result.status === "PAID") {
+          const fallbackPayment = await prisma.payment.findFirst({ where: { contractId } });
+          if (fallbackPayment) await notifyBrokerPaid(contractId, fallbackPayment.id);
+        }
       } else {
         console.error(
           "[PAYMENT WEBHOOK] ✗ no matching payment — cannot advance contract.",
@@ -159,11 +164,65 @@ export async function POST(request: Request) {
     // ── Step 4: persist + advance contract ────────────────────────────────────
     await processPaymentUpdate(payment.contractId, result.providerPaymentId, result.status, result.paidAt);
 
+    // ── Step 5: notify broker when payment is confirmed ───────────────────────
+    if (result.status === "PAID") {
+      await notifyBrokerPaid(payment.contractId, payment.id);
+    }
+
     return NextResponse.json({ received: true });
   } catch (error) {
     console.error("[PAYMENT WEBHOOK] ✗ unhandled error:", error);
     // Always return 200 to prevent provider retries for our own DB errors.
     return NextResponse.json({ received: true, error: "Internal processing error" });
+  }
+}
+
+// ── Helper: broker paid notification ─────────────────────────────────────────
+// Fires after a payment is confirmed PAID. Never throws — errors are swallowed
+// so webhook always returns 200 to the provider.
+
+async function notifyBrokerPaid(contractId: string, paymentId: string): Promise<void> {
+  try {
+    const contract = await prisma.contract.findUnique({
+      where:   { id: contractId },
+      include: { client: true, user: true, payment: true },
+    });
+
+    if (!contract) {
+      console.warn(`[notifyBrokerPaid] contract ${contractId} not found`);
+      return;
+    }
+    if (!contract.user.phone) {
+      console.warn(`[notifyBrokerPaid] broker ${contract.userId} has no phone — skipping SMS`);
+      return;
+    }
+
+    const commissionShekels = (contract.commission / 100).toLocaleString("he-IL");
+    const body =
+      `SignDeal — התשלום התקבל! ✓\n` +
+      `עמלה של ₪${commissionShekels} עבור ${contract.client.name} (${contract.propertyAddress})\n` +
+      `היכנס למערכת לפרטים.`;
+
+    const notifyResult = await sendNotification({
+      type:           "BROKER_PAYMENT_RECEIVED",
+      channel:        "SMS",
+      body,
+      recipientPhone: contract.user.phone,
+      userId:         contract.userId,
+      contractId:     contract.id,
+      clientId:       contract.clientId,
+      paymentId,
+    });
+
+    console.log("[notifyBrokerPaid] result:", {
+      ok:        notifyResult.ok,
+      skipped:   notifyResult.skipped,
+      messageId: notifyResult.messageId,
+      reason:    notifyResult.reason,
+    });
+  } catch (err) {
+    // Must never propagate — webhook already responded
+    console.error("[notifyBrokerPaid] unexpected error:", err);
   }
 }
 

@@ -231,7 +231,9 @@ export async function PATCH(
       include: { client: true, payment: true },
     });
 
-    // G3.3: Persist activity + G3.4: notify broker — only on signing
+    // G3.3: Persist activity + G3.4: notify broker — only on signing.
+    // sendBrokerSignedSms is awaited (not void) so Vercel does not kill the promise
+    // when the HTTP response returns. It catches all errors internally and never propagates.
     if (signatureStatus === "SIGNED") {
       await prisma.activity.create({
         data: {
@@ -240,7 +242,7 @@ export async function PATCH(
           userId:     contract.userId,
         },
       });
-      void sendBrokerSignedSms(
+      await sendBrokerSignedSms(
         { id: contract.id, userId: contract.userId, clientId: contract.clientId },
         updated.client.name,
       );
