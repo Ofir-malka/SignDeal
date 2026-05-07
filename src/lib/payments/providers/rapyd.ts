@@ -277,17 +277,16 @@ export class RapydPaymentProvider implements PaymentProvider {
       const hexDigest   = createHmac("sha256", secretKey).update(toSign, "utf8").digest("hex");
       const expected    = Buffer.from(hexDigest).toString("base64");
 
-      if (IS_DEV) {
-        console.log("[Rapyd] verifyWebhook →", {
-          urlPath,
-          salt,
-          timestamp,
-          bodyLength: rawBody.length,
-          signatureMatch: expected === received,
-        });
-      }
+      const sigMatch = expected === received;
+      console.log("[RapydPaymentProvider] verifyWebhook signature:", {
+        urlPath,
+        salt,
+        timestamp,
+        bodyLength: rawBody.length,
+        signatureMatch: sigMatch,
+      });
 
-      if (expected !== received) {
+      if (!sigMatch) {
         // TODO before going live: throw new Error("Invalid Rapyd webhook signature");
         console.warn(
           "[RapydPaymentProvider] webhook signature mismatch — " +
@@ -299,32 +298,84 @@ export class RapydPaymentProvider implements PaymentProvider {
     }
 
     // ── 2. Extract event data ──────────────────────────────────────────────────
+    //
+    // Rapyd sends two shapes depending on the webhook type:
+    //
+    //   Shape A — payment object (most PAYMENT_COMPLETED events):
+    //     data.id                   = "payment_xxx"
+    //     data.status               = "CLO"
+    //     data.merchant_reference_id = our Payment CUID
+    //     data.paid_at              = Unix seconds
+    //
+    //   Shape B — checkout object (some PAYMENT_COMPLETED / CHECKOUT_COMPLETED):
+    //     data.id                   = "checkout_xxx"
+    //     data.status               = "COM"  ← NOT "CLO"
+    //     data.merchant_reference_id = our Payment CUID
+    //     data.payment              = nested payment object { id, status:"CLO", paid_at }
+    //
+    // We handle both by preferring the nested payment object when present.
+
     const type = String(payload["type"] ?? "");
     const data = (payload["data"] as Record<string, unknown>) ?? {};
 
-    // Use our paymentId (merchant_reference_id) for reconciliation; fall back to Rapyd's ID
-    const providerPaymentId = String(
-      data["merchant_reference_id"] ?? data["id"] ?? "unknown",
-    );
+    // Nested payment object (Shape B). May be absent (Shape A).
+    const nestedPayment = (data["payment"] as Record<string, unknown>) ?? {};
 
-    // Map Rapyd status code or event type → our MappedStatus
-    const rapydStatus = String(data["status"] ?? "").toUpperCase();
-    const mapped      = this.mapWebhookToStatus(rapydStatus || type);
+    // merchant_reference_id identifies our Payment row (set during checkout creation).
+    // Check nested payment first, then outer data.
+    const merchantRefId = String(
+      nestedPayment["merchant_reference_id"] ??
+      data["merchant_reference_id"]          ??
+      "",
+    );
+    const providerPaymentId = merchantRefId || String(data["id"] ?? "unknown");
+
+    // Status resolution: prefer nested payment status (most accurate) over outer status.
+    // Fall back to event type when status codes are absent or ambiguous.
+    const nestedStatus  = String(nestedPayment["status"] ?? "").toUpperCase();
+    const outerStatus   = String(data["status"]          ?? "").toUpperCase();
+    const statusCode    = nestedStatus || outerStatus;
+
+    const mappedFromStatus = statusCode ? this.mapWebhookToStatus(statusCode) : "UNKNOWN";
+    const mappedFromType   = type       ? this.mapWebhookToStatus(type)       : "UNKNOWN";
+    // Use the status-code mapping when it resolves cleanly; fall back to event-type mapping.
+    const mapped = mappedFromStatus !== "UNKNOWN" ? mappedFromStatus : mappedFromType;
+
+    console.log("[RapydPaymentProvider] verifyWebhook parsed:", {
+      type,
+      outerDataId:      data["id"],
+      merchantRefId,
+      providerPaymentId,
+      outerStatus,
+      nestedStatus,
+      statusCode,
+      mappedFromStatus,
+      mappedFromType,
+      finalMapped:      mapped,
+    });
 
     // Coerce non-terminal states to FAILED — webhooks only fire on meaningful events
     const status: "PAID" | "FAILED" | "CANCELED" =
       mapped === "PAID"     ? "PAID"     :
       mapped === "CANCELED" ? "CANCELED" : "FAILED";
 
-    // paid_at is a Unix timestamp in seconds (Rapyd convention)
-    const rawPaidAt = Number(data["paid_at"] ?? 0);
+    // paid_at is a Unix timestamp in seconds (Rapyd convention).
+    // Prefer nested payment timestamp (Shape B) over outer data.
+    const rawPaidAt = Number(nestedPayment["paid_at"] ?? data["paid_at"] ?? 0);
     const paidAt    = status === "PAID"
       ? (rawPaidAt > 0 ? new Date(rawPaidAt * 1000) : new Date())
       : undefined;
 
-    // Rapyd reports amounts in decimal ILS — convert back to agorot
-    const rawAmount   = Number(data["amount"] ?? 0);
+    // Rapyd reports amounts in decimal ILS — convert back to agorot.
+    const rawAmount   = Number(nestedPayment["amount"] ?? data["amount"] ?? 0);
     const totalAmount = rawAmount > 0 ? Math.round(rawAmount * AGOROT_PER_ILS) : undefined;
+
+    console.log("[RapydPaymentProvider] verifyWebhook result:", {
+      providerPaymentId,
+      status,
+      paidAt,
+      totalAmount,
+    });
 
     return { providerPaymentId, status, paidAt, totalAmount };
   }
@@ -335,17 +386,20 @@ export class RapydPaymentProvider implements PaymentProvider {
     switch (rapydStatus.toUpperCase()) {
       // Payment object status codes
       case "CLO": return "PAID";       // CLO = closed, payment collected
+      case "COM": return "PAID";       // COM = checkout complete (checkout object shape)
       case "CAN": return "CANCELED";
       case "ERR": return "FAILED";
       case "EXP": return "FAILED";     // expired
       case "ACT": return "PENDING";    // active — still in progress
+      case "EWT": return "PENDING";    // EWT = awaiting — in progress
 
       // Webhook event type strings
-      case "PAYMENT_COMPLETED": return "PAID";
-      case "PAYMENT_SUCCEEDED": return "PAID";
-      case "PAYMENT_FAILED":    return "FAILED";
-      case "PAYMENT_EXPIRED":   return "FAILED";
-      case "PAYMENT_CANCELED":  return "CANCELED";
+      case "PAYMENT_COMPLETED":         return "PAID";
+      case "PAYMENT_SUCCEEDED":         return "PAID";
+      case "CHECKOUT_PAYMENT_COMPLETED": return "PAID";
+      case "PAYMENT_FAILED":            return "FAILED";
+      case "PAYMENT_EXPIRED":           return "FAILED";
+      case "PAYMENT_CANCELED":          return "CANCELED";
 
       default: return "UNKNOWN";
     }

@@ -5,11 +5,20 @@ import { getPaymentProvider } from "@/lib/payments";
 /**
  * POST /api/payments/webhook
  *
- * Accepts payment-provider callbacks and advances contracts to PAID (or FAILED).
+ * Accepts Rapyd payment-provider callbacks and advances contracts to PAID (or FAILED).
+ *
+ * Webhook URL to configure in Rapyd dashboard:
+ *   https://www.signdeal.co.il/api/payments/webhook
+ *
+ * Supported event types:
+ *   PAYMENT_COMPLETED / PAYMENT_SUCCEEDED → Contract PAID
+ *   PAYMENT_FAILED / PAYMENT_EXPIRED      → Payment FAILED (contract unchanged)
+ *   PAYMENT_CANCELED                      → Payment CANCELED (contract unchanged)
+ *
+ * Idempotent: if Payment row is already PAID, returns 200 without re-processing.
  *
  * TODO (Phase 2 hardening):
- *  - Real HMAC signature verification per provider
- *  - Idempotency check (ignore duplicate events for the same providerPaymentId)
+ *  - Enforce HMAC signature verification (currently logs mismatch, does not reject)
  *  - Dead-letter queue / retry for DB failures
  *  - Broker notification SMS/email on PAID
  */
@@ -17,7 +26,15 @@ export async function POST(request: Request) {
   const rawBody = await request.text();
   const headers = Object.fromEntries(request.headers.entries());
 
-  console.log("[PAYMENT WEBHOOK] received", { headers, rawBody: rawBody.slice(0, 500) });
+  // ── Step 0: log receipt so we know the webhook is arriving ───────────────────
+  console.log("[PAYMENT WEBHOOK] ▶ received", {
+    contentType:   headers["content-type"],
+    hasSalt:       !!headers["salt"],
+    hasSignature:  !!headers["signature"],
+    hasTimestamp:  !!headers["timestamp"],
+    bodyLength:    rawBody.length,
+    bodyPreview:   rawBody.slice(0, 300),
+  });
 
   let payload: Record<string, unknown>;
   try {
@@ -27,6 +44,10 @@ export async function POST(request: Request) {
     // Providers occasionally send form-encoded pings; acknowledge and move on.
     return NextResponse.json({ received: true });
   }
+
+  // Log the event type immediately so we can diagnose misconfigured event subscriptions
+  const eventType = String(payload["type"] ?? "(none)");
+  console.log("[PAYMENT WEBHOOK] event type:", eventType);
 
   try {
     // ── Step 1: parse + verify via provider abstraction ──────────────────────
@@ -40,9 +61,14 @@ export async function POST(request: Request) {
       "x-rapyd-raw-body":  rawBody,
       "x-rapyd-url-path":  "/api/payments/webhook",
     };
-    const result   = await provider.verifyWebhook(payload, enrichedHeaders);
+    const result = await provider.verifyWebhook(payload, enrichedHeaders);
 
-    console.log("[PAYMENT WEBHOOK] parsed result:", result);
+    console.log("[PAYMENT WEBHOOK] parsed result:", {
+      providerPaymentId: result.providerPaymentId,
+      status:            result.status,
+      paidAt:            result.paidAt,
+      totalAmount:       result.totalAmount,
+    });
 
     // ── Step 2: locate Payment record ─────────────────────────────────────────
     //
@@ -59,8 +85,7 @@ export async function POST(request: Request) {
     //
     //   3. contractId extracted from nested payload metadata
     //      Last-resort fallback for providers that embed the contract reference
-    //      in payload.data.metadata.contract_id, payload.data.contract_id,
-    //      payload.metadata.contract_id, or the top-level payload.contractId.
+    //      in payload.data.metadata.contract_id etc.
 
     const data = (payload["data"] as Record<string, unknown>) ?? {};
     const meta = (
@@ -69,15 +94,24 @@ export async function POST(request: Request) {
       {}
     );
 
+    let lookupPath = "";
     let payment =
       // 1. match by stored providerPaymentId
-      await prisma.payment.findFirst({
-        where: { providerPaymentId: result.providerPaymentId },
-      }) ??
+      await (async () => {
+        const p = await prisma.payment.findFirst({
+          where: { providerPaymentId: result.providerPaymentId },
+        });
+        if (p) lookupPath = "providerPaymentId column";
+        return p;
+      })() ??
       // 2. match by Payment primary key (Rapyd: merchant_reference_id = our Payment.id)
-      await prisma.payment.findUnique({
-        where: { id: result.providerPaymentId },
-      });
+      await (async () => {
+        const p = await prisma.payment.findUnique({
+          where: { id: result.providerPaymentId },
+        });
+        if (p) lookupPath = "Payment.id (merchant_reference_id)";
+        return p;
+      })();
 
     if (!payment) {
       // 3. fallback: extract contractId from nested metadata fields
@@ -87,23 +121,47 @@ export async function POST(request: Request) {
         typeof payload["contractId"]  === "string" ? payload["contractId"]  :
         null;
 
+      console.warn("[PAYMENT WEBHOOK] payment row not found by ID:", {
+        triedProviderPaymentId: result.providerPaymentId,
+        fallbackContractId:     contractId,
+      });
+
       if (contractId) {
-        console.log("[PAYMENT WEBHOOK] payment not found by ID — falling back to contractId:", contractId);
+        console.log("[PAYMENT WEBHOOK] falling back to contractId lookup:", contractId);
         await processPaymentUpdate(contractId, result.providerPaymentId, result.status, result.paidAt);
       } else {
-        console.warn(
-          "[PAYMENT WEBHOOK] no matching payment found.",
-          { providerPaymentId: result.providerPaymentId },
+        console.error(
+          "[PAYMENT WEBHOOK] ✗ no matching payment — cannot advance contract.",
+          {
+            eventType,
+            providerPaymentId: result.providerPaymentId,
+            rawPayloadKeys:    Object.keys(payload),
+            dataKeys:          Object.keys(data),
+          },
         );
       }
       return NextResponse.json({ received: true });
     }
 
+    console.log("[PAYMENT WEBHOOK] matched payment row:", {
+      paymentId:    payment.id,
+      contractId:   payment.contractId,
+      currentStatus: payment.status,
+      lookupPath,
+    });
+
+    // ── Step 3: idempotency — skip re-processing if already in terminal state ──
+    if (payment.status === "PAID") {
+      console.log(`[PAYMENT WEBHOOK] idempotent — payment ${payment.id} already PAID; skipping`);
+      return NextResponse.json({ received: true });
+    }
+
+    // ── Step 4: persist + advance contract ────────────────────────────────────
     await processPaymentUpdate(payment.contractId, result.providerPaymentId, result.status, result.paidAt);
 
     return NextResponse.json({ received: true });
   } catch (error) {
-    console.error("[POST /api/payments/webhook]", error);
+    console.error("[PAYMENT WEBHOOK] ✗ unhandled error:", error);
     // Always return 200 to prevent provider retries for our own DB errors.
     return NextResponse.json({ received: true, error: "Internal processing error" });
   }
@@ -117,24 +175,42 @@ async function processPaymentUpdate(
   status:            "PAID" | "FAILED" | "CANCELED",
   paidAt?:           Date,
 ): Promise<void> {
-  const paymentStatus  = status;                              // PAID | FAILED | CANCELED
   const contractStatus = status === "PAID" ? "PAID" : null;  // only PAID advances the contract
+
+  console.log("[PAYMENT WEBHOOK] processPaymentUpdate →", {
+    contractId,
+    providerPaymentId,
+    status,
+    paidAt,
+    willAdvanceContract: !!contractStatus,
+  });
 
   await prisma.payment.updateMany({
     where: { contractId },
     data:  {
-      status:            paymentStatus,
+      status:            status,
       providerPaymentId,
       ...(status === "PAID" ? { paidAt: paidAt ?? new Date() } : {}),
     },
   });
 
   if (contractStatus) {
-    await prisma.contract.updateMany({
+    const updated = await prisma.contract.updateMany({
       where: { id: contractId, status: { in: ["PAYMENT_PENDING", "SIGNED", "OPENED"] } },
       data:  { status: contractStatus },
     });
 
-    console.log(`[PAYMENT WEBHOOK] contract ${contractId} advanced to ${contractStatus}`);
+    if (updated.count > 0) {
+      console.log(`[PAYMENT WEBHOOK] ✓ contract ${contractId} → ${contractStatus}`);
+    } else {
+      // Contract may already be PAID (idempotent), or may be in an unexpected state
+      const contract = await prisma.contract.findUnique({
+        where:  { id: contractId },
+        select: { status: true },
+      });
+      console.warn(`[PAYMENT WEBHOOK] contract ${contractId} not updated (0 rows). Current status:`, contract?.status);
+    }
+  } else {
+    console.log(`[PAYMENT WEBHOOK] payment ${status} — contract not advanced (only PAID triggers advance)`);
   }
 }
