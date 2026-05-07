@@ -85,9 +85,9 @@ export async function POST(request: Request) {
       },
     });
 
-    void sendWelcomeEmail(fullName!.trim(), email!.trim()).catch(err =>
-      console.error("[POST /api/users] sendWelcomeEmail error:", err),
-    );
+    // await (not void) — Vercel may kill the container before a detached promise runs.
+    // sendWelcomeEmail catches all errors internally, so this never blocks the 201.
+    await sendWelcomeEmail(fullName!.trim(), email!.trim());
 
     return NextResponse.json(user, { status: 201 });
 
