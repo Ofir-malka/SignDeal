@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { sendEmail } from "@/lib/messaging/email-provider";
+import { rateLimit, getRealIp } from "@/lib/rate-limit";
 
 async function sendWelcomeEmail(fullName: string, email: string): Promise<void> {
   console.log(`[sendWelcomeEmail] sending to=${email}`);
@@ -27,6 +28,19 @@ async function sendWelcomeEmail(fullName: string, email: string): Promise<void> 
 // Public endpoint — no auth required for registration.
 
 export async function POST(request: Request) {
+  // ── Rate limit: max 10 registration attempts per IP per hour ─────────────────
+  const ip = getRealIp(request);
+  const rl = rateLimit(ip, "register", { max: 10, windowMs: 3_600_000 });
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "יותר מדי בקשות — נסה שוב מאוחר יותר" },
+      {
+        status:  429,
+        headers: { "Retry-After": String(rl.retryAfter) },
+      },
+    );
+  }
+
   try {
     const body = await request.json();
     const {

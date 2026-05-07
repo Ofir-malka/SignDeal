@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import { sendSms } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
+import { rateLimit, getRealIp } from "@/lib/rate-limit";
 
 // ── GET /api/contracts/sign/[token] ──────────────────────────────────────────
 // Public endpoint — returns signing-safe contract fields for the client.
@@ -162,6 +163,24 @@ export async function PATCH(
 ) {
   try {
     const { token } = await params;
+
+    // ── Rate limit: max 10 signing attempts per token per 15 minutes ──────────
+    // Keyed on token so it prevents brute-force enumeration of signing tokens.
+    // Also keyed on IP to catch clients with multiple tokens.
+    const ip = getRealIp(request);
+    const rlToken = rateLimit(token, "sign-patch",  { max: 10, windowMs: 15 * 60_000 });
+    const rlIp    = rateLimit(ip,    "sign-patch-ip", { max: 30, windowMs: 15 * 60_000 });
+    if (!rlToken.allowed || !rlIp.allowed) {
+      const retryAfter = Math.max(rlToken.retryAfter ?? 0, rlIp.retryAfter ?? 0);
+      return NextResponse.json(
+        { error: "יותר מדי ניסיונות — נסה שוב מאוחר יותר" },
+        {
+          status:  429,
+          headers: { "Retry-After": String(retryAfter) },
+        },
+      );
+    }
+
     const body = await request.json();
 
     // Reject any field that isn't in the signing-safe allowlist

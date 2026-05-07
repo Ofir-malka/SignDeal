@@ -37,3 +37,5 @@ export type {
   WebhookResult,
   MappedStatus,
 } from "./provider";
+
+export { WebhookSignatureError } from "./providers/rapyd";

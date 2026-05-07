@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
 import { sendNotification } from "@/lib/messaging/notify";
+import { rateLimit } from "@/lib/rate-limit";
 
 export async function POST(
   _request: Request,
@@ -23,6 +24,19 @@ export async function POST(
     const { userId } = authResult;
 
     const { id } = await params;
+
+    // ── Rate limit: max 5 reminders per contract per 10 minutes ──────────────
+    // Keyed on contractId so different brokers aren't affected by each other.
+    const rl = rateLimit(id, "sms-reminder", { max: 5, windowMs: 10 * 60_000 });
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: "יותר מדי תזכורות — המתן מספר דקות ונסה שוב" },
+        {
+          status:  429,
+          headers: { "Retry-After": String(rl.retryAfter) },
+        },
+      );
+    }
 
     const contract = await prisma.contract.findFirst({
       where:  { id, userId },

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { getPaymentProvider } from "@/lib/payments";
+import { getPaymentProvider, WebhookSignatureError } from "@/lib/payments";
 import { sendNotification } from "@/lib/messaging/notify";
 
 /**
@@ -96,7 +96,7 @@ export async function POST(request: Request) {
     );
 
     let lookupPath = "";
-    let payment =
+    const payment =
       // 1. match by stored providerPaymentId
       await (async () => {
         const p = await prisma.payment.findFirst({
@@ -171,8 +171,21 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ received: true });
   } catch (error) {
+    // ── Signature failure → 401 ───────────────────────────────────────────────
+    // Return non-200 so Rapyd knows the webhook was rejected, not processed.
+    // Rapyd will NOT retry on 4xx (it retries on 5xx and timeouts only).
+    if (error instanceof WebhookSignatureError) {
+      console.error("[PAYMENT WEBHOOK] ✗ signature verification failed:", error.message);
+      return NextResponse.json(
+        { error: "Invalid webhook signature" },
+        { status: 401 },
+      );
+    }
+
+    // ── All other errors → 200 ────────────────────────────────────────────────
+    // Return 200 to prevent Rapyd from retrying events that failed due to our
+    // own DB errors (which would trigger duplicate processing on retry).
     console.error("[PAYMENT WEBHOOK] ✗ unhandled error:", error);
-    // Always return 200 to prevent provider retries for our own DB errors.
     return NextResponse.json({ received: true, error: "Internal processing error" });
   }
 }

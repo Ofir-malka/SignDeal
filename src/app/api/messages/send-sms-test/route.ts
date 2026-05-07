@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendSms } from "@/lib/messaging/sms-provider";
+import { requireUserId } from "@/lib/require-user";
 
 /**
  * POST /api/messages/send-sms-test
@@ -18,10 +19,19 @@ import { sendSms } from "@/lib/messaging/sms-provider";
  *     the Message record is still created with status FAILED so the
  *     failure is auditable in the database.
  *
- * NOTE: No auth guard in Phase 1. Phase 2 will add session-based auth
- * before wiring this to real contract / payment send flows.
+ * Auth required. Disabled entirely in production (returns 404).
  */
 export async function POST(request: Request) {
+  // ── Disabled in production — return 404 so the route is invisible to attackers
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // ── Auth guard — must be a signed-in broker even in dev/staging
+  const authResult = await requireUserId();
+  if (authResult instanceof NextResponse) return authResult;
+  const { userId } = authResult;
+
   try {
     const body          = await request.json();
     const to: string    = (body.to   ?? "").trim();
@@ -34,16 +44,8 @@ export async function POST(request: Request) {
       );
     }
 
-    // Attach to demo user when available — purely for audit linkage.
-    const user = await prisma.user.findFirst({
-      where:  { email: "demo@signdeal.app" },
-      select: { id: true },
-    });
-
     // ── 1. Create Message record BEFORE attempting the send ──────────────────
-    // This ensures every send attempt is logged even if the server crashes
-    // mid-flight. A PENDING record with no lastAttemptAt signals a crash;
-    // the Phase 6 retry engine will sweep these up.
+    // Linked to the authenticated broker (userId from session).
     const message = await prisma.message.create({
       data: {
         type:           "SIGNING_REMINDER",  // placeholder type for the test route
@@ -51,9 +53,9 @@ export async function POST(request: Request) {
         provider:       "infobip",
         body:           text,
         recipientPhone: to,
+        userId,
         status:         "PENDING",
         attempts:       0,
-        ...(user ? { userId: user.id } : {}),
       },
     });
 

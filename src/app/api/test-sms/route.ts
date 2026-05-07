@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireUserId } from "@/lib/require-user";
 
 /**
  * POST /api/test-sms
@@ -12,13 +13,17 @@ import { NextResponse } from "next/server";
  *   { success: true,  messageId: "...", providerResponse: { ... } }
  *   { success: false, error: "...",     providerResponse: { ... } | null }
  *
- * This route intentionally calls Infobip directly (not via sendSms()) so
- * the full raw provider response is always available in the JSON output
- * for debugging without extra parsing layers.
- *
- * ⚠ No auth guard — remove or restrict before any public deployment.
+ * Auth required. Disabled entirely in production (returns 404).
  */
 export async function POST(request: Request) {
+  // ── Disabled in production — return 404 so the route is invisible to attackers
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // ── Auth guard — must be a signed-in broker even in dev/staging
+  const authResult = await requireUserId();
+  if (authResult instanceof NextResponse) return authResult;
   const baseUrl = process.env.INFOBIP_BASE_URL?.trim();
   const apiKey  = process.env.INFOBIP_API_KEY?.trim();
   const sender  = (process.env.INFOBIP_SMS_SENDER?.trim() || "SignDeal");

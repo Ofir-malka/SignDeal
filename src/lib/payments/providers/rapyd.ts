@@ -47,6 +47,24 @@ import type {
   MappedStatus,
 } from "../provider";
 
+/**
+ * Thrown by verifyWebhook when the Rapyd signature is missing or invalid.
+ *
+ * The webhook route catches this specifically to return 401 rather than
+ * the default 200 "received: true" acknowledgement. Returning non-200
+ * signals to Rapyd that the webhook was NOT processed and may be retried.
+ *
+ * Bypass (dev / manual testing only):
+ *   Set RAPYD_SKIP_SIGNATURE_VERIFICATION=true in .env.local
+ *   This env var must NEVER be set in production.
+ */
+export class WebhookSignatureError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "WebhookSignatureError";
+  }
+}
+
 // 1 ILS = 100 agorot. Rapyd expects decimal ILS amounts.
 const AGOROT_PER_ILS = 100;
 
@@ -267,34 +285,67 @@ export class RapydPaymentProvider implements PaymentProvider {
     const urlPath   = headers["x-rapyd-url-path"]  ?? "";
     const rawBody   = headers["x-rapyd-raw-body"]  ?? JSON.stringify(payload);
 
+    // ── Signature enforcement ─────────────────────────────────────────────────
+    //
+    // Production: all webhooks MUST carry valid Rapyd signature headers.
+    //   Missing or mismatched → WebhookSignatureError (route returns 401).
+    //
+    // Dev / manual testing: set RAPYD_SKIP_SIGNATURE_VERIFICATION=true in
+    //   .env.local to bypass verification. NEVER set this in production.
+    const skipVerification =
+      process.env.RAPYD_SKIP_SIGNATURE_VERIFICATION === "true";
+
     if (salt && timestamp && received) {
       const secretKey = process.env.RAPYD_SECRET_KEY ?? "";
       const accessKey = process.env.RAPYD_ACCESS_KEY ?? "";
 
       // Webhook formula: no http_method prefix (Rapyd quirk vs. request signing)
       // Same hex-then-base64 digest as request signing (official Rapyd Node sample)
-      const toSign      = urlPath + salt + timestamp + accessKey + secretKey + rawBody;
-      const hexDigest   = createHmac("sha256", secretKey).update(toSign, "utf8").digest("hex");
-      const expected    = Buffer.from(hexDigest).toString("base64");
+      const toSign    = urlPath + salt + timestamp + accessKey + secretKey + rawBody;
+      const hexDigest = createHmac("sha256", secretKey).update(toSign, "utf8").digest("hex");
+      const expected  = Buffer.from(hexDigest).toString("base64");
+      const sigMatch  = expected === received;
 
-      const sigMatch = expected === received;
-      console.log("[RapydPaymentProvider] verifyWebhook signature:", {
+      console.log("[RapydPaymentProvider] verifyWebhook signature check:", {
         urlPath,
         salt,
         timestamp,
-        bodyLength: rawBody.length,
+        bodyLength:     rawBody.length,
         signatureMatch: sigMatch,
+        enforcement:    skipVerification ? "bypassed (RAPYD_SKIP_SIGNATURE_VERIFICATION=true)" : "enforced",
       });
 
       if (!sigMatch) {
-        // TODO before going live: throw new Error("Invalid Rapyd webhook signature");
-        console.warn(
-          "[RapydPaymentProvider] webhook signature mismatch — " +
-          "acceptable in sandbox; harden for production",
-        );
+        if (skipVerification) {
+          console.warn(
+            "[RapydPaymentProvider] ⚠ webhook signature MISMATCH — continuing because " +
+            "RAPYD_SKIP_SIGNATURE_VERIFICATION=true. Remove this override in production.",
+          );
+        } else {
+          console.error(
+            "[RapydPaymentProvider] ✗ webhook signature MISMATCH — rejecting webhook. " +
+            "Expected:", expected, "Received:", received,
+          );
+          throw new WebhookSignatureError("Rapyd webhook signature mismatch");
+        }
       }
     } else {
-      console.warn("[RapydPaymentProvider] webhook missing signature headers — skipping verification");
+      // Headers are missing entirely — this is either a misconfigured Rapyd subscription
+      // or a forged request that doesn't know how to sign.
+      if (skipVerification) {
+        console.warn(
+          "[RapydPaymentProvider] ⚠ webhook missing signature headers (salt/timestamp/signature). " +
+          "Continuing because RAPYD_SKIP_SIGNATURE_VERIFICATION=true. " +
+          "Rapyd always sends these headers — investigate why they are absent.",
+        );
+      } else {
+        console.error(
+          "[RapydPaymentProvider] ✗ webhook missing required signature headers — rejecting. " +
+          "Rapyd always sends salt, timestamp, and signature headers. " +
+          "If testing manually, set RAPYD_SKIP_SIGNATURE_VERIFICATION=true in .env.local.",
+        );
+        throw new WebhookSignatureError("Rapyd webhook missing signature headers");
+      }
     }
 
     // ── 2. Extract event data ──────────────────────────────────────────────────

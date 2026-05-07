@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { sendSms } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { requireUserId } from "@/lib/require-user";
+import { rateLimit } from "@/lib/rate-limit";
 
 export async function POST(
   _req: Request,
@@ -14,6 +15,18 @@ export async function POST(
     const { userId } = result;
 
     const { id } = await params;
+
+    // ── Rate limit: max 3 payment SMS per contract per hour ───────────────────
+    const rl = rateLimit(id, "sms-payment", { max: 3, windowMs: 60 * 60_000 });
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: "יותר מדי בקשות תשלום — המתן שעה ונסה שוב" },
+        {
+          status:  429,
+          headers: { "Retry-After": String(rl.retryAfter) },
+        },
+      );
+    }
 
     // ── 1. Load contract, client, payment ─────────────────────────────────────
     const contract = await prisma.contract.findFirst({

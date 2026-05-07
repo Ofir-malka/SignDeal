@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireUserId } from "@/lib/require-user";
 
 /**
  * GET /api/test-sms/status?messageId={messageId}
@@ -12,9 +13,17 @@ import { NextResponse } from "next/server";
  *   { success: true,  messageId, providerResponse }
  *   { success: false, error,     providerResponse | null }
  *
- * ⚠ No auth guard — remove or restrict before any public deployment.
+ * Auth required. Disabled entirely in production (returns 404).
  */
 export async function GET(request: Request) {
+  // ── Disabled in production — return 404 so the route is invisible to attackers
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // ── Auth guard — must be a signed-in broker even in dev/staging
+  const authResult = await requireUserId();
+  if (authResult instanceof NextResponse) return authResult;
   const { searchParams } = new URL(request.url);
   const messageId = searchParams.get("messageId")?.trim();
 
