@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import { requireUserId } from "@/lib/require-user";
+import { parseOptionalEnum, parseOptionalDate, firstError } from "@/lib/validate";
 
 export async function GET(
   _request: Request,
@@ -56,11 +57,23 @@ export async function PATCH(
       return NextResponse.json({ error: "Signature data too large" }, { status: 400 });
     }
 
+    // ── Validate enum + date fields before touching the DB ───────────────────
+    const SIGNATURE_STATUSES = [
+      "DRAFT", "SENT", "OPENED", "SIGNED", "PAYMENT_PENDING", "PAID", "EXPIRED", "CANCELED",
+    ] as const;
+    const vStatus      = parseOptionalEnum(signatureStatus, SIGNATURE_STATUSES, "סטטוס חוזה");
+    const vSignedAt    = parseOptionalDate(signedAt,    "תאריך חתימה");
+    const vDealClosedAt = parseOptionalDate(dealClosedAt, "תאריך סגירת עסקה");
+    const validationError = firstError(vStatus, vSignedAt, vDealClosedAt);
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 });
+    }
+
     const data: Record<string, unknown> = {};
-    if (signatureStatus  !== undefined) data.status       = signatureStatus;
-    if (dealClosed       !== undefined) data.dealClosed   = Boolean(dealClosed);
-    if (signedAt         !== undefined) data.signedAt     = signedAt     ? new Date(signedAt)     : null;
-    if (dealClosedAt     !== undefined) data.dealClosedAt = dealClosedAt ? new Date(dealClosedAt) : null;
+    if (signatureStatus !== undefined) data.status       = vStatus.ok      ? vStatus.value      : undefined;
+    if (dealClosed      !== undefined) data.dealClosed   = Boolean(dealClosed);
+    if (signedAt        !== undefined) data.signedAt     = vSignedAt.ok    ? vSignedAt.value    : undefined;
+    if (dealClosedAt    !== undefined) data.dealClosedAt = vDealClosedAt.ok ? vDealClosedAt.value : undefined;
 
     // Capture full audit trail when signing
     if (signatureStatus === "SIGNED") {

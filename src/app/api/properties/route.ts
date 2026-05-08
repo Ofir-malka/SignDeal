@@ -2,6 +2,13 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
 import { rateLimit } from "@/lib/rate-limit";
+import {
+  parseEnum,
+  parseOptionalPositiveFloat,
+  parseOptionalInt,
+  parseOptionalPositiveInt,
+  firstError,
+} from "@/lib/validate";
 
 export async function GET() {
   try {
@@ -40,11 +47,29 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { address, city, type, listingType, rooms, floor, sizeSqm, askingPrice } = body;
 
-    if (!address || !city || !type) {
+    if (!address || !city) {
       return NextResponse.json(
-        { error: "Missing required fields: address, city, type" },
+        { error: "כתובת ועיר הם שדות חובה" },
         { status: 400 }
       );
+    }
+
+    // ── Enum + numeric validation ─────────────────────────────────────────────
+    const PROPERTY_TYPES  = ["APARTMENT", "HOUSE", "OFFICE", "LAND", "PARKING", "OTHER"] as const;
+    const LISTING_TYPES   = ["RENTAL", "SALE", "BOTH"] as const;
+    const vType        = parseEnum(type,               PROPERTY_TYPES, "סוג נכס");
+    const vListingType = parseEnum(listingType ?? "RENTAL", LISTING_TYPES, "סוג מודעה");
+    const vRooms       = parseOptionalPositiveFloat(rooms,       "חדרים");
+    const vFloor       = parseOptionalInt(floor,                 "קומה");
+    const vSizeSqm     = parseOptionalPositiveFloat(sizeSqm,     "שטח במ״ר");
+    const vAskingPrice = parseOptionalPositiveInt(askingPrice,   "מחיר מבוקש");
+    const validationError = firstError(vType, vListingType, vRooms, vFloor, vSizeSqm, vAskingPrice);
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 });
+    }
+    // Narrowing: all Results are Ok beyond this point
+    if (!vType.ok || !vListingType.ok || !vRooms.ok || !vFloor.ok || !vSizeSqm.ok || !vAskingPrice.ok) {
+      return NextResponse.json({ error: "Validation error" }, { status: 400 });
     }
 
     const property = await prisma.property.create({
@@ -52,12 +77,12 @@ export async function POST(request: Request) {
         userId,
         address,
         city,
-        type,
-        listingType: listingType || "RENTAL",
-        rooms:       rooms       != null ? Number(rooms)       : null,
-        floor:       floor       != null ? Number(floor)       : null,
-        sizeSqm:     sizeSqm     != null ? Number(sizeSqm)     : null,
-        askingPrice: askingPrice != null ? Number(askingPrice) : null,
+        type:        vType.value,
+        listingType: vListingType.value,
+        rooms:       vRooms.value       ?? null,
+        floor:       vFloor.value       ?? null,
+        sizeSqm:     vSizeSqm.value     ?? null,
+        askingPrice: vAskingPrice.value ?? null,
       },
       include: { _count: { select: { contracts: true } } },
     });

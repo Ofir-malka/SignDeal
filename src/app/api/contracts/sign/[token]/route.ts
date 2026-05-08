@@ -195,6 +195,14 @@ export async function PATCH(
       return NextResponse.json({ error: "Signature data too large" }, { status: 400 });
     }
 
+    // ── signatureStatus: only "SIGNED" is a valid client-facing transition ────
+    if (signatureStatus !== undefined && signatureStatus !== "SIGNED") {
+      return NextResponse.json(
+        { error: "ערך סטטוס לא חוקי — ניתן לשלוח SIGNED בלבד" },
+        { status: 400 },
+      );
+    }
+
     const contract = await prisma.contract.findUnique({
       where: { signatureToken: token },
     });

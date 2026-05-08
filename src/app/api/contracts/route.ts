@@ -6,6 +6,7 @@ import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { requireUserId } from "@/lib/require-user";
 import { resolveTemplate, buildContext } from "@/lib/contracts/resolve-template";
 import { rateLimit } from "@/lib/rate-limit";
+import { parsePositiveInt, parseNonNegativeInt, parseEnum, firstError } from "@/lib/validate";
 
 // ─── SMS helper ───────────────────────────────────────────────────────────────
 // Fire-and-forget: never throws, never blocks the HTTP response.
@@ -171,13 +172,29 @@ export async function POST(request: Request) {
       ? rawLanguage.toUpperCase()
       : "HE";
 
-    if (!contractType || !dealType || !propertyAddress || !propertyCity ||
-        propertyPrice == null || commission == null) {
+    // ── Required string fields ────────────────────────────────────────────────
+    if (!contractType || !propertyAddress || !propertyCity) {
       return NextResponse.json({ error: "Missing required contract fields" }, { status: 400 });
     }
     if (!clientName || !clientPhone) {
       return NextResponse.json({ error: "Missing required client fields" }, { status: 400 });
     }
+
+    // ── Numeric + enum validation ─────────────────────────────────────────────
+    const vDealType      = parseEnum(dealType,      ["SALE", "RENTAL"] as const, "סוג העסקה");
+    const vPropertyPrice = parsePositiveInt(propertyPrice, "מחיר הנכס");
+    const vCommission    = parseNonNegativeInt(commission, "עמלה");
+    const validationError = firstError(vDealType, vPropertyPrice, vCommission);
+    if (validationError) {
+      return NextResponse.json({ error: validationError }, { status: 400 });
+    }
+    // Narrowing: all Results are Ok beyond this point (firstError returned early on any Err)
+    if (!vDealType.ok || !vPropertyPrice.ok || !vCommission.ok) {
+      return NextResponse.json({ error: "Validation error" }, { status: 400 });
+    }
+    const validatedDealType      = vDealType.value;
+    const validatedPropertyPrice = vPropertyPrice.value;
+    const validatedCommission    = vCommission.value;
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -236,7 +253,7 @@ export async function POST(request: Request) {
         const ctx = buildContext({
           broker:   { fullName: user.fullName, licenseNumber: user.licenseNumber ?? null, phone: user.phone ?? null, idNumber: user.idNumber ?? null },
           client:   { name: clientName, idNumber: clientIdNumber || "", phone: clientPhone, email: clientEmail || "" },
-          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: Number(propertyPrice), dealType, commission: Number(commission), createdAt: new Date() },
+          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: validatedCommission, createdAt: new Date() },
         });
         generatedText      = resolveTemplate(tpl.content, ctx);
         resolvedTemplateId = tpl.id;
@@ -249,11 +266,11 @@ export async function POST(request: Request) {
     const contract = await prisma.contract.create({
       data: {
         contractType,
-        dealType,
+        dealType:      validatedDealType,
         propertyAddress,
         propertyCity,
-        propertyPrice: Number(propertyPrice),
-        commission:    Number(commission),
+        propertyPrice: validatedPropertyPrice,
+        commission:    validatedCommission,
         userId:        user.id,
         clientId:      client.id,
         signatureToken,
