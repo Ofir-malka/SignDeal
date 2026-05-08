@@ -5,6 +5,7 @@ import { calculateFees, defaultFeeConfig } from "@/lib/payments/fee-calculator";
 import { getPaymentProvider } from "@/lib/payments";
 import { sendSms } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
+import { rateLimit } from "@/lib/rate-limit";
 
 export async function POST(
   request: Request,
@@ -16,6 +17,20 @@ export async function POST(
     const { userId } = result;
 
     const { id } = await params;
+
+    // ── Rate limit: double-keyed to prevent both per-contract and per-broker flooding
+    // 5 requests per contract per hour — enough for retries after provider errors.
+    // 15 per broker per hour across all contracts — blocks bulk automation.
+    // Both limits call Rapyd (external) and send SMS; conservative caps are correct.
+    const rlContract = rateLimit(id,     "payment-request",    { max: 5,  windowMs: 60 * 60_000 });
+    const rlBroker   = rateLimit(userId, "payment-request-all", { max: 15, windowMs: 60 * 60_000 });
+    if (!rlContract.allowed || !rlBroker.allowed) {
+      const retryAfter = Math.max(rlContract.retryAfter ?? 0, rlBroker.retryAfter ?? 0);
+      return NextResponse.json(
+        { error: "יותר מדי בקשות תשלום — המתן שעה ונסה שוב" },
+        { status: 429, headers: { "Retry-After": String(retryAfter) } },
+      );
+    }
 
     const contract = await prisma.contract.findFirst({
       where:  { id, userId },

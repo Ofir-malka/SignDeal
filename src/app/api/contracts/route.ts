@@ -5,6 +5,7 @@ import { sendSms } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { requireUserId } from "@/lib/require-user";
 import { resolveTemplate, buildContext } from "@/lib/contracts/resolve-template";
+import { rateLimit } from "@/lib/rate-limit";
 
 // ─── SMS helper ───────────────────────────────────────────────────────────────
 // Fire-and-forget: never throws, never blocks the HTTP response.
@@ -133,6 +134,18 @@ export async function POST(request: Request) {
     const authResult = await requireUserId();
     if (authResult instanceof NextResponse) return authResult;
     const { userId } = authResult;
+
+    // ── Rate limit: 20 contract creations per broker per hour ─────────────────
+    // Keyed on userId (not IP) — brokers may share office NAT.
+    // Each creation sends an SMS and may call an external template; 20/hr is
+    // well above normal usage for a single broker.
+    const rl = rateLimit(userId, "contract-create", { max: 20, windowMs: 60 * 60_000 });
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: "יותר מדי חוזים — המתן שעה ונסה שוב" },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
+      );
+    }
 
     const body = await request.json();
     const {

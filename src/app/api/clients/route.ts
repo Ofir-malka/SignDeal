@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
+import { rateLimit } from "@/lib/rate-limit";
 
 export async function GET() {
   try {
@@ -24,6 +25,15 @@ export async function POST(req: NextRequest) {
     const result = await requireUserId();
     if (result instanceof NextResponse) return result;
     const { userId } = result;
+
+    // ── Rate limit: 30 client creations per broker per hour ───────────────────
+    const rl = rateLimit(userId, "client-create", { max: 30, windowMs: 60 * 60_000 });
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: "יותר מדי לקוחות — המתן שעה ונסה שוב" },
+        { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
+      );
+    }
 
     const body = await req.json();
     const name     = String(body.name     ?? "").trim();
