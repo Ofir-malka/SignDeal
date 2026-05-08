@@ -70,6 +70,10 @@ function InfoCard({
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export function ContractDetail({ contract: c }: { contract: Contract }) {
+  const isSigned = c.signatureStatus === "נחתם" ||
+                   c.signatureStatus === "ממתין לתשלום" ||
+                   c.signatureStatus === "שולם";
+
   return (
     <ContractDealWrapper
       contract={c}
@@ -104,8 +108,37 @@ export function ContractDetail({ contract: c }: { contract: Contract }) {
               },
               { label: "עמלה",         value: c.commission  },
               { label: "נשלח בתאריך", value: c.sentDate     },
+              { label: "נחתם בתאריך", value: c.signedDate   },
             ]}
           />
+
+          {/* Audit card — only shown when the contract has been signed */}
+          {isSigned && (
+            <InfoCard
+              title="אימות חתימה"
+              rows={[
+                {
+                  label: "חתימה גרפית",
+                  value: c.hasSignature
+                    ? <span className="inline-flex items-center gap-1 text-emerald-600 font-medium">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        קיימת
+                      </span>
+                    : <span className="text-gray-400">לא נשמרה</span>,
+                },
+                ...(c.signatureHashPrefix
+                  ? [{ label: "גיבוב SHA-256", value: <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono">{c.signatureHashPrefix}…</code> }]
+                  : []
+                ),
+                ...(c.signatureIpMasked
+                  ? [{ label: "IP חתימה", value: <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded font-mono">{c.signatureIpMasked}</code> }]
+                  : []
+                ),
+              ]}
+            />
+          )}
         </div>
       }
     />

@@ -75,7 +75,9 @@ export async function PATCH(
     if (signedAt        !== undefined) data.signedAt     = vSignedAt.ok    ? vSignedAt.value    : undefined;
     if (dealClosedAt    !== undefined) data.dealClosedAt = vDealClosedAt.ok ? vDealClosedAt.value : undefined;
 
-    // Capture full audit trail when signing
+    // Capture audit trail when broker manually marks contract as signed.
+    // signatureIp/userAgent record the broker's browser — clearly distinguishable
+    // from a client-side signing event (which goes through /sign/[token]).
     if (signatureStatus === "SIGNED") {
       const ip =
         request.headers.get("x-forwarded-for")?.split(",")[0].trim()
@@ -87,15 +89,6 @@ export async function PATCH(
       data.userAgent   = ua;
       if (typeof signatureData === "string") data.signatureData = signatureData;
       if (typeof signatureHash === "string") data.signatureHash = signatureHash;
-
-      // Temporary: log audit data for verification
-      console.log("[SIGN AUDIT]", {
-        contractId:  id,
-        signatureIp: ip,
-        userAgent:   ua,
-        hasSignatureData: data.signatureData !== null,
-        signatureHash:    data.signatureHash,
-      });
     }
 
     const clientData: Record<string, string> = {};
@@ -105,6 +98,24 @@ export async function PATCH(
 
     if (Object.keys(data).length === 0) {
       return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
+    }
+
+    // ── Persist audit activity for notable broker-initiated status changes ─────
+    // These complement the client-side Activity that /sign/[token] PATCH creates.
+    if (vStatus.ok && vStatus.value !== null && vStatus.value !== owned.status) {
+      const STATUS_LABELS: Record<string, string> = {
+        SIGNED:          "נחתם (שינוי ידני על ידי הסוכן)",
+        CANCELED:        "בוטל (שינוי ידני על ידי הסוכן)",
+        EXPIRED:         "פג תוקף (שינוי ידני על ידי הסוכן)",
+        PAYMENT_PENDING: "ממתין לתשלום (שינוי ידני על ידי הסוכן)",
+        PAID:            "שולם (שינוי ידני על ידי הסוכן)",
+      };
+      const label = STATUS_LABELS[vStatus.value];
+      if (label) {
+        await prisma.activity.create({
+          data: { contractId: id, message: `סטטוס עודכן: ${label}`, userId },
+        });
+      }
     }
 
     const contract = await prisma.contract.update({

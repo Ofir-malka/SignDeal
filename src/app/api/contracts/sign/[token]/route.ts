@@ -5,9 +5,13 @@ import { sendSms } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { rateLimit, getRealIp } from "@/lib/rate-limit";
 
+// ── UUID format guard — reject obviously invalid tokens before hitting the DB ─
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 // ── GET /api/contracts/sign/[token] ──────────────────────────────────────────
 // Public endpoint — returns signing-safe contract fields for the client.
-// Does NOT expose userId, signatureToken, or broker-private metadata.
+// Does NOT expose userId, signatureToken, signatureHash, userAgent, or any
+// broker-private metadata.
 
 export async function GET(
   _request: Request,
@@ -15,6 +19,10 @@ export async function GET(
 ) {
   try {
     const { token } = await params;
+
+    if (!UUID_RE.test(token)) {
+      return NextResponse.json({ error: "החוזה לא נמצא" }, { status: 404 });
+    }
 
     const contract = await prisma.contract.findUnique({
       where:   { signatureToken: token },
@@ -36,7 +44,13 @@ export async function GET(
       }).catch((err) => console.error("[sign GET] OPENED transition failed:", err));
     }
 
-    // Return ApiContractResponse-compatible shape — no broker-private fields
+    // ── Return only fields required to render + sign the contract ─────────────
+    // Deliberately omitted (audit/broker-private):
+    //   signatureHash — tamper-detection only; client has no use for it
+    //   userAgent     — recorded on sign, never sent back
+    //   templateId    — internal DB FK; not needed by signing page
+    //   signatureIp   — audit field stored server-side only
+    //   signatureToken, userId — always excluded
     return NextResponse.json({
       id:              contract.id,
       contractType:    contract.contractType,
@@ -64,17 +78,14 @@ export async function GET(
         provider:   contract.payment.provider   ?? null,
       } : null,
       signatureData:             contract.signatureData ?? null,
-      signatureHash:             contract.signatureHash ?? null,
-      userAgent:                 contract.userAgent     ?? null,
       propertyId:                contract.propertyId    ?? null,
       hideFullAddressFromClient: contract.hideFullAddressFromClient,
       generatedText:             contract.generatedText ?? null,
-      templateId:                contract.templateId    ?? null,
       language:                  contract.language      ?? "HE",
     });
   } catch (error) {
     console.error("[GET /api/contracts/sign/:token]", error);
-    return NextResponse.json({ error: "Failed to fetch contract" }, { status: 500 });
+    return NextResponse.json({ error: "שגיאה בטעינת החוזה" }, { status: 500 });
   }
 }
 
@@ -164,6 +175,10 @@ export async function PATCH(
   try {
     const { token } = await params;
 
+    if (!UUID_RE.test(token)) {
+      return NextResponse.json({ error: "החוזה לא נמצא" }, { status: 404 });
+    }
+
     // ── Rate limit: max 10 signing attempts per token per 15 minutes ──────────
     // Keyed on token so it prevents brute-force enumeration of signing tokens.
     // Also keyed on IP to catch clients with multiple tokens.
@@ -208,13 +223,16 @@ export async function PATCH(
     });
 
     if (!contract) {
-      return NextResponse.json({ error: "Contract not found" }, { status: 404 });
+      return NextResponse.json({ error: "החוזה לא נמצא" }, { status: 404 });
     }
     if (contract.status === "CANCELED") {
-      return NextResponse.json({ error: "Contract is canceled" }, { status: 400 });
+      return NextResponse.json({ error: "החוזה בוטל ואינו ניתן לחתימה" }, { status: 409 });
+    }
+    if (contract.status === "EXPIRED") {
+      return NextResponse.json({ error: "תוקף החוזה פג" }, { status: 409 });
     }
     if (signatureStatus === "SIGNED" && contract.status === "SIGNED") {
-      return NextResponse.json({ error: "Contract already signed" }, { status: 400 });
+      return NextResponse.json({ error: "החוזה כבר נחתם" }, { status: 409 });
     }
 
     const data: Record<string, unknown> = {};
@@ -233,19 +251,11 @@ export async function PATCH(
       const ua = request.headers.get("user-agent") ?? null;
 
       data.status      = "SIGNED";
-      data.signedAt    = new Date(); // G3.2: server controls timestamp, client value ignored
+      data.signedAt    = new Date(); // server controls timestamp; client-supplied signedAt is ignored
       data.signatureIp = ip;
       data.userAgent   = ua;
       if (typeof signatureData === "string") data.signatureData = signatureData;
       if (typeof signatureHash === "string") data.signatureHash = signatureHash;
-
-      console.log("[SIGN AUDIT]", {
-        contractId:       contract.id,
-        signatureIp:      ip,
-        userAgent:        ua,
-        hasSignatureData: !!signatureData,
-        signatureHash,
-      });
     }
 
     if (Object.keys(data).length === 0) {
@@ -258,14 +268,29 @@ export async function PATCH(
       include: { client: true, payment: true },
     });
 
-    // G3.3: Persist activity + G3.4: notify broker — only on signing.
-    // sendBrokerSignedSms is awaited (not void) so Vercel does not kill the promise
-    // when the HTTP response returns. It catches all errors internally and never propagates.
+    // G3.3: Persist audit activity + G3.4: notify broker — only on signing.
+    // The activity message embeds the hash prefix (first 12 chars) and whether
+    // an IP was captured, forming a durable audit trail without exposing full
+    // secrets. The full signatureHash, signatureIp, and userAgent are stored
+    // on the Contract record itself.
+    // sendBrokerSignedSms is awaited so Vercel does not kill the promise.
     if (signatureStatus === "SIGNED") {
+      const hashPrefix   = typeof signatureHash === "string" && signatureHash
+        ? signatureHash.slice(0, 12)
+        : null;
+      const ipCaptured   = !!(data.signatureIp);
+
+      const auditMessage = [
+        "הלקוח חתם על החוזה",
+        hashPrefix  ? `גיבוב: ${hashPrefix}…` : null,
+        ipCaptured  ? "IP נרשם"              : "IP לא זמין",
+        (data.signatureData as string | undefined) ? "חתימה גרפית נשמרה" : null,
+      ].filter(Boolean).join(" | ");
+
       await prisma.activity.create({
         data: {
           contractId: contract.id,
-          message:    "הלקוח חתם על החוזה",
+          message:    auditMessage,
           userId:     contract.userId,
         },
       });
@@ -301,6 +326,6 @@ export async function PATCH(
       return NextResponse.json({ error: "Contract not found" }, { status: 404 });
     }
     console.error("[PATCH /api/contracts/sign/:token]", error);
-    return NextResponse.json({ error: "Failed to update contract" }, { status: 500 });
+    return NextResponse.json({ error: "שגיאה בשמירת החתימה — נסה שוב" }, { status: 500 });
   }
 }

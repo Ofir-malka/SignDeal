@@ -23,9 +23,10 @@ export type ApiContractResponse = {
     paymentUrl: string | null;
     provider:   string | null;
   } | null;
-  signatureData: string | null;
-  signatureHash: string | null;
-  userAgent:     string | null;
+  signatureData:  string | null;
+  signatureHash?: string | null;  // broker GET only; omitted from public sign GET
+  signatureIp?:   string | null;  // broker GET only
+  userAgent?:     string | null;  // broker GET only
   propertyId:    string | null;
   hideFullAddressFromClient: boolean;
   templateId?:     string | null;
@@ -102,5 +103,21 @@ export function apiToContract(c: ApiContractResponse): Contract {
     generatedText:             c.generatedText  ?? null,
     signatureToken:            c.signatureToken ?? null,
     language:                  c.language       ?? "HE",
+    // ── Signing audit fields — only present on broker GET responses ───────────
+    signatureHashPrefix: c.signatureHash ? c.signatureHash.slice(0, 12) : null,
+    hasSignature:        !!c.signatureData,
+    signatureIpMasked:   maskIp(c.signatureIp ?? null),
   };
+}
+
+// ── IP masking helper — hides first octet: 192.168.1.5 → "*.168.1.5" ─────────
+function maskIp(ip: string | null | undefined): string | null {
+  if (!ip) return null;
+  // Handle IPv4
+  const v4 = ip.split(".");
+  if (v4.length === 4) return ["*", v4[1], v4[2], v4[3]].join(".");
+  // Handle IPv6 — mask first group
+  const v6 = ip.split(":");
+  if (v6.length >= 2) return ["*", ...v6.slice(1)].join(":");
+  return "*";
 }
