@@ -166,6 +166,15 @@ export function Sidebar({ mobileOpen = false, onMobileClose }: SidebarProps) {
         ))}
       </nav>
 
+      {/* Legal + support footer */}
+      <div className="px-4 py-3 border-t border-gray-100">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <Link href="/legal/terms"   className="text-[11px] text-gray-400 hover:text-gray-600 transition-colors">תנאי שימוש</Link>
+          <Link href="/legal/privacy" className="text-[11px] text-gray-400 hover:text-gray-600 transition-colors">פרטיות</Link>
+          <a href="mailto:support@signdeal.co.il" className="text-[11px] text-gray-400 hover:text-gray-600 transition-colors">תמיכה</a>
+        </div>
+      </div>
+
       {/* User profile */}
       <div className="px-4 py-4 border-t border-gray-100">
         <div className="flex items-center gap-3">

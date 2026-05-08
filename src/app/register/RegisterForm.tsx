@@ -352,6 +352,14 @@ export function RegisterForm({ googleEnabled, appleEnabled }: Props) {
           )}
 
         </div>
+
+        {/* Legal links */}
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+          <Link href="/legal/terms"   className="text-xs text-gray-400 hover:text-gray-600 transition-colors">תנאי שימוש</Link>
+          <Link href="/legal/privacy" className="text-xs text-gray-400 hover:text-gray-600 transition-colors">מדיניות פרטיות</Link>
+          <Link href="/legal/cookies" className="text-xs text-gray-400 hover:text-gray-600 transition-colors">עוגיות</Link>
+          <a href="mailto:support@signdeal.co.il" className="text-xs text-gray-400 hover:text-gray-600 transition-colors">support@signdeal.co.il</a>
+        </div>
       </div>
     </main>
   );

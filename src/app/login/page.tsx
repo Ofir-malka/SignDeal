@@ -1,4 +1,10 @@
+import type { Metadata } from "next";
 import { LoginForm } from "./LoginForm";
+
+export const metadata: Metadata = {
+  title:       "התחברות",
+  description: "התחבר לחשבון SignDeal לניהול חוזי התיווך שלך.",
+};
 
 // Server component — checks env vars at request time (never exposed to client bundle).
 // Both ID and SECRET must be present before a provider button is shown,

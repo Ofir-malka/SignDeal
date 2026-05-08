@@ -1,4 +1,10 @@
+import type { Metadata } from "next";
 import { RegisterForm } from "./RegisterForm";
+
+export const metadata: Metadata = {
+  title:       "הרשמה",
+  description: "צור חשבון SignDeal לניהול חוזי תיווך, חתימות דיגיטליות ותשלומים.",
+};
 
 // Server component — checks env vars at request time (never exposed to client bundle).
 // Both ID and SECRET must be present before a provider button is shown,
