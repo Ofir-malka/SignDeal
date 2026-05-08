@@ -1,29 +1,32 @@
-import { NextResponse } from "next/server";
-import { requireUserId } from "@/lib/require-user";
-
 /**
  * GET /api/test-sms/status?messageId={messageId}
  *
- * Developer-only route — fetches the Infobip delivery report for a given
- * messageId and returns the raw provider response for debugging.
+ * Developer-only route — fetches the Infobip delivery report for a messageId
+ * and returns a sanitised summary (not the raw provider response).
  *
- * Calls: GET /sms/1/reports?messageId={messageId}
- *
- * Returns:
- *   { success: true,  messageId, providerResponse }
- *   { success: false, error,     providerResponse | null }
- *
- * Auth required. Disabled entirely in production (returns 404).
+ * Access:
+ *   - Production (NODE_ENV=production) with ENABLE_TEST_SMS_ROUTES≠"true" → 404
+ *   - Unauthenticated session → 401
+ *   - Email not in INTERNAL_ADMIN_EMAILS → 403
  */
-export async function GET(request: Request) {
-  // ── Disabled in production — return 404 so the route is invisible to attackers
-  if (process.env.NODE_ENV === "production") {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
 
-  // ── Auth guard — must be a signed-in broker even in dev/staging
-  const authResult = await requireUserId();
-  if (authResult instanceof NextResponse) return authResult;
+import { NextResponse }             from "next/server";
+import { requireTestRouteAccess }   from "@/lib/require-test-route";
+
+// Delivery status fields we surface — no internal Infobip structure exposed.
+type DeliveryReport = {
+  messageId:   string;
+  status:      string;       // e.g. "DELIVERED_TO_HANDSET"
+  description: string;       // human-readable status description
+  sentAt:      string | null;
+  doneAt:      string | null;
+  errorCode:   string | null;
+};
+
+export async function GET(request: Request) {
+  const gate = await requireTestRouteAccess();
+  if (!gate.ok) return gate.response;
+
   const { searchParams } = new URL(request.url);
   const messageId = searchParams.get("messageId")?.trim();
 
@@ -38,51 +41,84 @@ export async function GET(request: Request) {
   const apiKey  = process.env.INFOBIP_API_KEY?.trim();
 
   if (!baseUrl || !apiKey) {
+    // Never reveal which specific env var is missing.
     return NextResponse.json(
-      { success: false, error: "INFOBIP_BASE_URL or INFOBIP_API_KEY not configured in .env" },
-      { status: 500 },
+      { success: false, error: "SMS provider not configured" },
+      { status: 503 },
     );
   }
 
-  const url = `${baseUrl}/sms/1/reports?messageId=${encodeURIComponent(messageId)}`;
-  console.log(`[GET /api/test-sms/status] Fetching delivery report — messageId=${messageId}`);
-
-  let providerResponse: unknown = null;
+  console.log(
+    `[GET /api/test-sms/status] fetching report — messageId=${messageId} by=${gate.email}`,
+  );
 
   try {
-    const res = await fetch(url, {
-      method:  "GET",
-      headers: {
-        "Authorization": `App ${apiKey}`,
-        "Accept":        "application/json",
+    const res = await fetch(
+      `${baseUrl}/sms/1/reports?messageId=${encodeURIComponent(messageId)}`,
+      {
+        method:  "GET",
+        headers: {
+          "Authorization": `App ${apiKey}`,
+          "Accept":        "application/json",
+        },
       },
-    });
+    );
 
-    providerResponse = await res.json().catch(() => null);
+    // Parse response regardless of HTTP status — Infobip returns error detail in JSON
+    const json = await res.json().catch(() => null) as Record<string, unknown> | null;
 
-    if (!res.ok) {
+    if (!res.ok || !json) {
+      // Extract error text from Infobip shape without returning the full object.
       const detail =
-        (providerResponse as { requestError?: { serviceException?: { text?: string } } })
+        (json as { requestError?: { serviceException?: { text?: string } } } | null)
           ?.requestError?.serviceException?.text ??
         `HTTP ${res.status}`;
-
-      console.error(`[GET /api/test-sms/status] Infobip error: ${detail}`, providerResponse);
-
+      console.error(`[GET /api/test-sms/status] provider error: ${detail}`);
       return NextResponse.json(
-        { success: false, error: `Infobip error: ${detail}`, providerResponse },
-        { status: 200 },
+        { success: false, error: `Provider error: ${detail}` },
+        { status: 502 },
       );
     }
 
-    console.log(`[GET /api/test-sms/status] Report received for messageId=${messageId}`);
+    // Infobip delivery report shape:
+    //   { results: [{ messageId, sentAt, doneAt, smsCount,
+    //                 status: { name, description, groupName },
+    //                 error:  { name, description } }] }
+    type InfobipReport = {
+      messageId:  string;
+      sentAt?:    string;
+      doneAt?:    string;
+      status?:    { name?: string; description?: string };
+      error?:     { name?: string };
+    };
 
-    return NextResponse.json({ success: true, messageId, providerResponse });
+    const results = (json["results"] as InfobipReport[] | undefined) ?? [];
+    const report  = results[0];
+
+    if (!report) {
+      return NextResponse.json(
+        { success: false, error: "No delivery report found for this messageId yet" },
+        { status: 404 },
+      );
+    }
+
+    const summary: DeliveryReport = {
+      messageId:   report.messageId,
+      status:      report.status?.name        ?? "UNKNOWN",
+      description: report.status?.description ?? "",
+      sentAt:      report.sentAt              ?? null,
+      doneAt:      report.doneAt              ?? null,
+      errorCode:   report.error?.name         ?? null,
+    };
+
+    console.log(`[GET /api/test-sms/status] report: status=${summary.status}`);
+    return NextResponse.json({ success: true, report: summary });
 
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error("[GET /api/test-sms/status] Network error:", message);
+    console.error("[GET /api/test-sms/status] network error:", message);
     return NextResponse.json(
-      { success: false, error: `Network error: ${message}`, providerResponse },
+      { success: false, error: "Network error reaching SMS provider" },
       { status: 500 },
     );
   }

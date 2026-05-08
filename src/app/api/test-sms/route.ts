@@ -1,44 +1,30 @@
-import { NextResponse } from "next/server";
-import { requireUserId } from "@/lib/require-user";
-
 /**
  * POST /api/test-sms
  *
- * Developer-only route — verifies real Infobip SMS delivery with the
- * approved "SignDeal" sender name.
+ * Developer-only route — fires a real Infobip SMS to verify delivery.
  *
  * Body:  { "to": "+972XXXXXXXXX" }
  *
- * Returns:
- *   { success: true,  messageId: "...", providerResponse: { ... } }
- *   { success: false, error: "...",     providerResponse: { ... } | null }
+ * Access:
+ *   - Production (NODE_ENV=production) with ENABLE_TEST_SMS_ROUTES≠"true" → 404
+ *   - Unauthenticated session → 401
+ *   - Email not in INTERNAL_ADMIN_EMAILS → 403
  *
- * Auth required. Disabled entirely in production (returns 404).
+ * Never returns raw Infobip API responses or credential-revealing error detail.
  */
+
+import { NextResponse }             from "next/server";
+import { requireTestRouteAccess }   from "@/lib/require-test-route";
+import { sendSms }                  from "@/lib/messaging/sms-provider";
+
 export async function POST(request: Request) {
-  // ── Disabled in production — return 404 so the route is invisible to attackers
-  if (process.env.NODE_ENV === "production") {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-
-  // ── Auth guard — must be a signed-in broker even in dev/staging
-  const authResult = await requireUserId();
-  if (authResult instanceof NextResponse) return authResult;
-  const baseUrl = process.env.INFOBIP_BASE_URL?.trim();
-  const apiKey  = process.env.INFOBIP_API_KEY?.trim();
-  const sender  = (process.env.INFOBIP_SMS_SENDER?.trim() || "SignDeal");
-
-  if (!baseUrl || !apiKey) {
-    return NextResponse.json(
-      { success: false, error: "INFOBIP_BASE_URL or INFOBIP_API_KEY not configured in .env" },
-      { status: 500 },
-    );
-  }
+  const gate = await requireTestRouteAccess();
+  if (!gate.ok) return gate.response;
 
   let to: string;
   try {
     const body = await request.json();
-    to = (body.to ?? "").trim();
+    to = String(body.to ?? "").trim();
   } catch {
     return NextResponse.json(
       { success: false, error: 'Invalid JSON body. Expected: { "to": "+972XXXXXXXXX" }' },
@@ -53,88 +39,24 @@ export async function POST(request: Request) {
     );
   }
 
-  const messageBody = "בדיקת SMS מ-SignDeal. אם קיבלת את ההודעה, השליחה עובדת.";
+  console.log(`[POST /api/test-sms] sending test SMS to="${to}" by=${gate.email}`);
 
-  const payload = {
-    messages: [
-      {
-        from:         sender,
-        destinations: [{ to }],
-        text:         messageBody,
-      },
-    ],
-  };
+  // Use the shared sendSms helper — same path as all real notifications.
+  // This also respects SMS_TEST_PHONE so the caller can verify guard behaviour.
+  const result = await sendSms({
+    to,
+    body: "בדיקת SMS מ-SignDeal. אם קיבלת את ההודעה, השליחה עובדת.",
+  });
 
-  console.log(`[POST /api/test-sms] sender="${sender}" to="${to}"`);
-
-  let providerResponse: unknown = null;
-  let httpStatus: number;
-
-  try {
-    const res = await fetch(`${baseUrl}/sms/2/text/advanced`, {
-      method:  "POST",
-      headers: {
-        "Authorization": `App ${apiKey}`,
-        "Content-Type":  "application/json",
-        "Accept":        "application/json",
-      },
-      body: JSON.stringify(payload),
-    });
-
-    httpStatus       = res.status;
-    providerResponse = await res.json().catch(() => null);
-
-    if (!res.ok) {
-      // Infobip error shape: { requestError: { serviceException: { text, messageId } } }
-      const detail =
-        (providerResponse as { requestError?: { serviceException?: { text?: string } } })
-          ?.requestError?.serviceException?.text ??
-        `HTTP ${httpStatus}`;
-
-      console.error(`[POST /api/test-sms] Infobip rejected: ${detail}`, providerResponse);
-
-      return NextResponse.json(
-        {
-          success:          false,
-          error:            `Infobip rejected the request: ${detail}`,
-          providerResponse,
-        },
-        { status: 200 }, // 200 so the caller gets the full JSON regardless
-      );
-    }
-
-    // Success: { messages: [{ messageId: string, status: { ... } }] }
-    const messageId =
-      (providerResponse as { messages?: { messageId?: string }[] })
-        ?.messages?.[0]?.messageId;
-
-    if (!messageId) {
-      return NextResponse.json(
-        {
-          success:          false,
-          error:            "Infobip returned 2xx but no messageId in response",
-          providerResponse,
-        },
-        { status: 200 },
-      );
-    }
-
-    console.log(`[POST /api/test-sms] Sent OK — messageId=${messageId}`);
-
-    return NextResponse.json({
-      success:          true,
-      messageId,
-      sender,
-      to,
-      providerResponse,
-    });
-
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("[POST /api/test-sms] Network error:", message);
-    return NextResponse.json(
-      { success: false, error: `Network error: ${message}`, providerResponse },
-      { status: 500 },
-    );
+  if (result.ok) {
+    console.log(`[POST /api/test-sms] sent OK — messageId=${result.messageId}`);
+    return NextResponse.json({ success: true, messageId: result.messageId, to });
   }
+
+  console.error(`[POST /api/test-sms] send failed — reason=${result.reason}`);
+  // Return the provider's error text but NOT the full raw response object.
+  return NextResponse.json(
+    { success: false, error: result.reason ?? "SMS send failed" },
+    { status: 502 },
+  );
 }
