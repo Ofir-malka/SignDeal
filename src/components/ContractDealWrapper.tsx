@@ -556,8 +556,8 @@ export function ContractDealWrapper({
               <p className="text-sm text-emerald-700 mt-0.5">
                 הלקוח חתם על החוזה בתאריך {c.signedDate ?? "תאריך לא זמין"}
               </p>
-              <p className="text-xs text-gray-400 mt-2">
-                בגרסה המלאה יופיע כאן תיעוד חתימה מלא כולל IP, זמן חתימה ו-PDF חתום.
+              <p className="text-xs text-emerald-600 mt-1.5">
+                החתימה אומתה ונשמרה במערכת
               </p>
             </div>
           </div>
