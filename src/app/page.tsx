@@ -20,17 +20,28 @@ export default function DashboardPage() {
   const { data: session } = useSession();
   const firstName = session?.user?.name?.trim().split(/\s+/)[0] ?? "";
 
-  const [contracts, setContracts] = useState<Contract[]>([]);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState<string | null>(null);
+  const [contracts, setContracts]           = useState<Contract[]>([]);
+  const [loading, setLoading]               = useState(true);
+  const [error, setError]                   = useState<string | null>(null);
+  const [failedMsgCount, setFailedMsgCount] = useState(0);
 
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch("/api/contracts");
-        if (!res.ok) throw new Error("שגיאה בטעינת נתונים");
-        const data: ApiContractResponse[] = await res.json();
+        // Fetch contracts and failed-message count in parallel
+        const [contractsRes, msgsRes] = await Promise.all([
+          fetch("/api/contracts"),
+          fetch("/api/messages?status=FAILED&limit=1"),
+        ]);
+
+        if (!contractsRes.ok) throw new Error("שגיאה בטעינת נתונים");
+        const data: ApiContractResponse[] = await contractsRes.json();
         setContracts(data.map(apiToContract));
+
+        if (msgsRes.ok) {
+          const msgsData = await msgsRes.json() as { summary?: { failedCount?: number } };
+          setFailedMsgCount(msgsData.summary?.failedCount ?? 0);
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "שגיאה לא ידועה");
       } finally {
@@ -76,7 +87,7 @@ export default function DashboardPage() {
         <DashboardStats contracts={contracts} loading={loading} error={error} />
 
         {/* Needs attention */}
-        <NeedsAttention contracts={contracts} loading={loading} />
+        <NeedsAttention contracts={contracts} loading={loading} failedNotificationsCount={failedMsgCount} />
 
         {/* Quick action strip */}
         <div className="flex flex-wrap items-center gap-2 sm:gap-3 mb-8">

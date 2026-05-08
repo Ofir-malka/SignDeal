@@ -71,10 +71,29 @@ export function ReminderModal({
     }
   }
 
-  function handleSendWhatsApp() {
-    // WhatsApp is opened via wa.me link — no server-side API call needed.
-    // When Infobip / 360dialog WhatsApp Business API is wired,
-    // replace this with a server-side call that records a WHATSAPP Message row.
+  async function handleSendWhatsApp() {
+    setSending(true);
+    setError(null);
+    try {
+      // Record the WhatsApp send intent on the server (creates an auditable Message row).
+      // The actual message is sent manually by the broker through the wa.me link below.
+      const res = await fetch(`/api/contracts/${contractId}/send-reminder`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ channel: "WHATSAPP" }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        setError(data.error ?? "שגיאה בתיעוד שליחת WhatsApp");
+        return;
+      }
+    } catch {
+      // Network error — still open wa.me so the broker isn't blocked, but warn
+      setError("לא ניתן היה לתעד את ההודעה בשרת, אך WhatsApp נפתח");
+    } finally {
+      setSending(false);
+    }
+
     const phone   = normalizePhone(clientPhone);
     const message =
       `שלום ${clientName},\n` +
@@ -93,7 +112,7 @@ export function ReminderModal({
     if (method === "sms") {
       await handleSendSms();
     } else {
-      handleSendWhatsApp();
+      await handleSendWhatsApp();
     }
   }
 

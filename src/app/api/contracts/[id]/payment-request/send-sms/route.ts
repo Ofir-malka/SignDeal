@@ -35,20 +35,20 @@ export async function POST(
     });
 
     if (!contract) {
-      return NextResponse.json({ error: "Contract not found" }, { status: 404 });
+      return NextResponse.json({ error: "החוזה לא נמצא" }, { status: 404 });
     }
 
     if (!contract.payment) {
       return NextResponse.json(
-        { error: "Payment request does not exist" },
-        { status: 400 }
+        { error: "לא קיימת בקשת תשלום לחוזה זה" },
+        { status: 400 },
       );
     }
 
     if (!contract.payment.paymentUrl) {
       return NextResponse.json(
-        { error: "Payment link is not available yet" },
-        { status: 400 }
+        { error: "קישור התשלום עדיין אינו זמין — נסה שוב בעוד מספר שניות" },
+        { status: 400 },
       );
     }
 
@@ -135,6 +135,6 @@ export async function POST(
 
   } catch (error) {
     console.error("[POST /api/contracts/[id]/payment-request/send-sms]", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json({ error: "שגיאה בשליחת ה-SMS — נסה שוב" }, { status: 500 });
   }
 }

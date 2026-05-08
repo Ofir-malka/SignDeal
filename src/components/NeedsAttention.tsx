@@ -72,9 +72,11 @@ function SkeletonRow() {
 export function NeedsAttention({
   contracts,
   loading,
+  failedNotificationsCount = 0,
 }: {
-  contracts: Contract[];
-  loading:   boolean;
+  contracts:                 Contract[];
+  loading:                   boolean;
+  failedNotificationsCount?: number;
 }) {
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [sentIds,   setSentIds]   = useState<Set<string>>(new Set());
@@ -116,9 +118,10 @@ export function NeedsAttention({
   }
 
   const items = buildItems(contracts);
+  const hasFailedNotifications = failedNotificationsCount > 0;
 
   // Empty — nothing needs attention
-  if (items.length === 0) return null;
+  if (items.length === 0 && !hasFailedNotifications) return null;
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm mb-8 overflow-hidden">
@@ -128,8 +131,26 @@ export function NeedsAttention({
           <span className="w-2 h-2 rounded-full bg-amber-400" />
           <h2 className="text-sm font-semibold text-gray-900">דורש טיפול</h2>
         </div>
-        <span className="text-xs text-gray-400">{items.length} פריטים</span>
+        {items.length > 0 && (
+          <span className="text-xs text-gray-400">{items.length} פריטים</span>
+        )}
       </div>
+
+      {/* Failed notifications banner */}
+      {hasFailedNotifications && (
+        <div className="px-6 py-2.5 bg-red-50 border-b border-red-100 flex items-center gap-2">
+          <svg className="shrink-0 text-red-500" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
+          <p className="text-xs text-red-700 flex-1">
+            {failedNotificationsCount === 1
+              ? "הודעה אחת נכשלה בשליחה — כנס לחוזה הרלוונטי כדי לשלוח מחדש"
+              : `${failedNotificationsCount} הודעות נכשלו בשליחה — כנס לחוזים הרלוונטיים כדי לשלוח מחדש`}
+          </p>
+        </div>
+      )}
 
       {/* SMS error banner */}
       {smsError && (
