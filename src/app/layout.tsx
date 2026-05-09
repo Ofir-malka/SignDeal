@@ -39,14 +39,21 @@ export const metadata: Metadata = {
     siteName:    "SignDeal",
     title:       "SignDeal – ניהול חוזים לסוכני נדל\"ן",
     description: "פלטפורמה מתקדמת לניהול חוזי תיווך, חתימות דיגיטליות ותשלומים לסוכני נדל\"ן בישראל.",
-    // og:image is populated automatically from src/app/opengraph-image.tsx
+    images: [
+      {
+        url:    "/og-image.png",
+        width:  1200,
+        height: 630,
+        alt:    "SignDeal – ניהול חוזים לסוכני נדל\"ן",
+      },
+    ],
   },
 
   twitter: {
     card:        "summary_large_image",
     title:       "SignDeal – ניהול חוזים לסוכני נדל\"ן",
     description: "פלטפורמה מתקדמת לניהול חוזי תיווך, חתימות דיגיטליות ותשלומים לסוכני נדל\"ן בישראל.",
-    // twitter:image falls back to og:image (opengraph-image.tsx) when not set explicitly
+    images:      ["/og-image.png"],
   },
 
   icons: {
