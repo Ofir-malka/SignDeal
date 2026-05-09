@@ -36,6 +36,11 @@ export default async function Image() {
           background: "linear-gradient(135deg, #312e81 0%, #1e1b4b 55%, #0d0a2a 100%)",
           fontFamily: "Heebo",
           overflow:   "hidden",
+          // Layer 1: establish RTL as the base direction for the entire image.
+          // Satori's UBA paragraph resolver reads this when determining the
+          // base direction of every descendant block that doesn't set its own.
+          direction:   "rtl",
+          unicodeBidi: "embed",
         }}
       >
         {/* ── Decorative glows ─────────────────────────────────────────────── */}
@@ -80,6 +85,12 @@ export default async function Image() {
         />
 
         {/* ── Main content ─────────────────────────────────────────────────── */}
+        {/*
+          Layer 2: repeat RTL on the column container.
+          flexDirection: "column" is unaffected by direction (it stacks items
+          vertically either way). alignItems: "center" centres them on the
+          cross-axis, which is also direction-agnostic. So this is safe to add.
+        */}
         <div
           style={{
             display:        "flex",
@@ -89,6 +100,8 @@ export default async function Image() {
             width:          "100%",
             height:         "100%",
             padding:        "60px 120px",
+            direction:      "rtl",
+            unicodeBidi:    "embed",
           }}
         >
           {/* Logo mark */}
@@ -144,18 +157,39 @@ export default async function Image() {
           />
 
           {/* Hebrew tagline — Heebo has full Hebrew glyph coverage */}
+          {/*
+            Layer 3 (the decisive one): unicodeBidi: "embed" opens a new
+            explicit directional embedding at level 1 (RTL). This tells
+            Satori's UBA that the paragraph base direction for every run
+            of text inside this block is RTL — fixing word order for the
+            neutral comma/space characters between Hebrew words.
+
+            The U+200F (RIGHT-TO-LEFT MARK) prepended to the string is an
+            invisible RTL character that pins the paragraph's "first strong
+            character" to RTL, ensuring correct resolution even if Satori's
+            UBA version ignores the CSS embedding level.
+          */}
           <div
             style={{
-              fontSize:   35,
-              fontWeight: 400,
-              color:      "rgba(199,210,254,1)",
-              textAlign:  "center",
-              maxWidth:   820,
-              lineHeight: 1.45,
-              direction:  "rtl",
+              fontSize:    35,
+              fontWeight:  400,
+              color:       "rgba(199,210,254,1)",
+              textAlign:   "center",
+              maxWidth:    820,
+              lineHeight:  1.45,
+              direction:   "rtl",
+              unicodeBidi: "embed",
+              // Satori needs display:"flex" only when a div has >1 child node.
+              // With a single string expression child we can skip it.
             }}
           >
-            מערכת חוזים, חתימות ותשלומים למתווכים
+            {/*
+              Single string expression = one React child node (Satori-safe).
+              ‏ = RIGHT-TO-LEFT MARK — invisible character that acts as
+              the first strong directional character, pinning UBA paragraph
+              base direction to RTL before any Hebrew or neutral glyph is seen.
+            */}
+            {"‏מערכת חוזים, חתימות ותשלומים למתווכים"}
           </div>
 
           {/* Domain */}
