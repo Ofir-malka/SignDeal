@@ -34,6 +34,19 @@ export async function POST(request: Request) {
   try {
     const result = await requireUserId();
     if (result instanceof NextResponse) return result;
+    const { userId } = result;
+
+    // ── Admin guard ──────────────────────────────────────────────────────────
+    // Set ADMIN_USER_IDS in env as a comma-separated list of allowed user IDs.
+    // When the var is set and non-empty, only those IDs may create templates.
+    // Leave the var unset (or empty) to keep this endpoint open during local dev.
+    const adminIds = (process.env.ADMIN_USER_IDS ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (adminIds.length > 0 && !adminIds.includes(userId)) {
+      return NextResponse.json({ error: "גישה אסורה" }, { status: 403 });
+    }
 
     const body = await request.json();
     const { title, content, templateKey, language } = body;

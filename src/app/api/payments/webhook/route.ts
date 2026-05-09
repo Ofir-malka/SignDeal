@@ -18,10 +18,9 @@ import { sendNotification } from "@/lib/messaging/notify";
  *
  * Idempotent: if Payment row is already PAID, returns 200 without re-processing.
  *
- * TODO (Phase 2 hardening):
- *  - Enforce HMAC signature verification (currently logs mismatch, does not reject)
- *  - Dead-letter queue / retry for DB failures
- *  - Broker notification SMS/email on PAID
+ * Security: HMAC signature verification is fully enforced in production via
+ * RapydPaymentProvider.verifyWebhook(). Set RAPYD_SKIP_SIGNATURE_VERIFICATION=true
+ * only in sandbox/staging Vercel environments — never in production.
  */
 export async function POST(request: Request) {
   const rawBody = await request.text();

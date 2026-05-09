@@ -58,7 +58,7 @@ export default function OnboardingPage() {
       // Re-issue JWT with profileComplete = true so middleware allows / immediately.
       // update() PATCHes /api/auth/session → jwt callback trigger:"update" → new cookie.
       await update({ profileComplete: true, name: fullName.trim() });
-      router.push("/");
+      router.push("/dashboard");
       router.refresh();
     } catch {
       setGeneralError("שגיאת רשת — בדוק חיבור לאינטרנט ונסה שנית");
