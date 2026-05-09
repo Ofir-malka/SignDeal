@@ -7,11 +7,12 @@ export default function robots(): MetadataRoute.Robots {
     rules: [
       {
         userAgent: "*",
-        // Only the legal section is publicly crawlable.
-        // Everything else is behind authentication and should not be indexed.
-        allow:     ["/legal/"],
-        disallow:  [
+        // Public marketing pages are crawlable; everything else is private.
+        // /pricing will be added to allow once the route exists.
+        allow:    ["/", "/legal/"],
+        disallow: [
           "/api/",
+          "/dashboard",
           "/contracts/",
           "/clients/",
           "/payments/",
@@ -22,7 +23,6 @@ export default function robots(): MetadataRoute.Robots {
           "/pay/",
           "/login",
           "/register",
-          "/",
         ],
       },
     ],
