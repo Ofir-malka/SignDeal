@@ -10,6 +10,27 @@ datasource db {
   provider = "postgresql"
 }
 
+// ── Subscription enums ────────────────────────────────────────────────────────
+
+enum UserRole {
+  BROKER   // default — every registered broker
+  ADMIN    // SignDeal staff — grants access to /admin
+}
+
+enum PlanType {
+  STARTER     // Free tier — up to 3 active contracts, no reminders/payments
+  PRO         // Paid tier — unlimited contracts, reminders, payment requests
+  ENTERPRISE  // Custom — reserved for agencies; negotiated terms
+}
+
+enum SubscriptionStatus {
+  TRIALING   // Within 14-day free Pro trial
+  ACTIVE     // Paid and current
+  PAST_DUE   // Payment failed; grace period before downgrade
+  CANCELED   // Canceled by user; access until currentPeriodEnd
+  EXPIRED    // Trial or subscription ended with no active payment method
+}
+
 // ── User (broker) ──────────────────────────────────────────────────────────────
 model User {
   id            String    @id @default(cuid())
@@ -26,14 +47,18 @@ model User {
   image           String?    // avatar URL from Google / Apple
   profileComplete Boolean    @default(false) // true once phone+license+idNumber filled
 
+  // ── SaaS role & plan ──────────────────────────────────────────────────────
+  role            UserRole   @default(BROKER)
+
   createdAt  DateTime    @default(now())
 
   // ── Relations ─────────────────────────────────────────────────────────────
-  contracts  Contract[]
-  activities Activity[]
-  properties Property[]
-  messages   Message[]
-  clients    Client[]
+  contracts     Contract[]
+  activities    Activity[]
+  properties    Property[]
+  messages      Message[]
+  clients       Client[]
+  subscription  Subscription?   // 1-to-1; created at registration
 
   // ── Auth.js adapter relations ─────────────────────────────────────────────
   accounts   Account[]
@@ -361,4 +386,77 @@ model Message {
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// ── Subscription ───────────────────────────────────────────────────────────────
+//
+// One row per User — always exists once a user registers.
+// Phase 1: schema + seeding only.
+// Phase 2: plan limits enforced at API layer.
+// Phase 3: billing provider fills billingCustomerId / billingSubscriptionId via webhook.
+
+model Subscription {
+  id     String @id @default(cuid())
+  userId String @unique                    // 1-to-1; cascade-delete with user
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // ── Plan & status ──────────────────────────────────────────────────────────
+  plan   PlanType           @default(STARTER)
+  status SubscriptionStatus @default(TRIALING)
+
+  // ── Trial ──────────────────────────────────────────────────────────────────
+  // Set to now()+14 days at registration. Null for admin-assigned STARTER rows.
+  trialEndsAt DateTime?
+
+  // ── Billing provider (filled when payment integration goes live) ───────────
+  billingProvider       String?  // "rapyd" | "stripe" — provider slug
+  billingCustomerId     String?  // provider's customer object ID
+  billingSubscriptionId String?  // provider's subscription object ID
+
+  // ── Current billing period (filled by provider webhook) ───────────────────
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+
+  // ── Lifecycle timestamps ───────────────────────────────────────────────────
+  canceledAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  events SubscriptionEvent[]
+
+  @@index([status])           // fast queries: "all TRIALING users"
+  @@index([trialEndsAt])      // fast queries: "trials expiring soon"
+}
+
+// ── SubscriptionEvent ──────────────────────────────────────────────────────────
+//
+// Append-only audit log. Never update or delete rows.
+// Required for billing dispute resolution and admin debugging.
+
+model SubscriptionEvent {
+  id             String       @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  // ── What changed ──────────────────────────────────────────────────────────
+  event      String              // "trial_started" | "upgraded" | "downgraded"
+                                 // | "canceled" | "reactivated" | "expired"
+                                 // | "payment_succeeded" | "payment_failed"
+                                 // | "admin_override"
+  fromPlan   PlanType?
+  toPlan     PlanType?
+  fromStatus SubscriptionStatus?
+  toStatus   SubscriptionStatus?
+
+  // ── Who/what triggered the change ─────────────────────────────────────────
+  source   String  // "registration" | "admin" | "webhook" | "user" | "system"
+  actorId  String? // userId of admin who made the change; null for system/webhook
+
+  // ── Raw context (webhook payload, admin note, etc.) ───────────────────────
+  metadata String? @db.Text // JSON string — keep raw for debugging
+
+  createdAt DateTime @default(now())
+
+  @@index([subscriptionId])   // look up all events for a subscription
+  @@index([createdAt])        // chronological queries
 }

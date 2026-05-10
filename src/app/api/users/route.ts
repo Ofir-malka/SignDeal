@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { sendEmail } from "@/lib/messaging/email-provider";
 import { rateLimit, getRealIp } from "@/lib/rate-limit";
+import { TRIAL_DAYS } from "@/lib/plans";
 
 async function sendWelcomeEmail(fullName: string, email: string): Promise<void> {
   console.log(`[sendWelcomeEmail] sending to=${email}`);
@@ -82,28 +83,63 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "מספר רישיון כבר קיים במערכת" }, { status: 409 });
     }
 
-    // ── Create ────────────────────────────────────────────────────────────────
-    const user = await prisma.user.create({
-      data: {
-        fullName:      fullName!.trim(),
-        email:         email!.trim(),
-        phone:         phone!.trim(),
-        licenseNumber: licenseNumber!.trim(),
-        idNumber:      idNumber!.trim(),
-        logoUrl:         logoUrl?.trim() || null,
-        passwordHash:    await bcrypt.hash(password!.trim(), 10),
-        profileComplete: true,
-      },
-      // idNumber excluded from response — treated as sensitive
-      select: {
-        id:            true,
-        fullName:      true,
-        email:         true,
-        phone:         true,
-        licenseNumber: true,
-        logoUrl:       true,
-        createdAt:     true,
-      },
+    // ── Create user + subscription atomically ─────────────────────────────────
+    // The transaction guarantees that no user ever exists without a Subscription
+    // row. If either insert fails the whole registration is rolled back.
+    const passwordHash = await bcrypt.hash(password!.trim(), 10);
+    const trialEndsAt  = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+
+    const user = await prisma.$transaction(async (tx) => {
+      // 1. Create the user
+      const newUser = await tx.user.create({
+        data: {
+          fullName:      fullName!.trim(),
+          email:         email!.trim(),
+          phone:         phone!.trim(),
+          licenseNumber: licenseNumber!.trim(),
+          idNumber:      idNumber!.trim(),
+          logoUrl:         logoUrl?.trim() || null,
+          passwordHash,
+          profileComplete: true,
+        },
+        // idNumber excluded from response — treated as sensitive
+        select: {
+          id:            true,
+          fullName:      true,
+          email:         true,
+          phone:         true,
+          licenseNumber: true,
+          logoUrl:       true,
+          createdAt:     true,
+        },
+      });
+
+      // 2. Create the subscription — PRO trial for all new registrations
+      const subscription = await tx.subscription.create({
+        data: {
+          userId:      newUser.id,
+          plan:        "PRO",
+          status:      "TRIALING",
+          trialEndsAt,
+        },
+      });
+
+      // 3. Record the audit event
+      await tx.subscriptionEvent.create({
+        data: {
+          subscriptionId: subscription.id,
+          event:          "trial_started",
+          fromPlan:       null,
+          toPlan:         "PRO",
+          fromStatus:     null,
+          toStatus:       "TRIALING",
+          source:         "registration",
+          actorId:        null,
+          metadata:       JSON.stringify({ trialDays: TRIAL_DAYS }),
+        },
+      });
+
+      return newUser;
     });
 
     // await (not void) — Vercel may kill the container before a detached promise runs.
