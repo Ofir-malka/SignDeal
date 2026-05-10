@@ -12,7 +12,10 @@ import type { UsageData } from "@/components/UsageCard";
 // for Starter→Pro and Pro→Enterprise upgrades from the same CTA.
 function navigateToUpgrade(/* targetPlan: "PRO" | "ENTERPRISE" */ ) {
   // TODO: open billing portal / upgrade modal when billing is connected.
-  window.location.href = "/#pricing";
+  // Uses a fully-qualified URL (origin + path + hash) so the browser cannot
+  // resolve this relative to the current route (/dashboard#pricing) and the
+  // middleware never sees a bare "/" path that would redirect back to /dashboard.
+  window.location.assign(`${window.location.origin}/#pricing`);
 }
 
 // ── Banner variant logic ───────────────────────────────────────────────────────
