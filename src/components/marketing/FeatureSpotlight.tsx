@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { GlassCard } from "@/components/marketing/ui/GlassCard";
 import { AnimateIn }  from "@/components/marketing/ui/AnimateIn";
 
@@ -365,6 +366,33 @@ export function FeatureSpotlight() {
           index={i}
         />
       ))}
+
+      {/* Micro CTA — after last spotlight block */}
+      <div className="border-t border-white/10 py-14">
+        <div className="max-w-6xl mx-auto px-6">
+          <AnimateIn delay={0}>
+            <div dir="rtl" className="flex justify-center">
+              <Link
+                href="/register"
+                className="inline-flex items-center gap-2 bg-white/10 border border-white/20
+                           text-white text-sm font-medium px-7 py-3 rounded-xl
+                           hover:bg-white/15 active:scale-[0.98] transition-all"
+              >
+                <svg
+                  width="14" height="14" viewBox="0 0 24 24"
+                  fill="none" stroke="currentColor" strokeWidth="2.5"
+                  strokeLinecap="round" strokeLinejoin="round"
+                  aria-hidden="true"
+                  className="rotate-180"
+                >
+                  <polyline points="9 18 3 12 9 6" />
+                </svg>
+                מוכנים לנסות? התחל חינם
+              </Link>
+            </div>
+          </AnimateIn>
+        </div>
+      </div>
     </div>
   );
 }

@@ -157,18 +157,16 @@ export function FAQSection() {
         <div className="max-w-2xl mx-auto">
           <div
             className="bg-white/5 border border-white/10 rounded-2xl px-6 sm:px-8"
-            role="list"
           >
             {FAQS.map(({ q, a }, i) => (
-              <div key={i} role="listitem">
-                <FAQItem
-                  question={q}
-                  answer={a}
-                  index={i}
-                  isOpen={openIndex === i}
-                  onToggle={() => toggle(i)}
-                />
-              </div>
+              <FAQItem
+                key={i}
+                question={q}
+                answer={a}
+                index={i}
+                isOpen={openIndex === i}
+                onToggle={() => toggle(i)}
+              />
             ))}
           </div>
         </div>

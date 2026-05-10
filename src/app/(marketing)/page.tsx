@@ -9,12 +9,28 @@ import { HowItWorks }        from "@/components/marketing/HowItWorks";
 import { FeatureSpotlight }  from "@/components/marketing/FeatureSpotlight";
 import { PricingSection }    from "@/components/marketing/PricingSection";
 import { FAQSection }        from "@/components/marketing/FAQSection";
+import { FinalCTA }          from "@/components/marketing/FinalCTA";
 import { MarketingFooter }   from "@/components/marketing/MarketingFooter";
 
 export const metadata: Metadata = {
   title:       "SignDeal – ניהול חוזים לסוכני נדל\"ן",
   description: "פלטפורמה לניהול חוזי תיווך, חתימות דיגיטליות וגביית עמלות לסוכני נדל\"ן בישראל.",
   robots:      { index: true, follow: true },
+  openGraph: {
+    title:       "SignDeal – ניהול חוזים לסוכני נדל\"ן",
+    description: "פלטפורמה לניהול חוזי תיווך, חתימות דיגיטליות וגביית עמלות לסוכני נדל\"ן בישראל.",
+    url:         "https://www.signdeal.co.il",
+    siteName:    "SignDeal",
+    locale:      "he_IL",
+    type:        "website",
+    images: [{ url: "/og-image.png", width: 1200, height: 630, alt: "SignDeal" }],
+  },
+  twitter: {
+    card:        "summary_large_image",
+    title:       "SignDeal – ניהול חוזים לסוכני נדל\"ן",
+    description: "פלטפורמה לניהול חוזי תיווך, חתימות דיגיטליות וגביית עמלות לסוכני נדל\"ן בישראל.",
+    images:      ["/og-image.png"],
+  },
 };
 
 /**
@@ -47,6 +63,7 @@ export default function HomePage() {
       <FeatureSpotlight />
       <PricingSection />
       <FAQSection />
+      <FinalCTA />
       <MarketingFooter />
     </div>
   );

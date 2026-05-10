@@ -53,10 +53,16 @@ export function AnimateIn({ children, delay = 0, className = "", from = "bottom"
   // true  → JS has run: hidden classes applied until IntersectionObserver fires.
   const [mounted, setMounted] = useState(false);
   const [visible, setVisible] = useState(false);
+  // When the user prefers reduced motion, skip the transition entirely.
+  const [reducedMotion, setReducedMotion] = useState(false);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+
+    // Detect reduced-motion preference before switching to animated mode.
+    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+    setReducedMotion(mq.matches);
 
     // Switch to animated mode — element will be hidden until IO fires.
     setMounted(true);
@@ -87,6 +93,16 @@ export function AnimateIn({ children, delay = 0, className = "", from = "bottom"
   }
 
   // ── JS / animated path ──────────────────────────────────────────────────
+  // When reduced motion is preferred, skip the fade/slide entirely —
+  // render content at full opacity with no transition class.
+  if (reducedMotion) {
+    return (
+      <div ref={ref} className={className || undefined}>
+        {children}
+      </div>
+    );
+  }
+
   return (
     <div
       ref={ref}
