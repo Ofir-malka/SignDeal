@@ -1,7 +1,19 @@
 "use client";
 
-import Link from "next/link";
 import type { UsageData } from "@/components/UsageCard";
+
+// ── Upgrade navigation ────────────────────────────────────────────────────────
+// Uses a hard browser navigation rather than Next.js client-side routing so
+// the browser natively handles the #pricing hash scroll (client-side routing
+// from /dashboard to /#pricing does not reliably trigger the scroll).
+//
+// FUTURE: replace this with the billing upgrade flow when Stripe/Rapyd is
+// connected. The function signature can accept a targetPlan param so it works
+// for Starter→Pro and Pro→Enterprise upgrades from the same CTA.
+function navigateToUpgrade(/* targetPlan: "PRO" | "ENTERPRISE" */ ) {
+  // TODO: open billing portal / upgrade modal when billing is connected.
+  window.location.href = "/#pricing";
+}
 
 // ── Banner variant logic ───────────────────────────────────────────────────────
 // Returns null when no banner should be shown.
@@ -74,12 +86,13 @@ export function UpgradeBanner({ data }: { data: UsageData | null }) {
       </div>
 
       {/* CTA */}
-      <Link
-        href="/#pricing"
+      <button
+        type="button"
+        onClick={navigateToUpgrade}
         className={`shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap ${copy.btnCl}`}
       >
         שדרג ל-PRO
-      </Link>
+      </button>
     </div>
   );
 }
