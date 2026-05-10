@@ -9,8 +9,9 @@ import { DashboardStats }  from "@/components/DashboardStats";
 import { NeedsAttention }  from "@/components/NeedsAttention";
 import { RecentActivity }  from "@/components/RecentActivity";
 import { UsageCard }       from "@/components/UsageCard";
-import { UpgradeBanner }   from "@/components/UpgradeBanner";
-import type { UsageData }  from "@/components/UsageCard";
+import { UpgradeBanner }       from "@/components/UpgradeBanner";
+import { QuickContractCards }  from "@/components/QuickContractCards";
+import type { UsageData }      from "@/components/UsageCard";
 import type { Contract } from "@/lib/contracts-data";
 import { type ApiContractResponse, apiToContract } from "@/lib/api-contracts";
 
@@ -102,6 +103,9 @@ export default function DashboardPage() {
         <div className="mb-6">
           <UsageCard data={usageData} />
         </div>
+
+        {/* Quick contract type cards */}
+        <QuickContractCards />
 
         {/* Needs attention */}
         <NeedsAttention contracts={contracts} loading={loading} failedNotificationsCount={failedMsgCount} />

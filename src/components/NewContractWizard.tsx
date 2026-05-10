@@ -1272,9 +1272,28 @@ function SuccessScreen({
 
 // ─── Main export ──────────────────────────────────────────────────────────────
 
-export function NewContractWizard() {
-  const [step, setStep] = useState(1);
-  const [data, setData] = useState<FormData>(INITIAL);
+interface WizardProps {
+  /**
+   * Pre-selected contract type from the URL query param `?type=`.
+   * When set the wizard skips step 1 (contract type selection) and opens at step 2.
+   */
+  initialType?: ContractType;
+  /**
+   * Pre-selected deal type from the URL query param `?deal=`.
+   * Only meaningful for contract types that have a deal type (e.g. "exclusivity").
+   */
+  initialDeal?: DealType;
+}
+
+export function NewContractWizard({ initialType, initialDeal }: WizardProps = {}) {
+  // If a contract type was pre-selected (via URL param), start at step 2 so the
+  // user skips the type-selection card and lands directly on client details.
+  const [step, setStep] = useState(initialType ? 2 : 1);
+  const [data, setData] = useState<FormData>({
+    ...INITIAL,
+    ...(initialType ? { contractType: initialType } : {}),
+    ...(initialDeal ? { dealType:     initialDeal } : {}),
+  });
   const [sent, setSent] = useState(false);
   const [createdId, setCreatedId]                         = useState<string | null>(null);
   const [createdSignatureToken, setCreatedSignatureToken] = useState<string>("");
