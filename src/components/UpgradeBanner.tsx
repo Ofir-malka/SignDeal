@@ -11,11 +11,10 @@ import type { UsageData } from "@/components/UsageCard";
 // connected. The function signature can accept a targetPlan param so it works
 // for Starter→Pro and Pro→Enterprise upgrades from the same CTA.
 function navigateToUpgrade(/* targetPlan: "PRO" | "ENTERPRISE" */ ) {
-  // TODO: open billing portal / upgrade modal when billing is connected.
-  // Uses a fully-qualified URL (origin + path + hash) so the browser cannot
-  // resolve this relative to the current route (/dashboard#pricing) and the
-  // middleware never sees a bare "/" path that would redirect back to /dashboard.
-  window.location.assign(`${window.location.origin}/#pricing`);
+  // TODO: replace with billing portal / upgrade modal when billing is connected.
+  // /pricing is in proxy.ts PUBLIC_PREFIXES so authenticated users are NOT
+  // redirected to /dashboard — this is a real public route, not a hash anchor.
+  window.location.assign("/pricing");
 }
 
 // ── Banner variant logic ───────────────────────────────────────────────────────

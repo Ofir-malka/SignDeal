@@ -8,8 +8,7 @@ export default function robots(): MetadataRoute.Robots {
       {
         userAgent: "*",
         // Public marketing pages are crawlable; everything else is private.
-        // /pricing will be added to allow once the route exists.
-        allow:    ["/", "/legal/"],
+        allow:    ["/", "/pricing", "/legal/"],
         disallow: [
           "/api/",
           "/dashboard",

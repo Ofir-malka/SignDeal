@@ -9,7 +9,6 @@ const APP_URL = process.env.APP_BASE_URL ?? "https://www.signdeal.co.il";
  *  • All dashboard/app routes (/dashboard, /contracts, /clients, etc.)
  *  • Auth pages (/login, /register, /onboarding)
  *  • Client-facing utility pages (/contracts/sign/*, /pay/complete)
- *  • /pricing — add when the pricing page route is created
  */
 export default function sitemap(): MetadataRoute.Sitemap {
   return [
@@ -19,6 +18,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified:    new Date("2025-05-01"),
       changeFrequency: "monthly",
       priority:        1.0,
+    },
+
+    // ── Pricing page ──────────────────────────────────────────────────────
+    {
+      url:             `${APP_URL}/pricing`,
+      lastModified:    new Date(),
+      changeFrequency: "monthly",
+      priority:        0.9,
     },
 
     // ── Legal pages ───────────────────────────────────────────────────────
