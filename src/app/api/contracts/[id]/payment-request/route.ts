@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
 import { calculateFees, defaultFeeConfig } from "@/lib/payments/fee-calculator";
@@ -6,6 +6,7 @@ import { getPaymentProvider } from "@/lib/payments";
 import { sendSms } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { rateLimit } from "@/lib/rate-limit";
+import { sendEmail, paymentRequestEmail } from "@/lib/email";
 
 export async function POST(
   request: Request,
@@ -17,6 +18,13 @@ export async function POST(
     const { userId } = result;
 
     const { id } = await params;
+
+    // Fetch broker early — needed for notification copy.
+    const user = await prisma.user.findUnique({
+      where:  { id: userId },
+      select: { fullName: true },
+    });
+    if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
     // ── Rate limit: double-keyed to prevent both per-contract and per-broker flooding
     // 5 requests per contract per hour — enough for retries after provider errors.
@@ -41,7 +49,7 @@ export async function POST(
         propertyAddress: true,
         propertyCity:    true,
         client: {
-          select: { name: true, phone: true, email: true },
+          select: { id: true, name: true, phone: true, email: true },
         },
         payment:         true,   // needed for the PAID early-return
       },
@@ -137,10 +145,27 @@ export async function POST(
 
     // ── Step 6: auto-send payment link via SMS ────────────────────────────────
     // Errors are swallowed — SMS failure must never fail the payment request.
-    await sendPaymentLinkSms(
-      { id: contract.id, userId, propertyAddress: contract.propertyAddress, client: contract.client },
-      { id: updated.id, paymentUrl: updated.paymentUrl },
-    );
+    const notifyContract = {
+      id:              contract.id,
+      userId,
+      clientId:        contract.client.id,
+      propertyAddress: contract.propertyAddress,
+      client:          contract.client,
+    };
+    const notifyPayment = { id: updated.id, paymentUrl: updated.paymentUrl };
+
+    await sendPaymentLinkSms(notifyContract, notifyPayment, user.fullName);
+
+    // Email is sent after the response is flushed; after() keeps Vercel alive.
+    // sendPaymentLinkEmail catches all errors internally.
+    after(async () => {
+      await sendPaymentLinkEmail(
+        notifyContract,
+        notifyPayment,
+        user.fullName,
+        fees.grossAmount,
+      );
+    });
 
     return NextResponse.json(updated, { status: 201 });
   } catch (error) {
@@ -158,7 +183,8 @@ async function sendPaymentLinkSms(
     propertyAddress: string;
     client:          { name: string; phone: string };
   },
-  payment: { id: string; paymentUrl: string | null },
+  payment:    { id: string; paymentUrl: string | null },
+  brokerName: string,
 ): Promise<void> {
   try {
     if (!payment.paymentUrl) return;
@@ -167,7 +193,9 @@ async function sendPaymentLinkSms(
 
     const body =
       `שלום ${contract.client.name},\n` +
-      `לתשלום עמלת התיווך עבור הנכס ${contract.propertyAddress}:\n` +
+      `נשלחה אליך בקשת תשלום מ-${brokerName} עבור:\n` +
+      `${contract.propertyAddress}\n\n` +
+      `לתשלום מאובטח:\n` +
       `${payment.paymentUrl}\n\n` +
       `SignDeal`;
 
@@ -224,5 +252,80 @@ async function sendPaymentLinkSms(
     }
   } catch (err) {
     console.error("[sendPaymentLinkSms] unexpected error:", err);
+  }
+}
+
+// ── Helper: auto-send payment link email (never throws) ──────────────────────
+// Skipped silently when client has no email address.
+
+async function sendPaymentLinkEmail(
+  contract: {
+    id:              string;
+    userId:          string;
+    clientId:        string;
+    propertyAddress: string;
+    client:          { name: string; email: string };
+  },
+  payment:    { id: string; paymentUrl: string | null },
+  brokerName: string,
+  amountNis:  number,
+): Promise<void> {
+  try {
+    if (!payment.paymentUrl) return;
+    if (!contract.client.email.trim()) {
+      console.log(`[sendPaymentLinkEmail] skipped — contract ${contract.id} has no client email`);
+      return;
+    }
+
+    const template = paymentRequestEmail({
+      clientName:      contract.client.name,
+      brokerName,
+      propertyAddress: contract.propertyAddress,
+      amountNis,
+      paymentLink:     payment.paymentUrl,
+    });
+
+    // Create PENDING record before the network call.
+    const message = await prisma.message.create({
+      data: {
+        type:           "PAYMENT_REQUEST_LINK",
+        channel:        "EMAIL",
+        provider:       "resend",
+        body:           template.text,
+        contractId:     contract.id,
+        clientId:       contract.clientId,
+        paymentId:      payment.id,
+        userId:         contract.userId,
+        recipientEmail: contract.client.email.trim(),
+        status:         "PENDING",
+        attempts:       0,
+      },
+    });
+
+    const result = await sendEmail({ to: contract.client.email.trim(), ...template });
+
+    await prisma.message.update({
+      where: { id: message.id },
+      data: result.ok
+        ? {
+            status:            "SENT",
+            providerMessageId: result.messageId ?? null,
+            attempts:          1,
+            lastAttemptAt:     new Date(),
+          }
+        : {
+            status:        "FAILED",
+            failureReason: result.reason,
+            attempts:      1,
+            lastAttemptAt: new Date(),
+          },
+    });
+
+    if (!result.ok) {
+      console.error(`[sendPaymentLinkEmail] email failed for contract ${contract.id}:`, result.reason);
+    }
+  } catch (err) {
+    // Must never propagate — the payment request is already created.
+    console.error("[sendPaymentLinkEmail] unexpected error:", err);
   }
 }
