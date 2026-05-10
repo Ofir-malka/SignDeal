@@ -1275,7 +1275,9 @@ function SuccessScreen({
 interface WizardProps {
   /**
    * Pre-selected contract type from the URL query param `?type=`.
-   * When set the wizard skips step 1 (contract type selection) and opens at step 2.
+   * The wizard always opens at step 1 so the user can still choose a language.
+   * The matching contract-type card is highlighted and "הבא" is immediately
+   * enabled — the user only needs to confirm (or change) the language, then proceed.
    */
   initialType?: ContractType;
   /**
@@ -1286,9 +1288,10 @@ interface WizardProps {
 }
 
 export function NewContractWizard({ initialType, initialDeal }: WizardProps = {}) {
-  // If a contract type was pre-selected (via URL param), start at step 2 so the
-  // user skips the type-selection card and lands directly on client details.
-  const [step, setStep] = useState(initialType ? 2 : 1);
+  // Always start at step 1 so language selection is never skipped.
+  // When initialType is set the correct card is pre-highlighted and "הבא" is
+  // immediately enabled; the user can adjust the language before continuing.
+  const [step, setStep] = useState(1);
   const [data, setData] = useState<FormData>({
     ...INITIAL,
     ...(initialType ? { contractType: initialType } : {}),
