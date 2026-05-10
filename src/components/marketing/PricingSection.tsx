@@ -146,27 +146,32 @@ function PlanCard({ plan, period, index }: { plan: Plan; period: Period; index: 
   const isHighlighted = plan.highlighted;
 
   return (
-    <AnimateIn delay={index * 100} from="bottom" className={plan.badge ? "pt-5 lg:pt-0" : ""}>
+    <AnimateIn delay={index * 100} from="bottom" className="flex flex-col h-full">
+
+      {/*
+        Badge slot — fixed height present on ALL cards so the grid keeps
+        all three card tops aligned. Empty for non-badged plans.
+      */}
+      <div className="h-8 flex items-end justify-center pb-1">
+        {plan.badge && (
+          <span className="bg-violet-500 text-white text-xs font-semibold px-4 py-1 rounded-full shadow-lg shadow-violet-500/30">
+            {plan.badge}
+          </span>
+        )}
+      </div>
+
+      {/* Card — flex-1 so it fills the remainder of the grid cell */}
       <div
         className={[
-          "relative flex flex-col h-full rounded-2xl",
+          "flex flex-col flex-1 rounded-2xl",
           isHighlighted
             ? "ring-2 ring-violet-500/70 shadow-2xl shadow-violet-500/30"
             : "",
         ].join(" ")}
       >
-        {/* "Recommended" badge */}
-        {plan.badge && (
-          <div className="absolute -top-3.5 inset-x-0 flex justify-center">
-            <span className="bg-violet-500 text-white text-xs font-semibold px-4 py-1 rounded-full shadow-lg shadow-violet-500/30">
-              {plan.badge}
-            </span>
-          </div>
-        )}
-
         <GlassCard
           variant={isHighlighted ? "elevated" : "base"}
-          className="flex flex-col h-full p-7 pt-8"
+          className="flex flex-col h-full p-7"
         >
           <div dir="rtl" className="flex flex-col h-full gap-6">
 
