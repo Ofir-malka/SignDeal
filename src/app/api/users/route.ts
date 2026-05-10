@@ -1,28 +1,9 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
-import bcrypt from "bcryptjs";
-import { sendEmail } from "@/lib/messaging/email-provider";
+import { NextResponse, after } from "next/server";
+import { prisma }              from "@/lib/prisma";
+import bcrypt                  from "bcryptjs";
 import { rateLimit, getRealIp } from "@/lib/rate-limit";
-import { TRIAL_DAYS } from "@/lib/plans";
-
-async function sendWelcomeEmail(fullName: string, email: string): Promise<void> {
-  console.log(`[sendWelcomeEmail] sending to=${email}`);
-  try {
-    const result = await sendEmail({
-      to:      email,
-      subject: "ברוך הבא ל-SignDeal!",
-      text:    `שלום ${fullName},\n\nחשבונך ב-SignDeal נוצר בהצלחה.\nמעכשיו תוכל לנהל חוזים, לקוחות ותשלומים בקלות.\n\nצוות SignDeal`,
-      html:    `<p>שלום ${fullName},</p><p>חשבונך ב-SignDeal נוצר בהצלחה.<br>מעכשיו תוכל לנהל חוזים, לקוחות ותשלומים בקלות.</p><p>צוות SignDeal</p>`,
-    });
-    if (result.ok) {
-      console.log(`[sendWelcomeEmail] sent ok — messageId=${result.messageId ?? "n/a"}`);
-    } else {
-      console.error(`[sendWelcomeEmail] failed — reason=${result.reason}`);
-    }
-  } catch (err) {
-    console.error("[sendWelcomeEmail] unexpected error:", err);
-  }
-}
+import { TRIAL_DAYS }           from "@/lib/plans";
+import { sendEmail, welcomeEmail } from "@/lib/email";
 
 // ── POST /api/users ───────────────────────────────────────────────────────────
 // Creates a broker user profile with hashed password.
@@ -142,11 +123,26 @@ export async function POST(request: Request) {
       return newUser;
     });
 
-    // await (not void) — Vercel may kill the container before a detached promise runs.
-    // sendWelcomeEmail catches all errors internally, so this never blocks the 201.
-    console.log(`[POST /api/users] user created id=${user.id} — calling sendWelcomeEmail`);
-    await sendWelcomeEmail(fullName!.trim(), email!.trim());
-    console.log(`[POST /api/users] sendWelcomeEmail returned — responding 201`);
+    // Schedule the welcome email to run AFTER the 201 response is flushed.
+    // after() is Next.js 15+ — the runtime keeps the function alive until the
+    // callback resolves, so the email is not silently dropped on Vercel.
+    // If the send fails (Resend error, missing API key, network blip) the error
+    // is logged but the registration is already confirmed — the user is created.
+    console.log(`[POST /api/users] user created id=${user.id} — welcome email queued via after()`);
+    after(async () => {
+      try {
+        const template = welcomeEmail({ fullName: user.fullName });
+        const result   = await sendEmail({ to: user.email!, ...template });
+        if (result.ok) {
+          console.log(`[POST /api/users] welcome email sent — messageId=${result.messageId ?? "n/a"}`);
+        } else {
+          console.error(`[POST /api/users] welcome email failed — reason=${result.reason}`);
+        }
+      } catch (err) {
+        // Never let an email error surface after the response has been sent.
+        console.error("[POST /api/users] welcome email unexpected error:", err instanceof Error ? err.message : String(err));
+      }
+    });
 
     return NextResponse.json(user, { status: 201 });
 
