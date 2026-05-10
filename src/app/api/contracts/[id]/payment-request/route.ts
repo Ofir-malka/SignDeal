@@ -175,11 +175,13 @@ export async function POST(
 }
 
 // ── Helper: auto-send payment link SMS (never throws) ────────────────────────
+// TODO(queue): Replace with a durable job queue once retry-on-failure is needed.
 
 async function sendPaymentLinkSms(
   contract: {
     id:              string;
     userId:          string;
+    clientId:        string;
     propertyAddress: string;
     client:          { name: string; phone: string };
   },
@@ -207,17 +209,18 @@ async function sendPaymentLinkSms(
       console.log(`[sendPaymentLinkSms] skipped — ${normalizedPhone} is not SMS_TEST_PHONE`);
       await prisma.message.create({
         data: {
-          type:          "PAYMENT_REQUEST_LINK",
-          channel:       "SMS",
-          provider:      "infobip",
+          type:           "PAYMENT_REQUEST_LINK",
+          channel:        "SMS",
+          provider:       "infobip",
           body,
-          contractId:    contract.id,
-          paymentId:     payment.id,
-          userId:        contract.userId,
+          contractId:     contract.id,
+          clientId:       contract.clientId,
+          paymentId:      payment.id,
+          userId:         contract.userId,
           recipientPhone: normalizedPhone,
-          status:        "CANCELED",
-          failureReason: "skipped: phone does not match SMS_TEST_PHONE",
-          attempts:      0,
+          status:         "CANCELED",
+          failureReason:  "skipped: phone does not match SMS_TEST_PHONE",
+          attempts:       0,
         },
       });
       return;
@@ -225,16 +228,17 @@ async function sendPaymentLinkSms(
 
     const message = await prisma.message.create({
       data: {
-        type:          "PAYMENT_REQUEST_LINK",
-        channel:       "SMS",
-        provider:      "infobip",
+        type:           "PAYMENT_REQUEST_LINK",
+        channel:        "SMS",
+        provider:       "infobip",
         body,
-        contractId:    contract.id,
-        paymentId:     payment.id,
-        userId:        contract.userId,
+        contractId:     contract.id,
+        clientId:       contract.clientId,
+        paymentId:      payment.id,
+        userId:         contract.userId,
         recipientPhone: normalizedPhone,
-        status:        "PENDING",
-        attempts:      0,
+        status:         "PENDING",
+        attempts:       0,
       },
     });
 
@@ -257,6 +261,7 @@ async function sendPaymentLinkSms(
 
 // ── Helper: auto-send payment link email (never throws) ──────────────────────
 // Skipped silently when client has no email address.
+// TODO(queue): Replace with a durable job queue once retry-on-failure is needed.
 
 async function sendPaymentLinkEmail(
   contract: {
@@ -291,6 +296,7 @@ async function sendPaymentLinkEmail(
         type:           "PAYMENT_REQUEST_LINK",
         channel:        "EMAIL",
         provider:       "resend",
+        subject:        template.subject,
         body:           template.text,
         contractId:     contract.id,
         clientId:       contract.clientId,

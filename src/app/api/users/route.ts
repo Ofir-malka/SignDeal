@@ -128,6 +128,15 @@ export async function POST(request: Request) {
     // callback resolves, so the email is not silently dropped on Vercel.
     // If the send fails (Resend error, missing API key, network blip) the error
     // is logged but the registration is already confirmed — the user is created.
+    //
+    // NOTE: Unlike other notification flows, the welcome email does NOT write a
+    // Message table record. Welcome emails have no contractId / clientId context,
+    // and adding a userId-only Message row would require schema adjustments to
+    // the Message audit trail. Delivery is tracked via server logs only.
+    // TODO(audit): Write a Message record (channel=EMAIL, type=welcome, userId only)
+    //   once the Message model supports user-scoped records without contract context.
+    // TODO(queue): Replace after() with a durable job queue once retry-on-failure
+    //   or open-rate tracking is required for welcome emails.
     console.log(`[POST /api/users] user created id=${user.id} — welcome email queued via after()`);
     after(async () => {
       try {

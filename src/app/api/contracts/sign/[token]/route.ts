@@ -92,6 +92,7 @@ export async function GET(
 
 // ── Broker notification — fire-and-forget ────────────────────────────────────
 // Notifies the broker by SMS when their client signs. Never throws or blocks.
+// TODO(queue): Replace with a durable job queue once retry-on-failure is needed.
 
 async function sendBrokerSignedSms(
   contract: { id: string; userId: string; clientId: string; propertyAddress: string },
@@ -209,6 +210,7 @@ async function sendBrokerSignedEmail(
         type:           "BROKER_CONTRACT_SIGNED",
         channel:        "EMAIL",
         provider:       "resend",
+        subject:        template.subject,
         body:           template.text,
         contractId:     contract.id,
         clientId:       contract.clientId,
@@ -390,11 +392,13 @@ export async function PATCH(
         propertyAddress: contract.propertyAddress,
       };
 
-      await sendBrokerSignedSms(signingContext, updated.client.name);
-
-      // Email is sent after the response is flushed; after() keeps Vercel alive.
-      // sendBrokerSignedEmail catches all errors internally.
+      // Both broker notifications run AFTER the signing response is flushed so
+      // the client sees their confirmation screen instantly.  after() keeps the
+      // Vercel function alive until the callback resolves.
+      // TODO(queue): Replace with a durable job queue (BullMQ / Inngest) once
+      //   message volume or retry requirements outgrow fire-and-forget.
       after(async () => {
+        await sendBrokerSignedSms(signingContext, updated.client.name);
         await sendBrokerSignedEmail(
           signingContext,
           updated.client.name,

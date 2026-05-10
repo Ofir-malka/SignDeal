@@ -284,6 +284,7 @@ async function notifyBrokerPaid(contractId: string, paymentId: string): Promise<
 // ── Helper: email broker on payment received (never throws) ──────────────────
 // Skipped silently when broker has no email address (shouldn't happen — email is
 // required at registration — but defensive regardless).
+// TODO(queue): Replace with a durable job queue once retry-on-failure is needed.
 
 async function sendBrokerPaidEmail(
   ctx: {
@@ -330,6 +331,7 @@ async function sendBrokerPaidEmail(
         type:           "BROKER_PAYMENT_RECEIVED",
         channel:        "EMAIL",
         provider:       "resend",
+        subject:        template.subject,
         body:           template.text,
         contractId:     ctx.id,
         clientId:       ctx.clientId,

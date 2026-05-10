@@ -185,6 +185,10 @@ export async function processTrialReminders(): Promise<ReminderResult> {
         daysLeft,
       });
 
+      // TODO(queue): Replace inline sendEmail with a durable job queue
+      //   (BullMQ / Inngest) once retry-on-failure is required. The
+      //   SubscriptionEvent idempotency key already handles duplicate prevention
+      //   across retries — no additional dedup logic needed at the queue layer.
       try {
         const result = await sendEmail({ to: user.email, ...template });
 

@@ -13,6 +13,7 @@ import { sendEmail, contractSigningEmail } from "@/lib/email";
 // ─── SMS helper ───────────────────────────────────────────────────────────────
 // Fire-and-forget: never throws, never blocks the HTTP response.
 // All outcomes (SENT, FAILED, CANCELED) are persisted as Message records.
+// TODO(queue): Replace with a durable job queue once retry-on-failure is needed.
 
 async function sendContractSms(
   contract: {
@@ -115,6 +116,8 @@ async function sendContractSms(
 // ─── Email helper ─────────────────────────────────────────────────────────────
 // Fire-and-forget: never throws, never blocks the HTTP response.
 // Skipped silently when client has no email address.
+// TODO(queue): Replace after() + inline send with a durable job queue (BullMQ /
+//   Inngest) once retry-on-failure or delivery guarantees are required.
 
 async function sendContractEmail(
   contract: {
@@ -148,16 +151,17 @@ async function sendContractEmail(
     // still leaves an auditable record.
     const message = await prisma.message.create({
       data: {
-        type:             "CONTRACT_SIGNING_LINK",
-        channel:          "EMAIL",
-        provider:         "resend",
-        body:             template.text,
-        contractId:       contract.id,
-        clientId:         contract.clientId,
-        userId:           contract.userId,
-        recipientEmail:   clientEmail.trim(),
-        status:           "PENDING",
-        attempts:         0,
+        type:           "CONTRACT_SIGNING_LINK",
+        channel:        "EMAIL",
+        provider:       "resend",
+        subject:        template.subject,
+        body:           template.text,
+        contractId:     contract.id,
+        clientId:       contract.clientId,
+        userId:         contract.userId,
+        recipientEmail: clientEmail.trim(),
+        status:         "PENDING",
+        attempts:       0,
       },
     });
 
