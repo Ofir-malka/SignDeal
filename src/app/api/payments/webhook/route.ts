@@ -1,7 +1,8 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getPaymentProvider, WebhookSignatureError } from "@/lib/payments";
 import { sendNotification } from "@/lib/messaging/notify";
+import { sendEmail, paymentReceivedEmail } from "@/lib/email";
 
 /**
  * POST /api/payments/webhook
@@ -208,6 +209,7 @@ export async function POST(request: Request) {
 // ── Helper: broker paid notification ─────────────────────────────────────────
 // Fires after a payment is confirmed PAID. Never throws — errors are swallowed
 // so webhook always returns 200 to the provider.
+// SMS is awaited (fast); email is deferred via after() so it never delays the 200.
 
 async function notifyBrokerPaid(contractId: string, paymentId: string): Promise<void> {
   try {
@@ -220,37 +222,152 @@ async function notifyBrokerPaid(contractId: string, paymentId: string): Promise<
       console.warn(`[notifyBrokerPaid] contract ${contractId} not found`);
       return;
     }
-    if (!contract.user.phone) {
-      console.warn(`[notifyBrokerPaid] broker ${contract.userId} has no phone — skipping SMS`);
+
+    // Use grossAmount (what the client actually paid); fall back to commission if payment
+    // row is unexpectedly absent (defensive — should never happen in PAID state).
+    const amountNis       = contract.payment?.grossAmount ?? contract.commission;
+    const amountFormatted = Math.round(amountNis).toLocaleString("he-IL");
+    const paidAt          = contract.payment?.paidAt ?? new Date();
+
+    // ── SMS to broker ─────────────────────────────────────────────────────────
+    if (contract.user.phone) {
+      const body =
+        `התקבל תשלום עבור:\n` +
+        `${contract.propertyAddress}\n\n` +
+        `סכום:\n` +
+        `₪${amountFormatted}\n\n` +
+        `${contract.client.name} השלים/ה את התשלום בהצלחה.\n\n` +
+        `SignDeal`;
+
+      const smsResult = await sendNotification({
+        type:           "BROKER_PAYMENT_RECEIVED",
+        channel:        "SMS",
+        body,
+        recipientPhone: contract.user.phone,
+        userId:         contract.userId,
+        contractId:     contract.id,
+        clientId:       contract.clientId,
+        paymentId,
+      });
+
+      console.log("[notifyBrokerPaid] SMS result:", {
+        ok:        smsResult.ok,
+        skipped:   smsResult.skipped,
+        messageId: smsResult.messageId,
+        reason:    smsResult.reason,
+      });
+    } else {
+      console.warn(`[notifyBrokerPaid] broker ${contract.userId} has no phone — SMS skipped`);
+    }
+
+    // ── Email to broker — deferred via after() ────────────────────────────────
+    // Runs after the 200 is flushed to Rapyd; sendBrokerPaidEmail never throws.
+    const emailCtx = {
+      id:              contract.id,
+      userId:          contract.userId,
+      clientId:        contract.clientId,
+      propertyAddress: contract.propertyAddress,
+      brokerFullName:  contract.user.fullName,
+      brokerEmail:     contract.user.email,
+      clientName:      contract.client.name,
+    };
+    after(async () => {
+      await sendBrokerPaidEmail(emailCtx, paymentId, amountNis, paidAt);
+    });
+
+  } catch (err) {
+    // Must never propagate — webhook always returns 200
+    console.error("[notifyBrokerPaid] unexpected error:", err);
+  }
+}
+
+// ── Helper: email broker on payment received (never throws) ──────────────────
+// Skipped silently when broker has no email address (shouldn't happen — email is
+// required at registration — but defensive regardless).
+
+async function sendBrokerPaidEmail(
+  ctx: {
+    id:              string;
+    userId:          string;
+    clientId:        string;
+    propertyAddress: string;
+    brokerFullName:  string;
+    brokerEmail:     string;
+    clientName:      string;
+  },
+  paymentId: string,
+  amountNis: number,
+  paidAt:    Date,
+): Promise<void> {
+  try {
+    if (!ctx.brokerEmail.trim()) {
+      console.log(`[sendBrokerPaidEmail] skipped — broker for contract ${ctx.id} has no email`);
       return;
     }
 
-    const commissionShekels = (contract.commission / 100).toLocaleString("he-IL");
-    const body =
-      `SignDeal — התשלום התקבל! ✓\n` +
-      `עמלה של ₪${commissionShekels} עבור ${contract.client.name} (${contract.propertyAddress})\n` +
-      `היכנס למערכת לפרטים.`;
+    const baseUrl      = process.env.APP_BASE_URL?.trim() || "http://localhost:3000";
+    const dashboardUrl = `${baseUrl}/contracts/${ctx.id}`;
 
-    const notifyResult = await sendNotification({
-      type:           "BROKER_PAYMENT_RECEIVED",
-      channel:        "SMS",
-      body,
-      recipientPhone: contract.user.phone,
-      userId:         contract.userId,
-      contractId:     contract.id,
-      clientId:       contract.clientId,
-      paymentId,
+    const receivedAtFormatted = paidAt.toLocaleDateString("he-IL", {
+      day: "numeric", month: "long", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
     });
 
-    console.log("[notifyBrokerPaid] result:", {
-      ok:        notifyResult.ok,
-      skipped:   notifyResult.skipped,
-      messageId: notifyResult.messageId,
-      reason:    notifyResult.reason,
+    const template = paymentReceivedEmail({
+      brokerName:      ctx.brokerFullName,
+      clientName:      ctx.clientName,
+      propertyAddress: ctx.propertyAddress,
+      amountNis,
+      contractId:      ctx.id,
+      receivedAt:      receivedAtFormatted,
+      dashboardUrl,
     });
+
+    // Create PENDING record before network call so a crash mid-flight
+    // still leaves an auditable record.
+    const message = await prisma.message.create({
+      data: {
+        type:           "BROKER_PAYMENT_RECEIVED",
+        channel:        "EMAIL",
+        provider:       "resend",
+        body:           template.text,
+        contractId:     ctx.id,
+        clientId:       ctx.clientId,
+        paymentId,
+        userId:         ctx.userId,
+        recipientEmail: ctx.brokerEmail.trim(),
+        status:         "PENDING",
+        attempts:       0,
+      },
+    });
+
+    const result = await sendEmail({ to: ctx.brokerEmail.trim(), ...template });
+
+    await prisma.message.update({
+      where: { id: message.id },
+      data: result.ok
+        ? {
+            status:            "SENT",
+            providerMessageId: result.messageId ?? null,
+            attempts:          1,
+            lastAttemptAt:     new Date(),
+          }
+        : {
+            status:        "FAILED",
+            failureReason: result.reason,
+            attempts:      1,
+            lastAttemptAt: new Date(),
+          },
+    });
+
+    if (!result.ok) {
+      console.error(`[sendBrokerPaidEmail] email failed for contract ${ctx.id}:`, result.reason);
+    } else {
+      console.log(`[sendBrokerPaidEmail] sent to ${ctx.brokerEmail} — messageId=${result.messageId ?? "n/a"}`);
+    }
   } catch (err) {
-    // Must never propagate — webhook already responded
-    console.error("[notifyBrokerPaid] unexpected error:", err);
+    // Must never propagate — payment is already recorded as PAID.
+    console.error("[sendBrokerPaidEmail] unexpected error:", err);
   }
 }
 
