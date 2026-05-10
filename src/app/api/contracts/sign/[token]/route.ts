@@ -1,9 +1,10 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
 import { sendSms } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { rateLimit, getRealIp } from "@/lib/rate-limit";
+import { sendEmail, contractSignedEmail } from "@/lib/email";
 
 // ── UUID format guard — reject obviously invalid tokens before hitting the DB ─
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -93,7 +94,7 @@ export async function GET(
 // Notifies the broker by SMS when their client signs. Never throws or blocks.
 
 async function sendBrokerSignedSms(
-  contract: { id: string; userId: string; clientId: string },
+  contract: { id: string; userId: string; clientId: string; propertyAddress: string },
   clientName: string,
 ): Promise<void> {
   try {
@@ -104,7 +105,15 @@ async function sendBrokerSignedSms(
     const normalizedPhone = normalizeIsraeliPhone(broker.phone);
     const normalizedTest  = testPhone ? normalizeIsraeliPhone(testPhone) : "";
 
-    const body = `SignDeal — הלקוח ${clientName} חתם על החוזה. היכנס למערכת לפרטים.`;
+    const baseUrl      = process.env.APP_BASE_URL?.trim() || "http://localhost:3000";
+    const contractLink = `${baseUrl}/contracts/${contract.id}`;
+
+    const body =
+      `${clientName} חתם/ה על החוזה עבור:\n` +
+      `${contract.propertyAddress}\n\n` +
+      `לצפייה בחוזה:\n` +
+      `${contractLink}\n\n` +
+      `SignDeal`;
 
     if (normalizedTest && normalizedPhone !== normalizedTest) {
       console.log(`[sendBrokerSignedSms] skipped — ${normalizedPhone} is not SMS_TEST_PHONE`);
@@ -155,6 +164,86 @@ async function sendBrokerSignedSms(
     }
   } catch (err) {
     console.error("[sendBrokerSignedSms] unexpected error:", err);
+  }
+}
+
+// ── Email notification — fire-and-forget ─────────────────────────────────────
+// Sends the broker a "contract signed" confirmation email.
+// Skipped silently when broker has no email address.
+
+async function sendBrokerSignedEmail(
+  contract: { id: string; userId: string; clientId: string; propertyAddress: string },
+  clientName: string,
+  signedAt:   Date,
+): Promise<void> {
+  try {
+    const broker = await prisma.user.findUnique({
+      where:  { id: contract.userId },
+      select: { email: true, fullName: true },
+    });
+    if (!broker?.email) {
+      console.log(`[sendBrokerSignedEmail] skipped — broker for contract ${contract.id} has no email`);
+      return;
+    }
+
+    const baseUrl      = process.env.APP_BASE_URL?.trim() || "http://localhost:3000";
+    const dashboardUrl = `${baseUrl}/contracts/${contract.id}`;
+
+    const signedAtFormatted = signedAt.toLocaleDateString("he-IL", {
+      day: "numeric", month: "long", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
+
+    const template = contractSignedEmail({
+      brokerName:      broker.fullName,
+      clientName,
+      propertyAddress: contract.propertyAddress,
+      contractId:      contract.id,
+      signedAt:        signedAtFormatted,
+      dashboardUrl,
+    });
+
+    // Create PENDING record before the network call.
+    const message = await prisma.message.create({
+      data: {
+        type:           "BROKER_CONTRACT_SIGNED",
+        channel:        "EMAIL",
+        provider:       "resend",
+        body:           template.text,
+        contractId:     contract.id,
+        clientId:       contract.clientId,
+        userId:         contract.userId,
+        recipientEmail: broker.email,
+        status:         "PENDING",
+        attempts:       0,
+      },
+    });
+
+    const result = await sendEmail({ to: broker.email, ...template });
+
+    await prisma.message.update({
+      where: { id: message.id },
+      data: result.ok
+        ? {
+            status:            "SENT",
+            providerMessageId: result.messageId ?? null,
+            attempts:          1,
+            lastAttemptAt:     new Date(),
+          }
+        : {
+            status:        "FAILED",
+            failureReason: result.reason,
+            attempts:      1,
+            lastAttemptAt: new Date(),
+          },
+    });
+
+    if (!result.ok) {
+      console.error(`[sendBrokerSignedEmail] email failed for contract ${contract.id}:`, result.reason);
+    }
+  } catch (err) {
+    // Must never propagate — the contract is already signed.
+    console.error("[sendBrokerSignedEmail] unexpected error:", err);
   }
 }
 
@@ -294,10 +383,24 @@ export async function PATCH(
           userId:     contract.userId,
         },
       });
-      await sendBrokerSignedSms(
-        { id: contract.id, userId: contract.userId, clientId: contract.clientId },
-        updated.client.name,
-      );
+      const signingContext = {
+        id:              contract.id,
+        userId:          contract.userId,
+        clientId:        contract.clientId,
+        propertyAddress: contract.propertyAddress,
+      };
+
+      await sendBrokerSignedSms(signingContext, updated.client.name);
+
+      // Email is sent after the response is flushed; after() keeps Vercel alive.
+      // sendBrokerSignedEmail catches all errors internally.
+      after(async () => {
+        await sendBrokerSignedEmail(
+          signingContext,
+          updated.client.name,
+          updated.signedAt ?? new Date(),
+        );
+      });
     }
 
     // G3.1: Return only signing-safe fields — no signatureToken, userId, signatureIp
