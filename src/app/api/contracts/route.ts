@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendSms } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
@@ -8,6 +8,7 @@ import { canUserCreateContract }  from "@/lib/subscription";
 import { resolveTemplate, buildContext } from "@/lib/contracts/resolve-template";
 import { rateLimit } from "@/lib/rate-limit";
 import { parsePositiveInt, parseNonNegativeInt, parseEnum, firstError } from "@/lib/validate";
+import { sendEmail, contractSigningEmail } from "@/lib/email";
 
 // ─── SMS helper ───────────────────────────────────────────────────────────────
 // Fire-and-forget: never throws, never blocks the HTTP response.
@@ -23,6 +24,7 @@ async function sendContractSms(
   },
   clientPhone: string,
   clientName:  string,
+  brokerName:  string,
 ): Promise<void> {
   try {
     const baseUrl         = process.env.APP_BASE_URL?.trim() || "http://localhost:3000";
@@ -31,10 +33,11 @@ async function sendContractSms(
     const normalizedPhone = normalizeIsraeliPhone(clientPhone);
 
     const body =
-      `שלום,\n` +
-      `קיבלת הסכם לחתימה בקישור:\n` +
+      `שלום ${clientName},\n` +
+      `נשלח אליך חוזה לחתימה מ-${brokerName} דרך SignDeal.\n\n` +
+      `לחתימה על החוזה:\n` +
       `${signingLink}\n\n` +
-      `SignDeal`;
+      `אם יש שאלות ניתן ליצור קשר עם המתווך ישירות.`;
 
     // Safety guard: compare normalized forms so the guard works regardless of
     // how the phone was typed in the wizard vs how SMS_TEST_PHONE is set in .env.
@@ -106,6 +109,86 @@ async function sendContractSms(
   } catch (err) {
     // Must never propagate — the contract was already created successfully.
     console.error("[sendContractSms] unexpected error:", err);
+  }
+}
+
+// ─── Email helper ─────────────────────────────────────────────────────────────
+// Fire-and-forget: never throws, never blocks the HTTP response.
+// Skipped silently when client has no email address.
+
+async function sendContractEmail(
+  contract: {
+    id:              string;
+    signatureToken:  string;
+    propertyAddress: string;
+    userId:          string;
+    clientId:        string;
+  },
+  clientEmail: string,
+  clientName:  string,
+  brokerName:  string,
+): Promise<void> {
+  try {
+    if (!clientEmail.trim()) {
+      console.log(`[sendContractEmail] skipped — contract ${contract.id} has no client email`);
+      return;
+    }
+
+    const baseUrl     = process.env.APP_BASE_URL?.trim() || "http://localhost:3000";
+    const signingLink = `${baseUrl}/contracts/sign/${contract.signatureToken}`;
+
+    const template = contractSigningEmail({
+      clientName,
+      brokerName,
+      propertyAddress: contract.propertyAddress,
+      signingLink,
+    });
+
+    // Create PENDING record before the network call so a crash mid-flight
+    // still leaves an auditable record.
+    const message = await prisma.message.create({
+      data: {
+        type:             "CONTRACT_SIGNING_LINK",
+        channel:          "EMAIL",
+        provider:         "resend",
+        body:             template.text,
+        contractId:       contract.id,
+        clientId:         contract.clientId,
+        userId:           contract.userId,
+        recipientEmail:   clientEmail.trim(),
+        status:           "PENDING",
+        attempts:         0,
+      },
+    });
+
+    const result = await sendEmail({ to: clientEmail.trim(), ...template });
+
+    await prisma.message.update({
+      where: { id: message.id },
+      data: result.ok
+        ? {
+            status:            "SENT",
+            providerMessageId: result.messageId ?? null,
+            attempts:          1,
+            lastAttemptAt:     new Date(),
+          }
+        : {
+            status:        "FAILED",
+            failureReason: result.reason,
+            attempts:      1,
+            lastAttemptAt: new Date(),
+          },
+    });
+
+    if (!result.ok) {
+      console.error(
+        `[sendContractEmail] email failed for contract ${contract.id}:`,
+        result.reason,
+      );
+    }
+  } catch (err) {
+    // Must never propagate — the contract was already created successfully.
+    console.error("[sendContractEmail] unexpected error:", err);
   }
 }
 
@@ -305,7 +388,21 @@ export async function POST(request: Request) {
       { ...contract, signatureToken: contract.signatureToken! },
       client.phone,
       client.name,
+      user.fullName,
     );
+
+    // Send signing-link email after the response is flushed.
+    // after() keeps the Vercel function alive until the callback resolves.
+    // sendContractEmail catches all errors internally and skips silently when
+    // the client has no email address.
+    after(async () => {
+      await sendContractEmail(
+        { ...contract, signatureToken: contract.signatureToken! },
+        client.email,
+        client.name,
+        user.fullName,
+      );
+    });
 
     return NextResponse.json(contract, { status: 201 });
   } catch (error) {
