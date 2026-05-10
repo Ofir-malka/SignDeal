@@ -123,32 +123,61 @@ export async function POST(request: Request) {
       return newUser;
     });
 
-    // Schedule the welcome email to run AFTER the 201 response is flushed.
-    // after() is Next.js 15+ — the runtime keeps the function alive until the
-    // callback resolves, so the email is not silently dropped on Vercel.
-    // If the send fails (Resend error, missing API key, network blip) the error
-    // is logged but the registration is already confirmed — the user is created.
-    //
-    // NOTE: Unlike other notification flows, the welcome email does NOT write a
-    // Message table record. Welcome emails have no contractId / clientId context,
-    // and adding a userId-only Message row would require schema adjustments to
-    // the Message audit trail. Delivery is tracked via server logs only.
-    // TODO(audit): Write a Message record (channel=EMAIL, type=welcome, userId only)
-    //   once the Message model supports user-scoped records without contract context.
+    // Schedule the welcome email + Message audit record AFTER the 201 response
+    // is flushed. after() keeps the Vercel function alive until the callback
+    // resolves, so neither the send nor the audit write is silently dropped.
+    // Any failure inside the callback is caught and logged — registration is
+    // already confirmed and must never be rolled back by a notification error.
     // TODO(queue): Replace after() with a durable job queue once retry-on-failure
     //   or open-rate tracking is required for welcome emails.
     console.log(`[POST /api/users] user created id=${user.id} — welcome email queued via after()`);
     after(async () => {
       try {
         const template = welcomeEmail({ fullName: user.fullName });
-        const result   = await sendEmail({ to: user.email!, ...template });
+
+        // Create PENDING record before the network call so a crash mid-flight
+        // still leaves an auditable row. userId is the only context available
+        // for registration emails (no contractId / clientId / paymentId).
+        const message = await prisma.message.create({
+          data: {
+            type:           "USER_WELCOME",
+            channel:        "EMAIL",
+            provider:       "resend",
+            subject:        template.subject,
+            body:           template.text,
+            userId:         user.id,
+            recipientEmail: user.email!,
+            status:         "PENDING",
+            attempts:       0,
+          },
+        });
+
+        const result = await sendEmail({ to: user.email!, ...template });
+
+        await prisma.message.update({
+          where: { id: message.id },
+          data: result.ok
+            ? {
+                status:            "SENT",
+                providerMessageId: result.messageId ?? null,
+                attempts:          1,
+                lastAttemptAt:     new Date(),
+              }
+            : {
+                status:        "FAILED",
+                failureReason: result.reason,
+                attempts:      1,
+                lastAttemptAt: new Date(),
+              },
+        });
+
         if (result.ok) {
           console.log(`[POST /api/users] welcome email sent — messageId=${result.messageId ?? "n/a"}`);
         } else {
           console.error(`[POST /api/users] welcome email failed — reason=${result.reason}`);
         }
       } catch (err) {
-        // Never let an email error surface after the response has been sent.
+        // Never let an email or audit error surface after the response has been sent.
         console.error("[POST /api/users] welcome email unexpected error:", err instanceof Error ? err.message : String(err));
       }
     });

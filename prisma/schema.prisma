@@ -323,6 +323,7 @@ enum MessageType {
   PAYMENT_REMINDER         // תזכורת לתשלום ללקוח
   BROKER_CONTRACT_SIGNED   // התראה למתווך: לקוח חתם
   BROKER_PAYMENT_RECEIVED  // התראה למתווך: תשלום התקבל
+  USER_WELCOME             // אימייל ברוכים הבאים לאחר הרשמה
 }
 
 // ── MessageTemplate ────────────────────────────────────────────────────────────
