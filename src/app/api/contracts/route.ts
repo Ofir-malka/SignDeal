@@ -3,7 +3,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendSms } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
-import { requireUserId } from "@/lib/require-user";
+import { requireUserId }          from "@/lib/require-user";
+import { canUserCreateContract }  from "@/lib/subscription";
 import { resolveTemplate, buildContext } from "@/lib/contracts/resolve-template";
 import { rateLimit } from "@/lib/rate-limit";
 import { parsePositiveInt, parseNonNegativeInt, parseEnum, firstError } from "@/lib/validate";
@@ -145,6 +146,18 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "יותר מדי חוזים — המתן שעה ונסה שוב" },
         { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
+      );
+    }
+
+    // ── Subscription enforcement ───────────────────────────────────────────────
+    // Checked after auth + rate-limit (both cheaper) and before body parsing.
+    // canUserCreateContract() fetches subscription + active count in at most 2
+    // queries; short-circuits after 1 when subscription is inactive.
+    const usageCheck = await canUserCreateContract(userId);
+    if (!usageCheck.allowed) {
+      return NextResponse.json(
+        { error: usageCheck.reason },   // "SUBSCRIPTION_INACTIVE" | "CONTRACT_LIMIT_REACHED"
+        { status: 403 },
       );
     }
 

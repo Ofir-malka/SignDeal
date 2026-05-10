@@ -31,6 +31,14 @@ export type SubscriptionStatus = "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED"
 /** Number of days in the free Pro trial, applied at registration. */
 export const TRIAL_DAYS = 14;
 
+// ── Plan limit constants ───────────────────────────────────────────────────────
+// Single source of truth for numeric limits used throughout the codebase.
+// ENTERPRISE_LIMIT is Infinity in TypeScript — not JSON-serialisable; callers
+// that write API responses should convert to null (representing "unlimited").
+export const STARTER_LIMIT    = 3;
+export const PRO_LIMIT        = 25;
+export const ENTERPRISE_LIMIT = Infinity;
+
 // ── Feature limits per plan ────────────────────────────────────────────────────
 export interface PlanLimits {
   /**
@@ -58,7 +66,7 @@ export interface PlanLimits {
 
 export const PLAN_LIMITS = {
   STARTER: {
-    maxActiveContracts: 3,
+    maxActiveContracts: STARTER_LIMIT,   // 3
     smsReminders:       false,
     whatsappReminders:  false,
     paymentRequests:    false,
@@ -66,7 +74,7 @@ export const PLAN_LIMITS = {
     prioritySupport:    false,
   },
   PRO: {
-    maxActiveContracts: null,  // unlimited
+    maxActiveContracts: PRO_LIMIT,        // 25
     smsReminders:       true,
     whatsappReminders:  true,
     paymentRequests:    true,
@@ -74,7 +82,7 @@ export const PLAN_LIMITS = {
     prioritySupport:    true,
   },
   ENTERPRISE: {
-    maxActiveContracts: null,
+    maxActiveContracts: null,             // unlimited (null sentinel)
     smsReminders:       true,
     whatsappReminders:  true,
     paymentRequests:    true,

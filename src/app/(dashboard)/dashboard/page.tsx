@@ -8,6 +8,9 @@ import { DealsTable }      from "@/components/DealsTable";
 import { DashboardStats }  from "@/components/DashboardStats";
 import { NeedsAttention }  from "@/components/NeedsAttention";
 import { RecentActivity }  from "@/components/RecentActivity";
+import { UsageCard }       from "@/components/UsageCard";
+import { UpgradeBanner }   from "@/components/UpgradeBanner";
+import type { UsageData }  from "@/components/UsageCard";
 import type { Contract } from "@/lib/contracts-data";
 import { type ApiContractResponse, apiToContract } from "@/lib/api-contracts";
 
@@ -24,14 +27,16 @@ export default function DashboardPage() {
   const [loading, setLoading]               = useState(true);
   const [error, setError]                   = useState<string | null>(null);
   const [failedMsgCount, setFailedMsgCount] = useState(0);
+  const [usageData, setUsageData]           = useState<UsageData | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
-        // Fetch contracts and failed-message count in parallel
-        const [contractsRes, msgsRes] = await Promise.all([
+        // Fetch contracts, failed-message count, and subscription usage in parallel
+        const [contractsRes, msgsRes, usageRes] = await Promise.all([
           fetch("/api/contracts"),
           fetch("/api/messages?status=FAILED&limit=1"),
+          fetch("/api/subscription/usage"),
         ]);
 
         if (!contractsRes.ok) throw new Error("שגיאה בטעינת נתונים");
@@ -41,6 +46,10 @@ export default function DashboardPage() {
         if (msgsRes.ok) {
           const msgsData = await msgsRes.json() as { summary?: { failedCount?: number } };
           setFailedMsgCount(msgsData.summary?.failedCount ?? 0);
+        }
+
+        if (usageRes.ok) {
+          setUsageData(await usageRes.json() as UsageData);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "שגיאה לא ידועה");
@@ -83,8 +92,16 @@ export default function DashboardPage() {
       {/* ── Scrollable main content ──────────────────────────────────────────── */}
       <main className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 sm:py-8">
 
+        {/* Upgrade / subscription alert banner — shown when near or at limit */}
+        <UpgradeBanner data={usageData} />
+
         {/* Stats grid */}
         <DashboardStats contracts={contracts} loading={loading} error={error} />
+
+        {/* Subscription usage card */}
+        <div className="mb-6">
+          <UsageCard data={usageData} />
+        </div>
 
         {/* Needs attention */}
         <NeedsAttention contracts={contracts} loading={loading} failedNotificationsCount={failedMsgCount} />
