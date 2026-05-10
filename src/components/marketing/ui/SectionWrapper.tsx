@@ -15,7 +15,7 @@ export function SectionWrapper({ id, className = "", children }: Props) {
   return (
     <section
       id={id}
-      className={["py-20 sm:py-28", className].filter(Boolean).join(" ")}
+      className={["py-20 sm:py-28 scroll-mt-20", className].filter(Boolean).join(" ")}
     >
       <div className="max-w-6xl mx-auto px-6">
         {children}

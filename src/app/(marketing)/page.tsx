@@ -1,10 +1,12 @@
 import type { Metadata } from "next";
 
-import { NavBar }          from "@/components/marketing/NavBar";
-import { HeroSection }     from "@/components/marketing/HeroSection";
-import { TrustStrip }      from "@/components/marketing/TrustStrip";
-import { ProblemSection }  from "@/components/marketing/ProblemSection";
-import { FeaturesGrid }    from "@/components/marketing/FeaturesGrid";
+import { NavBar }            from "@/components/marketing/NavBar";
+import { HeroSection }       from "@/components/marketing/HeroSection";
+import { TrustStrip }        from "@/components/marketing/TrustStrip";
+import { ProblemSection }    from "@/components/marketing/ProblemSection";
+import { FeaturesGrid }      from "@/components/marketing/FeaturesGrid";
+import { HowItWorks }        from "@/components/marketing/HowItWorks";
+import { FeatureSpotlight }  from "@/components/marketing/FeatureSpotlight";
 
 export const metadata: Metadata = {
   title:       "SignDeal – ניהול חוזים לסוכני נדל\"ן",
@@ -24,8 +26,8 @@ export const metadata: Metadata = {
  *  ✓ TrustStrip
  *  ✓ ProblemSection
  *  ✓ FeaturesGrid
- *  ○ HowItWorks     (step 6)
- *  ○ FeatureSpotlight (step 7)
+ *  ✓ HowItWorks
+ *  ✓ FeatureSpotlight
  *  ○ PricingPreview (step 8)
  *  ○ FAQSection     (step 9)
  *  ○ FinalCTA       (step 10)
@@ -39,6 +41,8 @@ export default function HomePage() {
       <TrustStrip />
       <ProblemSection />
       <FeaturesGrid />
+      <HowItWorks />
+      <FeatureSpotlight />
       {/* future sections go here */}
     </div>
   );
