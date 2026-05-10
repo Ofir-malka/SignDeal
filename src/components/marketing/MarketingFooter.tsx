@@ -77,10 +77,10 @@ export function MarketingFooter() {
           {/* Brand column */}
           <div className="flex flex-col gap-4 lg:col-span-1">
             <LogoMark />
-            <p className="text-sm text-indigo-200/70 leading-relaxed max-w-xs">
+            <p className="text-sm text-indigo-200/80 leading-relaxed max-w-xs">
               פלטפורמה לניהול חוזי תיווך, חתימות דיגיטליות וגביית עמלות — לסוכני נדל״ן ישראלים.
             </p>
-            <p className="text-xs text-indigo-400/60 italic">
+            <p className="text-xs text-indigo-300/70 italic">
               חתמו. גבו. סגרו.
             </p>
           </div>
@@ -93,7 +93,7 @@ export function MarketingFooter() {
                   <li key={href}>
                     <a
                       href={href}
-                      className="text-sm text-indigo-200/70 hover:text-white transition-colors"
+                      className="text-sm text-indigo-200/80 hover:text-white transition-colors"
                     >
                       {label}
                     </a>
@@ -111,7 +111,7 @@ export function MarketingFooter() {
                   <li key={href}>
                     <Link
                       href={href}
-                      className="text-sm text-indigo-200/70 hover:text-white transition-colors"
+                      className="text-sm text-indigo-200/80 hover:text-white transition-colors"
                     >
                       {label}
                     </Link>
@@ -129,7 +129,7 @@ export function MarketingFooter() {
                   <li key={href}>
                     <Link
                       href={href}
-                      className="text-sm text-indigo-200/70 hover:text-white transition-colors"
+                      className="text-sm text-indigo-200/80 hover:text-white transition-colors"
                     >
                       {label}
                     </Link>
@@ -138,7 +138,7 @@ export function MarketingFooter() {
                 <li className="mt-2 pt-2 border-t border-white/10">
                   <a
                     href="mailto:support@signdeal.co.il"
-                    className="text-sm text-indigo-200/70 hover:text-white transition-colors flex items-center gap-2"
+                    className="text-sm text-indigo-200/80 hover:text-white transition-colors flex items-center gap-2"
                   >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
@@ -157,10 +157,10 @@ export function MarketingFooter() {
       {/* ── Bottom bar ────────────────────────────────────────────────── */}
       <div className="border-t border-white/10">
         <div className="max-w-6xl mx-auto px-6 py-5 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-xs text-indigo-400/50 text-center sm:text-right">
+          <p className="text-xs text-indigo-300/60 text-center sm:text-right">
             © {new Date().getFullYear()} SignDeal. כל הזכויות שמורות.
           </p>
-          <p className="text-xs text-indigo-400/40">
+          <p className="text-xs text-indigo-400/60">
             נבנה בישראל 🇮🇱
           </p>
         </div>

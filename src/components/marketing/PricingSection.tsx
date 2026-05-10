@@ -146,12 +146,12 @@ function PlanCard({ plan, period, index }: { plan: Plan; period: Period; index: 
   const isHighlighted = plan.highlighted;
 
   return (
-    <AnimateIn delay={index * 100} from="bottom">
+    <AnimateIn delay={index * 100} from="bottom" className={plan.badge ? "pt-5 lg:pt-0" : ""}>
       <div
         className={[
           "relative flex flex-col h-full rounded-2xl",
           isHighlighted
-            ? "ring-2 ring-violet-500/60 shadow-2xl shadow-violet-500/20"
+            ? "ring-2 ring-violet-500/70 shadow-2xl shadow-violet-500/30"
             : "",
         ].join(" ")}
       >
@@ -178,8 +178,8 @@ function PlanCard({ plan, period, index }: { plan: Plan; period: Period; index: 
               <p className="text-sm text-indigo-300/70">{plan.tagline}</p>
             </div>
 
-            {/* Price */}
-            <div className="flex flex-col gap-1">
+            {/* Price — key=period forces re-mount on toggle → CSS fadeIn plays */}
+            <div key={period} className="flex flex-col gap-1 animate-[priceFadeIn_0.2s_ease-out]">
               <div className="flex items-baseline gap-2">
                 <span className="text-4xl font-bold text-white leading-none">
                   {price}
@@ -332,7 +332,7 @@ export function PricingSection() {
           dir="rtl"
           className="text-center text-xs text-indigo-400/50 mt-8"
         >
-          * תמחור אינדיקטיבי בלבד. המחיר הסופי ייקבע לפני ההשקה הרשמית.
+          * מחירי השקה לתקופת הבטא — עשויים להתעדכן בהמשך.
         </p>
       </AnimateIn>
     </SectionWrapper>

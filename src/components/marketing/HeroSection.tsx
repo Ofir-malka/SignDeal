@@ -47,8 +47,13 @@ export function HeroSection() {
 
           {/* H1 */}
           <AnimateIn delay={100}>
-            <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold text-white tracking-tight leading-tight">
-              חתמו. גבו. סגרו.
+            <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight leading-tight">
+              <span
+                className="bg-gradient-to-l from-white via-white to-violet-300
+                           bg-clip-text text-transparent"
+              >
+                חתמו. גבו. סגרו.
+              </span>
             </h1>
           </AnimateIn>
 
@@ -148,7 +153,7 @@ function DashboardMock() {
   return (
     <div
       aria-hidden="true"
-      className="animate-[float_4s_ease-in-out_infinite]"
+      className="animate-[float_4s_ease-in-out_infinite] will-change-transform"
     >
       <GlassCard variant="elevated" className="p-5 space-y-4 shadow-2xl shadow-black/40">
 
