@@ -7,6 +7,9 @@ import { ProblemSection }    from "@/components/marketing/ProblemSection";
 import { FeaturesGrid }      from "@/components/marketing/FeaturesGrid";
 import { HowItWorks }        from "@/components/marketing/HowItWorks";
 import { FeatureSpotlight }  from "@/components/marketing/FeatureSpotlight";
+import { PricingSection }    from "@/components/marketing/PricingSection";
+import { FAQSection }        from "@/components/marketing/FAQSection";
+import { MarketingFooter }   from "@/components/marketing/MarketingFooter";
 
 export const metadata: Metadata = {
   title:       "SignDeal – ניהול חוזים לסוכני נדל\"ן",
@@ -28,10 +31,9 @@ export const metadata: Metadata = {
  *  ✓ FeaturesGrid
  *  ✓ HowItWorks
  *  ✓ FeatureSpotlight
- *  ○ PricingPreview (step 8)
- *  ○ FAQSection     (step 9)
- *  ○ FinalCTA       (step 10)
- *  ○ MarketingFooter (step 11)
+ *  ✓ PricingSection
+ *  ✓ FAQSection
+ *  ✓ MarketingFooter
  */
 export default function HomePage() {
   return (
@@ -43,7 +45,9 @@ export default function HomePage() {
       <FeaturesGrid />
       <HowItWorks />
       <FeatureSpotlight />
-      {/* future sections go here */}
+      <PricingSection />
+      <FAQSection />
+      <MarketingFooter />
     </div>
   );
 }
