@@ -47,6 +47,25 @@ function isPublicPath(pathname: string): boolean {
 export default auth(function middleware(req) {
   const { pathname } = req.nextUrl;
 
+  // ── Admin paths — fast role guard ─────────────────────────────────────────
+  // JWT role is checked here for a fast redirect; the real security enforcement
+  // happens server-side in the admin layout (server component) and every admin
+  // API route (requireAdmin() re-queries the DB every time).
+  if (pathname.startsWith("/admin")) {
+    if (!req.auth?.user) {
+      // Not authenticated → /login with callbackUrl preserved
+      const url = req.nextUrl.clone();
+      url.pathname = "/login";
+      url.searchParams.set("callbackUrl", pathname);
+      return NextResponse.redirect(url);
+    }
+    if (req.auth.user.role !== "ADMIN") {
+      // Authenticated but not an admin → bounce to dashboard
+      return NextResponse.redirect(new URL("/dashboard", req.url));
+    }
+    // Admin user: fall through so the profile-completeness checks can also run
+  }
+
   // ── 0. Root path — special case ───────────────────────────────────────────
   // Cannot add "/" to PUBLIC_PREFIXES (it would match every path).
   // Unauthenticated users see the marketing homepage at /.
