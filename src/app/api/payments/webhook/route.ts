@@ -223,10 +223,11 @@ async function notifyBrokerPaid(contractId: string, paymentId: string): Promise<
       return;
     }
 
-    // Use grossAmount (what the client actually paid); fall back to commission if payment
-    // row is unexpectedly absent (defensive — should never happen in PAID state).
-    const amountNis       = contract.payment?.grossAmount ?? contract.commission;
-    const amountFormatted = Math.round(amountNis).toLocaleString("he-IL");
+    // grossAmount and commission are both stored in agorot (smallest currency unit).
+    // Divide by 100 to convert to NIS before formatting or passing to email templates.
+    const amountAgorot    = contract.payment?.grossAmount ?? contract.commission;
+    const amountNis       = Math.round(amountAgorot / 100);
+    const amountFormatted = amountNis.toLocaleString("he-IL");
     const paidAt          = contract.payment?.paidAt ?? new Date();
 
     // ── SMS to broker ─────────────────────────────────────────────────────────

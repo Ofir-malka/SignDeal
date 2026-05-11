@@ -103,9 +103,6 @@ export function ContractDealWrapper({
   const [activityLog, setActivityLog]         = useState<string[]>([]);
   const [copied, setCopied]                   = useState(false);
   const [copiedPayUrl, setCopiedPayUrl]       = useState(false);
-  const [sendingPaySms, setSendingPaySms]     = useState(false);
-  const [paySmsResult, setPaySmsResult]       = useState<"sent" | "failed" | null>(null);
-  const [paySmsError, setPaySmsError]         = useState<string | null>(null);
   const copiedTimeoutRef                      = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copiedPayUrlTimeoutRef                = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reminderSentTimeoutRef                = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -143,31 +140,6 @@ export function ContractDealWrapper({
     if (copiedPayUrlTimeoutRef.current) clearTimeout(copiedPayUrlTimeoutRef.current);
     setCopiedPayUrl(true);
     copiedPayUrlTimeoutRef.current = setTimeout(() => setCopiedPayUrl(false), 2000);
-  }
-
-  async function sendPaymentSms() {
-    setSendingPaySms(true);
-    setPaySmsResult(null);
-    setPaySmsError(null);
-    try {
-      const res  = await fetch(`/api/contracts/${c.id}/payment-request/send-sms`, { method: "POST" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setPaySmsResult("failed");
-        setPaySmsError(data.error ?? "שגיאה בשליחת SMS");
-      } else if (data.success) {
-        setPaySmsResult("sent");
-        addActivity("נשלחה בקשת תשלום ב-SMS ללקוח");
-      } else {
-        setPaySmsResult("failed");
-        setPaySmsError(data.reason ?? "שגיאה בשליחת SMS");
-      }
-    } catch {
-      setPaySmsResult("failed");
-      setPaySmsError("שגיאה בשליחת SMS");
-    } finally {
-      setSendingPaySms(false);
-    }
   }
 
   function handleWhatsApp() {
@@ -617,7 +589,7 @@ export function ContractDealWrapper({
               </svg>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-amber-800">בקשת תשלום נוצרה — ממתין לתשלום</p>
+              <p className="text-sm font-semibold text-amber-800">בקשת התשלום נוצרה ונשלחה ללקוח אוטומטית ב-SMS ובמייל</p>
               {localPayment.paymentUrl ? (
                 <>
                   <div className="flex items-center gap-2 mt-2 flex-wrap">
@@ -636,22 +608,7 @@ export function ContractDealWrapper({
                     >
                       {copiedPayUrl ? "הועתק ✓" : "העתק קישור"}
                     </button>
-                    <button
-                      type="button"
-                      onClick={sendPaymentSms}
-                      disabled={sendingPaySms}
-                      className="text-xs px-2 py-1 rounded border border-amber-200 text-amber-700 hover:bg-amber-100 disabled:opacity-50 whitespace-nowrap"
-                    >
-                      {sendingPaySms
-                        ? "שולח..."
-                        : paySmsResult === "sent"
-                        ? "נשלח ✓"
-                        : "שלח ב-SMS"}
-                    </button>
                   </div>
-                  {paySmsResult === "failed" && paySmsError && (
-                    <p className="text-xs text-red-600 mt-1">{paySmsError}</p>
-                  )}
                 </>
               ) : (
                 <p className="text-xs text-amber-600 mt-1">
