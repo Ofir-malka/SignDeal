@@ -14,7 +14,7 @@
  */
 
 import { prisma } from "@/lib/prisma";
-import { sendSms } from "@/lib/messaging/sms-provider";
+import { sendSms, getSmsProviderName } from "@/lib/messaging/sms-provider";
 import { sendEmail } from "@/lib/messaging/email-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 
@@ -122,7 +122,7 @@ export async function sendNotification(params: NotifyParams): Promise<NotifyResu
         );
         const msg = await prisma.message.create({
           data: {
-            type, channel: "SMS", provider: "infobip", body,
+            type, channel: "SMS", provider: getSmsProviderName(), body,
             contractId, clientId, paymentId, userId,
             recipientPhone: normalizedPhone,
             status:        "CANCELED",
@@ -149,7 +149,7 @@ export async function sendNotification(params: NotifyParams): Promise<NotifyResu
 
       const msg = await prisma.message.create({
         data: {
-          type, channel: "SMS", provider: "infobip", body,
+          type, channel: "SMS", provider: getSmsProviderName(), body,
           contractId, clientId, paymentId, userId,
           recipientPhone: normalizedPhone,
           status:   "PENDING",
