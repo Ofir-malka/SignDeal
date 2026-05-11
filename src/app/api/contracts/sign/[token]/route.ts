@@ -1,7 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
-import { sendSms } from "@/lib/messaging/sms-provider";
+import { sendSms, getSmsProviderName } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { rateLimit, getRealIp } from "@/lib/rate-limit";
 import { sendEmail, contractSignedEmail } from "@/lib/email";
@@ -122,7 +122,7 @@ async function sendBrokerSignedSms(
         data: {
           type:           "BROKER_CONTRACT_SIGNED",
           channel:        "SMS",
-          provider:       "infobip",
+          provider:       getSmsProviderName(),
           body,
           contractId:     contract.id,
           clientId:       contract.clientId,
@@ -140,7 +140,7 @@ async function sendBrokerSignedSms(
       data: {
         type:           "BROKER_CONTRACT_SIGNED",
         channel:        "SMS",
-        provider:       "infobip",
+        provider:       getSmsProviderName(),
         body,
         contractId:     contract.id,
         clientId:       contract.clientId,

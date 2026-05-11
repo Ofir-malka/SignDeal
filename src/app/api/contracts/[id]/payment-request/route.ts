@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
 import { calculateFees, defaultFeeConfig } from "@/lib/payments/fee-calculator";
 import { getPaymentProvider } from "@/lib/payments";
-import { sendSms } from "@/lib/messaging/sms-provider";
+import { sendSms, getSmsProviderName } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { rateLimit } from "@/lib/rate-limit";
 import { sendEmail, paymentRequestEmail } from "@/lib/email";
@@ -211,7 +211,7 @@ async function sendPaymentLinkSms(
         data: {
           type:           "PAYMENT_REQUEST_LINK",
           channel:        "SMS",
-          provider:       "infobip",
+          provider:       getSmsProviderName(),
           body,
           contractId:     contract.id,
           clientId:       contract.clientId,
@@ -230,7 +230,7 @@ async function sendPaymentLinkSms(
       data: {
         type:           "PAYMENT_REQUEST_LINK",
         channel:        "SMS",
-        provider:       "infobip",
+        provider:       getSmsProviderName(),
         body,
         contractId:     contract.id,
         clientId:       contract.clientId,

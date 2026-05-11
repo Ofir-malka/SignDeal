@@ -1,7 +1,7 @@
 import { randomUUID } from "crypto";
 import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { sendSms } from "@/lib/messaging/sms-provider";
+import { sendSms, getSmsProviderName } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { requireUserId }          from "@/lib/require-user";
 import { canUserCreateContract }  from "@/lib/subscription";
@@ -51,7 +51,7 @@ async function sendContractSms(
         data: {
           type:           "CONTRACT_SIGNING_LINK",
           channel:        "SMS",
-          provider:       "infobip",
+          provider:       getSmsProviderName(),
           body,
           contractId:     contract.id,
           clientId:       contract.clientId,
@@ -71,7 +71,7 @@ async function sendContractSms(
       data: {
         type:           "CONTRACT_SIGNING_LINK",
         channel:        "SMS",
-        provider:       "infobip",
+        provider:       getSmsProviderName(),
         body,
         contractId:     contract.id,
         clientId:       contract.clientId,
