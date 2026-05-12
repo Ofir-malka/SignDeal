@@ -8,6 +8,7 @@ import {
   PROPERTY_TYPE_LABELS,
   PROPERTY_LISTING_TYPE_LABELS,
 } from "@/lib/api-properties";
+import { parsePropertyAddress } from "@/lib/format-address";
 
 // ─── Type badge palette ───────────────────────────────────────────────────────
 
@@ -45,6 +46,10 @@ function PropertyCard({
   const hasAnyMeta = p.rooms != null || p.floor != null || p.sizeSqm != null;
   const [del, setDel] = useState<DeleteState>({ phase: "idle" });
 
+  // Decode encoded address — never expose raw "street||floor||apt" to the UI
+  const { address: displayAddress, floor: addrFloor, apartment: addrApt } =
+    parsePropertyAddress(p.address);
+
   async function handleDelete() {
     setDel({ phase: "deleting" });
     try {
@@ -66,8 +71,12 @@ function PropertyCard({
       {/* Header: address + type badge */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <p className="font-semibold text-gray-900 text-sm leading-snug">{p.address}</p>
-          <p className="text-xs text-gray-500 mt-0.5">{p.city}</p>
+          <p className="font-semibold text-gray-900 text-sm leading-snug">{displayAddress}</p>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {p.city}
+            {addrFloor     ? ` · קומה ${addrFloor}`     : ""}
+            {addrApt       ? ` · דירה ${addrApt}`       : ""}
+          </p>
         </div>
         <div className="shrink-0 flex flex-col items-end gap-1.5">
           <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${badge.bg} ${badge.text}`}>
@@ -258,11 +267,41 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
 }
 
 // ─── New property modal ───────────────────────────────────────────────────────
+//
+// Structured address fields — same format as NewContractForm.
+// Built address: "<street> <houseNumber>||<floor>||<apartment>"
+// If floor+apartment are empty: "<street> <houseNumber>" (legacy-compatible).
 
 const MODAL_INITIAL = {
-  address: "", city: "", type: "APARTMENT", listingType: "RENTAL",
-  rooms: "", floor: "", sizeSqm: "", askingPrice: "",
+  street:      "",
+  houseNumber: "",
+  floor:       "",
+  apartment:   "",
+  city:        "",
+  type:        "APARTMENT",
+  listingType: "RENTAL",
+  rooms:       "",
+  sizeSqm:     "",
+  askingPrice: "",
 };
+
+/** Mirrors buildPropertyAddress in NewContractForm. */
+function buildAddress(f: typeof MODAL_INITIAL): string {
+  const street = f.street.trim();
+  if (!street) return "";
+  const num   = f.houseNumber.trim();
+  const floor = f.floor.trim();
+  const apt   = f.apartment.trim();
+  const base  = num ? `${street} ${num}` : street;
+  if (!floor && !apt) return base;
+  return `${base}||${floor}||${apt}`;
+}
+
+// Shared input className to avoid repetition
+const INPUT_CLS =
+  "w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 " +
+  "placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 " +
+  "focus:border-transparent transition-all";
 
 function NewPropertyModal({
   onClose,
@@ -272,29 +311,50 @@ function NewPropertyModal({
   onCreated: (p: Property) => void;
 }) {
   const [form, setForm]         = useState(MODAL_INITIAL);
+  const [fieldErrors, setFE]    = useState<Record<string, string>>({});
   const [submitting, setSubmit] = useState(false);
   const [error, setError]       = useState<string | null>(null);
 
-  const set = (patch: Partial<typeof MODAL_INITIAL>) =>
+  const set = (patch: Partial<typeof MODAL_INITIAL>) => {
     setForm((prev) => ({ ...prev, ...patch }));
+    // Clear field-level errors on change
+    const keys = Object.keys(patch) as (keyof typeof MODAL_INITIAL)[];
+    if (keys.some((k) => fieldErrors[k])) {
+      setFE((prev) => {
+        const next = { ...prev };
+        keys.forEach((k) => delete next[k]);
+        return next;
+      });
+    }
+  };
 
-  const canSubmit = !!(form.address.trim() && form.city.trim() && form.type);
+  function validate(): Record<string, string> {
+    const e: Record<string, string> = {};
+    if (!form.street.trim()) e.street = "שם רחוב הוא שדה חובה";
+    if (!form.city.trim())   e.city   = "עיר היא שדה חובה";
+    return e;
+  }
 
   async function handleSubmit() {
-    if (!canSubmit) return;
+    const errs = validate();
+    if (Object.keys(errs).length > 0) { setFE(errs); return; }
+
     setSubmit(true);
     setError(null);
     try {
+      const address  = buildAddress(form);
+      const floorNum = form.floor.trim() ? parseInt(form.floor.trim(), 10) : null;
+
       const res = await fetch("/api/properties", {
-        method: "POST",
+        method:  "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          address:     form.address.trim(),
+          address,
           city:        form.city.trim(),
           type:        form.type,
           listingType: form.listingType,
           rooms:       form.rooms      ? Number(form.rooms)      : null,
-          floor:       form.floor      ? Number(form.floor)      : null,
+          floor:       Number.isInteger(floorNum) ? floorNum     : null,
           sizeSqm:     form.sizeSqm    ? Number(form.sizeSqm)    : null,
           askingPrice: form.askingPrice
             ? Math.round(Number(form.askingPrice.replace(/,/g, "")) * 100)
@@ -324,7 +384,7 @@ function NewPropertyModal({
       className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
       onClick={handleBackdrop}
     >
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" dir="rtl">
 
         {/* Modal header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
@@ -336,6 +396,7 @@ function NewPropertyModal({
             type="button"
             onClick={onClose}
             className="text-gray-400 hover:text-gray-600 transition-colors"
+            aria-label="סגור"
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
@@ -346,50 +407,103 @@ function NewPropertyModal({
         {/* Form */}
         <div className="px-6 py-5 space-y-5">
 
-          {/* Required fields */}
+          {/* ── Address section (structured) ── */}
           <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">פרטי חובה</p>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">כתובת הנכס</p>
             <div className="space-y-3">
+
+              {/* Street — full width, required */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">כתובת</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  שם רחוב <span className="text-red-400">*</span>
+                </label>
                 <input
                   type="text"
-                  placeholder="רחוב הרצל 12, דירה 3"
-                  value={form.address}
-                  onChange={(e) => set({ address: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                  placeholder="רוטשילד"
+                  value={form.street}
+                  onChange={(e) => set({ street: e.target.value })}
+                  className={[INPUT_CLS, fieldErrors.street ? "border-red-300 ring-1 ring-red-300" : ""].join(" ")}
                 />
+                {fieldErrors.street && (
+                  <p className="text-xs text-red-600 mt-1">{fieldErrors.street}</p>
+                )}
               </div>
-              <div className="grid grid-cols-2 gap-3">
+
+              {/* House number · Floor · Apartment — 3 columns */}
+              <div className="grid grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">עיר</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">מספר בית</label>
                   <input
                     type="text"
-                    placeholder="תל אביב"
-                    value={form.city}
-                    onChange={(e) => set({ city: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                    placeholder="42"
+                    value={form.houseNumber}
+                    onChange={(e) => set({ houseNumber: e.target.value })}
+                    className={INPUT_CLS}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">סוג נכס</label>
-                  <select
-                    value={form.type}
-                    onChange={(e) => set({ type: e.target.value })}
-                    className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                  >
-                    {Object.entries(PROPERTY_TYPE_LABELS).map(([key, label]) => (
-                      <option key={key} value={key}>{label}</option>
-                    ))}
-                  </select>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">קומה</label>
+                  <input
+                    type="text"
+                    placeholder="4"
+                    value={form.floor}
+                    onChange={(e) => set({ floor: e.target.value })}
+                    className={INPUT_CLS}
+                  />
                 </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">דירה</label>
+                  <input
+                    type="text"
+                    placeholder="8"
+                    value={form.apartment}
+                    onChange={(e) => set({ apartment: e.target.value })}
+                    className={INPUT_CLS}
+                  />
+                </div>
+              </div>
+
+              {/* City — required */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  עיר <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="תל אביב"
+                  value={form.city}
+                  onChange={(e) => set({ city: e.target.value })}
+                  className={[INPUT_CLS, fieldErrors.city ? "border-red-300 ring-1 ring-red-300" : ""].join(" ")}
+                />
+                {fieldErrors.city && (
+                  <p className="text-xs text-red-600 mt-1">{fieldErrors.city}</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Property classification ── */}
+          <div>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">סיווג נכס</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">סוג נכס</label>
+                <select
+                  value={form.type}
+                  onChange={(e) => set({ type: e.target.value })}
+                  className={INPUT_CLS}
+                >
+                  {Object.entries(PROPERTY_TYPE_LABELS).map(([key, label]) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">ייעוד</label>
                 <select
                   value={form.listingType}
                   onChange={(e) => set({ listingType: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                  className={INPUT_CLS}
                 >
                   {Object.entries(PROPERTY_LISTING_TYPE_LABELS).map(([key, label]) => (
                     <option key={key} value={key}>{label}</option>
@@ -399,7 +513,7 @@ function NewPropertyModal({
             </div>
           </div>
 
-          {/* Optional fields */}
+          {/* ── Optional details ── */}
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">פרטים נוספים (אופציונלי)</p>
             <div className="grid grid-cols-2 gap-3">
@@ -412,19 +526,7 @@ function NewPropertyModal({
                   min="0"
                   value={form.rooms}
                   onChange={(e) => set({ rooms: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">קומה</label>
-                <input
-                  type="number"
-                  placeholder="4"
-                  step="1"
-                  min="0"
-                  value={form.floor}
-                  onChange={(e) => set({ floor: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                  className={INPUT_CLS}
                 />
               </div>
               <div>
@@ -435,17 +537,17 @@ function NewPropertyModal({
                   min="0"
                   value={form.sizeSqm}
                   onChange={(e) => set({ sizeSqm: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                  className={INPUT_CLS}
                 />
               </div>
-              <div>
+              <div className="col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">מחיר מבוקש (₪)</label>
                 <input
                   type="text"
                   placeholder="3,500,000"
                   value={form.askingPrice}
                   onChange={(e) => set({ askingPrice: e.target.value })}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                  className={INPUT_CLS}
                 />
               </div>
             </div>
@@ -470,7 +572,7 @@ function NewPropertyModal({
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={!canSubmit || submitting}
+            disabled={submitting}
             className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold px-6 py-2.5 rounded-lg shadow-sm shadow-indigo-200 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {submitting ? (
