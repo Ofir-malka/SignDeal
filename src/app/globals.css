@@ -13,6 +13,11 @@ body {
 * {
   box-sizing: border-box;
 }
+/* Smooth anchor scrolling — overridden to auto by the reduced-motion block below */
+html {
+  scroll-behavior: smooth;
+}
+
 /* Pricing period toggle — price value fade-in on mount */
 @keyframes priceFadeIn {
   from { opacity: 0; transform: translateY(-5px); }
