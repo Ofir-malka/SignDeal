@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { SectionWrapper } from "@/components/marketing/ui/SectionWrapper";
 import { GlassCard }      from "@/components/marketing/ui/GlassCard";
 import { SectionBadge }   from "@/components/marketing/ui/SectionBadge";
@@ -132,6 +133,29 @@ export function FeaturesGrid() {
           </AnimateIn>
         ))}
       </div>
+
+      {/* Micro CTA */}
+      <AnimateIn delay={120}>
+        <div dir="rtl" className="flex justify-center mt-12">
+          <Link
+            href="/register"
+            className="inline-flex items-center gap-2 bg-white/10 border border-white/20
+                       text-white text-sm font-medium px-7 py-3 rounded-xl
+                       hover:bg-white/15 active:scale-[0.98] transition-all"
+          >
+            <svg
+              width="14" height="14" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" strokeWidth="2.5"
+              strokeLinecap="round" strokeLinejoin="round"
+              aria-hidden="true"
+              className="rotate-180"
+            >
+              <polyline points="9 18 3 12 9 6" />
+            </svg>
+            התחל חינם עכשיו
+          </Link>
+        </div>
+      </AnimateIn>
     </SectionWrapper>
   );
 }

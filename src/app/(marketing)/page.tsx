@@ -7,6 +7,7 @@ import { ProblemSection }      from "@/components/marketing/ProblemSection";
 import { ComparisonSection }   from "@/components/marketing/ComparisonSection";
 import { FeaturesGrid }        from "@/components/marketing/FeaturesGrid";
 import { HowItWorks }          from "@/components/marketing/HowItWorks";
+import { ProductShowcase }     from "@/components/marketing/ProductShowcase";
 import { FeatureSpotlight }    from "@/components/marketing/FeatureSpotlight";
 import { SocialProof }         from "@/components/marketing/SocialProof";
 import { PaymentSpotlight }    from "@/components/marketing/PaymentSpotlight";
@@ -92,22 +93,23 @@ const jsonLd = {
  *  • Updated title, description, keywords, canonical
  *  • Added JSON-LD SoftwareApplication schema
  *
- * Sections (Phase 3 order):
+ * Sections (Phase 4 order):
  *  ✓ NavBar
  *  ✓ HeroSection         — contract-lifecycle mock UI
  *  ✓ TrustStrip          — 4 concrete workflow signals
  *  ✓ ProblemSection
- *  ✓ ComparisonSection   — NEW: before/after old vs SignDeal
+ *  ✓ ComparisonSection   — before/after old vs SignDeal
  *  ✓ FeaturesGrid
- *  ✓ HowItWorks          — polished: gradient badges, GlassCard steps, detail chips
- *  ✓ FeatureSpotlight
+ *  ✓ HowItWorks          — gradient badges, GlassCard steps, detail chips
+ *  ✓ ProductShowcase     — NEW: 4-panel interactive product walkthrough
+ *  ✓ FeatureSpotlight    — 4 deep-dive blocks with mock UIs
  *  ✓ SocialProof         — 3 broker testimonials
  *  ✓ PaymentSpotlight    — fee-collection hook + flow mock
  *  ✓ PricingSection
  *  ✓ FAQSection
- *  ✓ FinalCTA            — premium: layered glows, stronger buttons
+ *  ✓ FinalCTA            — layered glows, gradient headline, stronger buttons
  *  ✓ MarketingFooter
- *  ✓ MobileStickyCTA     — NEW: fixed bottom bar, mobile-only
+ *  ✓ MobileStickyCTA     — fixed bottom bar, mobile-only
  */
 export default function HomePage() {
   return (
@@ -126,6 +128,7 @@ export default function HomePage() {
         <ComparisonSection />
         <FeaturesGrid />
         <HowItWorks />
+        <ProductShowcase />
         <FeatureSpotlight />
         <SocialProof />
         <PaymentSpotlight />
