@@ -1,18 +1,20 @@
 import type { Metadata } from "next";
 
-import { NavBar }             from "@/components/marketing/NavBar";
-import { HeroSection }        from "@/components/marketing/HeroSection";
-import { TrustStrip }         from "@/components/marketing/TrustStrip";
-import { ProblemSection }     from "@/components/marketing/ProblemSection";
-import { FeaturesGrid }       from "@/components/marketing/FeaturesGrid";
-import { HowItWorks }         from "@/components/marketing/HowItWorks";
-import { FeatureSpotlight }   from "@/components/marketing/FeatureSpotlight";
-import { SocialProof }        from "@/components/marketing/SocialProof";
-import { PaymentSpotlight }   from "@/components/marketing/PaymentSpotlight";
-import { PricingSection }     from "@/components/marketing/PricingSection";
-import { FAQSection }         from "@/components/marketing/FAQSection";
-import { FinalCTA }           from "@/components/marketing/FinalCTA";
-import { MarketingFooter }    from "@/components/marketing/MarketingFooter";
+import { NavBar }              from "@/components/marketing/NavBar";
+import { HeroSection }         from "@/components/marketing/HeroSection";
+import { TrustStrip }          from "@/components/marketing/TrustStrip";
+import { ProblemSection }      from "@/components/marketing/ProblemSection";
+import { ComparisonSection }   from "@/components/marketing/ComparisonSection";
+import { FeaturesGrid }        from "@/components/marketing/FeaturesGrid";
+import { HowItWorks }          from "@/components/marketing/HowItWorks";
+import { FeatureSpotlight }    from "@/components/marketing/FeatureSpotlight";
+import { SocialProof }         from "@/components/marketing/SocialProof";
+import { PaymentSpotlight }    from "@/components/marketing/PaymentSpotlight";
+import { PricingSection }      from "@/components/marketing/PricingSection";
+import { FAQSection }          from "@/components/marketing/FAQSection";
+import { FinalCTA }            from "@/components/marketing/FinalCTA";
+import { MarketingFooter }     from "@/components/marketing/MarketingFooter";
+import { MobileStickyCTA }     from "@/components/marketing/MobileStickyCTA";
 
 // ── Page constants ─────────────────────────────────────────────────────────────
 const SITE_URL    = "https://www.signdeal.co.il";
@@ -90,20 +92,22 @@ const jsonLd = {
  *  • Updated title, description, keywords, canonical
  *  • Added JSON-LD SoftwareApplication schema
  *
- * Sections (Phase 2 order):
+ * Sections (Phase 3 order):
  *  ✓ NavBar
- *  ✓ HeroSection       — contract-lifecycle mock UI
- *  ✓ TrustStrip        — 4 concrete workflow signals
+ *  ✓ HeroSection         — contract-lifecycle mock UI
+ *  ✓ TrustStrip          — 4 concrete workflow signals
  *  ✓ ProblemSection
+ *  ✓ ComparisonSection   — NEW: before/after old vs SignDeal
  *  ✓ FeaturesGrid
- *  ✓ HowItWorks
+ *  ✓ HowItWorks          — polished: gradient badges, GlassCard steps, detail chips
  *  ✓ FeatureSpotlight
- *  ✓ SocialProof       — NEW: 3 broker testimonials
- *  ✓ PaymentSpotlight  — NEW: fee-collection hook + flow mock
+ *  ✓ SocialProof         — 3 broker testimonials
+ *  ✓ PaymentSpotlight    — fee-collection hook + flow mock
  *  ✓ PricingSection
  *  ✓ FAQSection
- *  ✓ FinalCTA
+ *  ✓ FinalCTA            — premium: layered glows, stronger buttons
  *  ✓ MarketingFooter
+ *  ✓ MobileStickyCTA     — NEW: fixed bottom bar, mobile-only
  */
 export default function HomePage() {
   return (
@@ -119,6 +123,7 @@ export default function HomePage() {
         <HeroSection />
         <TrustStrip />
         <ProblemSection />
+        <ComparisonSection />
         <FeaturesGrid />
         <HowItWorks />
         <FeatureSpotlight />
@@ -128,6 +133,8 @@ export default function HomePage() {
         <FAQSection />
         <FinalCTA />
         <MarketingFooter />
+        {/* Mobile sticky CTA — client component, renders after hydration */}
+        <MobileStickyCTA />
       </div>
     </>
   );
