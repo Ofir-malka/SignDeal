@@ -1,16 +1,18 @@
 import type { Metadata } from "next";
 
-import { NavBar }            from "@/components/marketing/NavBar";
-import { HeroSection }       from "@/components/marketing/HeroSection";
-import { TrustStrip }        from "@/components/marketing/TrustStrip";
-import { ProblemSection }    from "@/components/marketing/ProblemSection";
-import { FeaturesGrid }      from "@/components/marketing/FeaturesGrid";
-import { HowItWorks }        from "@/components/marketing/HowItWorks";
-import { FeatureSpotlight }  from "@/components/marketing/FeatureSpotlight";
-import { PricingSection }    from "@/components/marketing/PricingSection";
-import { FAQSection }        from "@/components/marketing/FAQSection";
-import { FinalCTA }          from "@/components/marketing/FinalCTA";
-import { MarketingFooter }   from "@/components/marketing/MarketingFooter";
+import { NavBar }             from "@/components/marketing/NavBar";
+import { HeroSection }        from "@/components/marketing/HeroSection";
+import { TrustStrip }         from "@/components/marketing/TrustStrip";
+import { ProblemSection }     from "@/components/marketing/ProblemSection";
+import { FeaturesGrid }       from "@/components/marketing/FeaturesGrid";
+import { HowItWorks }         from "@/components/marketing/HowItWorks";
+import { FeatureSpotlight }   from "@/components/marketing/FeatureSpotlight";
+import { SocialProof }        from "@/components/marketing/SocialProof";
+import { PaymentSpotlight }   from "@/components/marketing/PaymentSpotlight";
+import { PricingSection }     from "@/components/marketing/PricingSection";
+import { FAQSection }         from "@/components/marketing/FAQSection";
+import { FinalCTA }           from "@/components/marketing/FinalCTA";
+import { MarketingFooter }    from "@/components/marketing/MarketingFooter";
 
 // ── Page constants ─────────────────────────────────────────────────────────────
 const SITE_URL    = "https://www.signdeal.co.il";
@@ -88,17 +90,19 @@ const jsonLd = {
  *  • Updated title, description, keywords, canonical
  *  • Added JSON-LD SoftwareApplication schema
  *
- * Sections:
- *  ✓ NavBar          — "מוצר" anchor added
- *  ✓ HeroSection     — new H1, subheadline, 3-stat strip
- *  ✓ TrustStrip
+ * Sections (Phase 2 order):
+ *  ✓ NavBar
+ *  ✓ HeroSection       — contract-lifecycle mock UI
+ *  ✓ TrustStrip        — 4 concrete workflow signals
  *  ✓ ProblemSection
  *  ✓ FeaturesGrid
  *  ✓ HowItWorks
  *  ✓ FeatureSpotlight
- *  ✓ PricingSection  — Pro visual polish, trial line
- *  ✓ FAQSection      — 2 new questions
- *  ✓ FinalCTA        — new copy + WhatsApp CTA
+ *  ✓ SocialProof       — NEW: 3 broker testimonials
+ *  ✓ PaymentSpotlight  — NEW: fee-collection hook + flow mock
+ *  ✓ PricingSection
+ *  ✓ FAQSection
+ *  ✓ FinalCTA
  *  ✓ MarketingFooter
  */
 export default function HomePage() {
@@ -118,6 +122,8 @@ export default function HomePage() {
         <FeaturesGrid />
         <HowItWorks />
         <FeatureSpotlight />
+        <SocialProof />
+        <PaymentSpotlight />
         <PricingSection />
         <FAQSection />
         <FinalCTA />

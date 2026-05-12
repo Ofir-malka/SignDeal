@@ -178,31 +178,44 @@ export function HeroSection() {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Decorative dashboard preview — pure Tailwind, no real data.
+   Decorative contract-lifecycle mock — pure Tailwind, no real data.
+   Shows the full SignDeal workflow in a single card:
+     contract created → SMS sent → signed → payment collected
    Float keyframe defined in globals.css.
 ───────────────────────────────────────────────────────────────────────── */
 
-const MOCK_ROWS = [
+const LIFECYCLE_STEPS = [
   {
-    name:     "יוסי כהן",
-    property: "דירה ברחוב הרצל 12",
-    amount:   "₪8,500",
-    status:   "ממתין לחתימה",
-    badge:    "bg-amber-400/20 text-amber-300 border-amber-400/30",
+    label:  "חוזה נשלח לחתימה",
+    sub:    "SMS נשלח ליוסי כהן",
+    time:   "10:00",
+    done:   true,
+    dotCls: "bg-violet-400",
+    textCls:"text-violet-300",
   },
   {
-    name:     "מיכל לוי",
-    property: "משרד בתל אביב",
-    amount:   "₪12,000",
-    status:   "שולם ✓",
-    badge:    "bg-emerald-400/20 text-emerald-300 border-emerald-400/30",
+    label:  "לקוח חתם",
+    sub:    "חתימה דיגיטלית אומתה",
+    time:   "10:14",
+    done:   true,
+    dotCls: "bg-blue-400",
+    textCls:"text-blue-300",
   },
   {
-    name:     "דוד אברהם",
-    property: "דירת 4 חדרים, ירושלים",
-    amount:   "₪9,200",
-    status:   "נחתם",
-    badge:    "bg-violet-400/20 text-violet-300 border-violet-400/30",
+    label:  "בקשת תשלום נשלחה",
+    sub:    "לינק מאובטח ב-SMS",
+    time:   "10:15",
+    done:   true,
+    dotCls: "bg-amber-400",
+    textCls:"text-amber-300",
+  },
+  {
+    label:  "עמלה ₪12,000 התקבלה",
+    sub:    "הכסף בדרך אליך ✓",
+    time:   "10:31",
+    done:   true,
+    dotCls: "bg-emerald-400",
+    textCls:"text-emerald-300",
   },
 ] as const;
 
@@ -212,59 +225,69 @@ function DashboardMock() {
       aria-hidden="true"
       className="animate-[float_4s_ease-in-out_infinite] will-change-transform"
     >
-      <GlassCard variant="elevated" className="p-5 space-y-4 shadow-2xl shadow-black/40">
+      <GlassCard variant="elevated" className="p-5 shadow-2xl shadow-black/40">
+        <div dir="rtl" className="space-y-4">
 
-        {/* Card header */}
-        <div className="flex items-center justify-between" dir="rtl">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-white/10 border border-white/20 rounded-md flex items-center justify-center">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
+          {/* Card header */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 bg-white/10 border border-white/20 rounded-md flex items-center justify-center">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              </div>
+              <span className="text-white text-xs font-semibold">SignDeal</span>
             </div>
-            <span className="text-white text-xs font-semibold">SignDeal</span>
+            <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/30 font-medium">
+              הושלם ✓
+            </span>
           </div>
-          <span className="text-indigo-300/70 text-xs">3 חוזים פעילים</span>
-        </div>
 
-        {/* Divider */}
-        <div className="border-t border-white/10" />
+          {/* Contract identity */}
+          <div className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5">
+            <p className="text-white text-xs font-semibold">חוזה תיווך — יוסי כהן</p>
+            <p className="text-indigo-300/60 text-[11px] mt-0.5">רוטשילד 15, תל אביב · עמלה ₪12,000</p>
+          </div>
 
-        {/* Contract rows */}
-        <div className="space-y-2.5" dir="rtl">
-          {MOCK_ROWS.map((row) => (
-            <div
-              key={row.name}
-              className="flex items-center justify-between bg-white/5 rounded-xl px-3 py-2.5 gap-3
-                         hover:bg-white/8 transition-colors"
-            >
-              {/* Left: name + property */}
-              <div className="min-w-0 flex-1 text-right">
-                <p className="text-white text-xs font-semibold truncate">{row.name}</p>
-                <p className="text-indigo-300/60 text-[11px] truncate">{row.property}</p>
+          {/* Lifecycle timeline */}
+          <div className="space-y-0 relative">
+            {LIFECYCLE_STEPS.map((step, i) => (
+              <div key={step.label} className="relative flex items-start gap-2.5 pb-3 last:pb-0">
+                {/* Connector line */}
+                {i < LIFECYCLE_STEPS.length - 1 && (
+                  <div
+                    className="absolute right-[9px] top-4 bottom-0 w-px bg-white/10"
+                    aria-hidden="true"
+                  />
+                )}
+                {/* Dot */}
+                <div className={`relative z-10 mt-0.5 w-[18px] h-[18px] rounded-full ${step.dotCls}/20 border border-current flex items-center justify-center shrink-0 ${step.textCls}`}>
+                  <div className={`w-1.5 h-1.5 rounded-full ${step.dotCls}`} />
+                </div>
+                {/* Text */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-1">
+                    <p className={`text-[11px] font-semibold ${step.textCls}`}>{step.label}</p>
+                    <span className="text-[10px] text-indigo-400/70 shrink-0">{step.time}</span>
+                  </div>
+                  <p className="text-[10px] text-indigo-400/60 mt-0.5">{step.sub}</p>
+                </div>
               </div>
+            ))}
+          </div>
 
-              {/* Right: status + amount */}
-              <div className="flex flex-col items-end gap-1 shrink-0">
-                <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${row.badge}`}>
-                  {row.status}
-                </span>
-                <span className="text-white/50 text-[11px]">{row.amount}</span>
-              </div>
-            </div>
-          ))}
-        </div>
+          {/* Footer */}
+          <div className="pt-1 border-t border-white/10 flex items-center justify-between">
+            <button className="text-xs text-violet-400 font-medium flex items-center gap-1">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true">
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              חוזה חדש
+            </button>
+            <span className="text-indigo-400/50 text-[11px]">31 דק׳ מחוזה לתשלום</span>
+          </div>
 
-        {/* Card footer action */}
-        <div className="flex items-center justify-between pt-1 border-t border-white/10" dir="rtl">
-          <button className="text-xs text-violet-400 font-medium flex items-center gap-1">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            חוזה חדש
-          </button>
-          <span className="text-indigo-400/50 text-[11px]">עודכן כרגע</span>
         </div>
       </GlassCard>
     </div>
