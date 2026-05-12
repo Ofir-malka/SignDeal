@@ -27,6 +27,8 @@ import { GlassCard }  from "@/components/marketing/ui/GlassCard";
 const HERO_STATS = [
   {
     label: "3 דקות לחוזה",
+    /* subtle tick: rotates 8° then snaps back every 3.5 s */
+    iconAnim: "animate-[hero-clock-tick_3.5s_ease-in-out_infinite]",
     icon: (
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" strokeWidth="2.5"
@@ -37,6 +39,8 @@ const HERO_STATS = [
   },
   {
     label: "חתימה ב-SMS",
+    /* gentle 2.5 s float nudge */
+    iconAnim: "animate-[hero-sms-bounce_2.5s_ease-in-out_infinite]",
     icon: (
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" strokeWidth="2.5"
@@ -47,6 +51,8 @@ const HERO_STATS = [
   },
   {
     label: "תשלום מאובטח",
+    /* subtle lift + tilt every 4 s */
+    iconAnim: "animate-[hero-card-tilt_4s_ease-in-out_infinite]",
     icon: (
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" strokeWidth="2.5"
@@ -104,19 +110,21 @@ export function HeroSection() {
         }}
       />
 
-      {/* Central violet radial glow */}
+      {/* Central violet radial glow — slow opacity breathe */}
       <div
         aria-hidden="true"
         className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
       >
-        <div className="w-[700px] h-[700px] bg-violet-600/15 rounded-full blur-3xl" />
+        <div className="w-[700px] h-[700px] bg-violet-600/15 rounded-full blur-3xl
+                        animate-[hero-glow-breathe_9s_ease-in-out_infinite]" />
       </div>
 
-      {/* Top-right accent glow */}
+      {/* Top-right accent glow — offset phase so it doesn't sync with centre */}
       <div
         aria-hidden="true"
         className="absolute -top-24 -right-24 w-[480px] h-[480px]
                    bg-violet-500/[0.07] rounded-full blur-3xl pointer-events-none select-none"
+        style={{ animation: "hero-glow-breathe 12s 3.5s ease-in-out infinite" }}
       />
 
       {/* Bottom section blend */}
@@ -178,9 +186,10 @@ export function HeroSection() {
                            bg-white text-indigo-700 font-black text-sm
                            px-7 py-4 rounded-xl
                            ring-1 ring-white/30
-                           hover:bg-indigo-50 hover:shadow-[0_0_24px_rgba(139,92,246,0.35)]
-                           active:scale-[0.98]
-                           transition-all shadow-xl shadow-black/25"
+                           hover:scale-[1.02] hover:bg-indigo-50
+                           hover:shadow-[0_0_32px_rgba(139,92,246,0.4)]
+                           active:scale-[0.97]
+                           transition-all duration-200 ease-out shadow-xl shadow-black/25"
               >
                 התחל חינם — ללא כרטיס אשראי
                 <svg
@@ -200,9 +209,10 @@ export function HeroSection() {
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2
                            bg-white/[0.07] border border-white/15 text-white/80 font-medium text-sm
                            px-7 py-4 rounded-xl
-                           hover:bg-white/[0.12] hover:text-white hover:border-white/25
-                           active:scale-[0.98]
-                           transition-all"
+                           hover:scale-[1.02] hover:bg-white/[0.12]
+                           hover:text-white hover:border-white/25
+                           active:scale-[0.97]
+                           transition-all duration-200 ease-out"
               >
                 צפה איך זה עובד
                 <svg
@@ -226,16 +236,22 @@ export function HeroSection() {
                          bg-white/[0.04] border border-white/[0.09]
                          overflow-hidden"
             >
-              {HERO_STATS.map(({ label, icon }, i) => (
+              {HERO_STATS.map(({ label, icon, iconAnim }, i) => (
                 <span
                   key={label}
                   className={[
                     "flex items-center gap-1.5 px-4 py-2.5",
-                    "transition-colors hover:bg-white/[0.05]",
+                    "transition-colors duration-200 hover:bg-white/[0.05]",
                     i > 0 ? "border-r border-white/[0.09]" : "",
                   ].join(" ")}
                 >
-                  <span className="text-violet-400 flex-shrink-0">{icon}</span>
+                  {/* Icon wrapper carries the micro-animation */}
+                  <span
+                    className={`text-violet-400 flex-shrink-0 inline-flex will-change-transform ${iconAnim}`}
+                    aria-hidden="true"
+                  >
+                    {icon}
+                  </span>
                   <span className="text-sm font-medium text-indigo-200/80 whitespace-nowrap">{label}</span>
                 </span>
               ))}
@@ -253,24 +269,36 @@ export function HeroSection() {
         {/* ── Mock UI column — relative anchor for floating chips ── */}
         <div className="relative flex-1 w-full max-w-sm lg:max-w-md">
 
-          {/* Floating live-status chips — desktop only, aria-hidden, not animated */}
-          {HERO_CHIPS.map(({ label, dot, color, cls }) => (
-            <div
-              key={label}
-              aria-hidden="true"
-              className={[
-                "hidden lg:flex items-center gap-2 absolute z-20",
-                "bg-indigo-900/90 border border-white/[0.12] backdrop-blur-md",
-                "rounded-xl px-3 py-2 shadow-lg shadow-black/40",
-                "text-xs font-semibold",
-                color,
-                cls,
-              ].join(" ")}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 animate-pulse ${dot}`} />
-              {label}
-            </div>
-          ))}
+          {/* Floating live-status chips — desktop only, aria-hidden.
+               Each chip drifts at a different duration + phase so they
+               never move in lockstep (avoids mechanical feel).           */}
+          {HERO_CHIPS.map(({ label, dot, color, cls }, chipIdx) => {
+            // Different drift durations + start offsets per chip
+            const DRIFT_STYLES = [
+              { animation: "hero-drift 5s ease-in-out infinite" },
+              { animation: "hero-drift 6.5s 1.3s ease-in-out infinite" },
+              { animation: "hero-drift 4.5s 2.7s ease-in-out infinite" },
+            ] as const;
+            return (
+              <div
+                key={label}
+                aria-hidden="true"
+                className={[
+                  "hidden lg:flex items-center gap-2 absolute z-20",
+                  "bg-indigo-900/90 border border-white/[0.12] backdrop-blur-md",
+                  "rounded-xl px-3 py-2 shadow-lg shadow-black/40",
+                  "will-change-transform",
+                  "text-xs font-semibold",
+                  color,
+                  cls,
+                ].join(" ")}
+                style={DRIFT_STYLES[chipIdx]}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 animate-pulse ${dot}`} />
+                {label}
+              </div>
+            );
+          })}
 
           {/* Mock — float animation wraps only the frame, not the chips */}
           <AnimateIn delay={250} from="left">
@@ -333,12 +361,15 @@ function DashboardMock() {
       <div className="absolute -inset-8 rounded-[2.5rem] bg-violet-600/[0.11] blur-3xl pointer-events-none" />
       <div className="absolute -inset-2 rounded-3xl bg-indigo-500/[0.07] blur-xl pointer-events-none" />
 
-      {/* ── Browser / app frame ── */}
+      {/* ── Browser / app frame — subtle border/glow brightens on hover ── */}
       <div
         className="relative rounded-2xl overflow-hidden
                    border border-white/[0.14]
                    shadow-[0_28px_60px_-8px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.04)]
-                   bg-indigo-950/90 backdrop-blur-xl"
+                   bg-indigo-950/90 backdrop-blur-xl
+                   transition-[border-color,box-shadow] duration-500
+                   hover:border-white/[0.24]
+                   hover:shadow-[0_28px_60px_-8px_rgba(0,0,0,0.7),0_0_28px_rgba(139,92,246,0.12),0_0_0_1px_rgba(255,255,255,0.07)]"
       >
         {/* Chrome bar */}
         <div className="flex items-center gap-3 px-4 py-3 bg-white/[0.04] border-b border-white/[0.08]">
@@ -405,10 +436,18 @@ function DashboardMock() {
                 <p className="text-indigo-300/60 text-[11px] mt-0.5">רוטשילד 15, תל אביב · עמלה ₪12,000</p>
               </div>
 
-              {/* Lifecycle timeline */}
+              {/* Lifecycle timeline — rows stagger in sequentially on load.
+                   Rows use animation-fill-mode:both so they stay hidden
+                   until their delay fires, then hold visible state.
+                   Base offset (200ms) lets the card entrance start first. */}
               <div className="space-y-0 relative">
                 {LIFECYCLE_STEPS.map((step, i) => (
-                  <div key={step.label} className="relative flex items-start gap-2.5 pb-3 last:pb-0">
+                  <div
+                    key={step.label}
+                    className="relative flex items-start gap-2.5 pb-3 last:pb-0
+                               animate-[hero-row-in_0.5s_ease-out_both]"
+                    style={{ animationDelay: `${200 + i * 190}ms` }}
+                  >
                     {/* Connector line */}
                     {i < LIFECYCLE_STEPS.length - 1 && (
                       <div

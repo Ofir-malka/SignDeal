@@ -36,6 +36,49 @@ body {
   }
 }
 
+/* ── Hero section motion polish ────────────────────────────────────────────
+   All animations use transform / opacity only — GPU composited, no layout.
+   The global reduced-motion @media below collapses every duration to 0.01ms
+   and limits iterations to 1, so all looping animations degrade gracefully
+   to a single imperceptible frame and then hold their final state.
+─────────────────────────────────────────────────────────────────────────── */
+
+/* Timeline row stagger — one-shot reveal with fill-mode:both */
+@keyframes hero-row-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+/* Clock icon: tick forward 8° then snap back — simulates a hand sweep */
+@keyframes hero-clock-tick {
+  0%, 40%, 100% { transform: rotate(0deg); }
+  50%, 90%      { transform: rotate(8deg); }
+}
+
+/* SMS bubble icon: gentle float nudge */
+@keyframes hero-sms-bounce {
+  0%, 100% { transform: translateY(0);      }
+  50%      { transform: translateY(-2.5px); }
+}
+
+/* Credit card icon: very subtle lift + tilt — "pick up a card" feel */
+@keyframes hero-card-tilt {
+  0%, 100% { transform: rotate(0deg)    scale(1);    }
+  50%      { transform: rotate(-1.5deg) scale(1.06); }
+}
+
+/* Floating status chips: slow independent vertical drift */
+@keyframes hero-drift {
+  0%, 100% { transform: translateY(0);    }
+  50%      { transform: translateY(-5px); }
+}
+
+/* Background glow layers: slow opacity breathing for depth */
+@keyframes hero-glow-breathe {
+  0%, 100% { opacity: 1;    }
+  50%      { opacity: 0.55; }
+}
+
 /* Respect reduced-motion preference — stop float & all transitions */
 @media (prefers-reduced-motion: reduce) {
   *,
