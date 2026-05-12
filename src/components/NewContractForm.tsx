@@ -39,6 +39,7 @@ interface ApiProperty {
   id:          string;
   address:     string;
   city:        string;
+  floor:       number | null;  // null when not set
   askingPrice: number | null;  // agorot; null when not set
   listingType: string;
 }
@@ -50,19 +51,26 @@ type DealType       = "SALE" | "RENTAL";
 type CommissionMode = "fixed" | "percent";
 
 interface FormState {
-  language:        Lang;
-  clientName:      string;
-  clientPhone:     string;
-  clientEmail:     string;
-  clientIdNumber:  string;
-  skipEmailId:     boolean;
-  propertyAddress: string;
-  propertyCity:    string;
-  dealType:        DealType;
-  priceNis:        string;
-  commissionMode:  CommissionMode;
-  commissionNis:   string;
-  commissionPct:   string;
+  language:          Lang;
+  clientName:        string;
+  clientPhone:       string;
+  clientEmail:       string;
+  clientIdNumber:    string;
+  skipEmailId:       boolean;
+  // ── Structured property address ───────────────────────────────────────────
+  // Built into a single readable string before sending to the API.
+  // When an existing property is selected via the picker, `propertyStreet`
+  // receives the full stored address and the other sub-fields are left empty.
+  propertyStreet:    string;   // street name (required)
+  propertyNumber:    string;   // building number — can contain letters, e.g. "15א"
+  propertyFloor:     string;   // optional; integer-parseable
+  propertyApartment: string;   // optional; apartment / unit identifier
+  propertyCity:      string;
+  dealType:          DealType;
+  priceNis:          string;
+  commissionMode:    CommissionMode;
+  commissionNis:     string;
+  commissionPct:     string;
 }
 
 type Stage =
@@ -76,19 +84,22 @@ interface FieldError { [key: string]: string }
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const INITIAL: FormState = {
-  language:        "HE",
-  clientName:      "",
-  clientPhone:     "",
-  clientEmail:     "",
-  clientIdNumber:  "",
-  skipEmailId:     false,
-  propertyAddress: "",
-  propertyCity:    "",
-  dealType:        "SALE",
-  priceNis:        "",
-  commissionMode:  "percent",
-  commissionNis:   "",
-  commissionPct:   "",
+  language:          "HE",
+  clientName:        "",
+  clientPhone:       "",
+  clientEmail:       "",
+  clientIdNumber:    "",
+  skipEmailId:       false,
+  propertyStreet:    "",
+  propertyNumber:    "",
+  propertyFloor:     "",
+  propertyApartment: "",
+  propertyCity:      "",
+  dealType:          "SALE",
+  priceNis:          "",
+  commissionMode:    "percent",
+  commissionNis:     "",
+  commissionPct:     "",
 };
 
 const LANGS: { id: Lang; flag: string; label: string }[] = [
@@ -106,6 +117,27 @@ function parseNis(raw: string): number {
 
 function fmtNis(agorot: number): string {
   return Math.round(agorot / 100).toLocaleString("he-IL");
+}
+
+/** Build a single readable Hebrew address string from the structured form fields.
+ *  Sent as `propertyAddress` to POST /api/contracts and POST /api/properties.
+ *
+ *  Examples:
+ *    street="הרצל"   number="15" floor="3" apt="8" → "רחוב הרצל 15, קומה 3, דירה 8"
+ *    street="הרצל"   number="15"                    → "רחוב הרצל 15"
+ *    street="שדרות רוטשילד"                          → "רחוב שדרות רוטשילד"
+ */
+function buildPropertyAddress(f: FormState): string {
+  const street = f.propertyStreet.trim();
+  if (!street) return "";
+  const num   = f.propertyNumber.trim();
+  const floor = f.propertyFloor.trim();
+  const apt   = f.propertyApartment.trim();
+
+  const parts: string[] = [num ? `רחוב ${street} ${num}` : `רחוב ${street}`];
+  if (floor) parts.push(`קומה ${floor}`);
+  if (apt)   parts.push(`דירה ${apt}`);
+  return parts.join(", ");
 }
 
 function calcCommissionAgorot(f: FormState): number {
@@ -283,13 +315,32 @@ function ClientPicker({
 }) {
   const picker = usePicker<ApiClient>("/api/clients");
 
-  const filtered = picker.items.filter((c) => {
-    const q = picker.query.toLowerCase();
-    return (
-      c.name.toLowerCase().includes(q) ||
-      c.phone.replace(/\D/g, "").includes(q.replace(/\D/g, ""))
-    );
-  });
+  // ── Ranked search ────────────────────────────────────────────────────────────
+  // Scoring (higher = better match):
+  //   4 — name startsWith query
+  //   3 — phone digits startsWith query digits
+  //   2 — name includes query
+  //   1 — phone digits includes query digits
+  // Items with score 0 are filtered out. Empty query shows all items unsorted.
+  const q    = picker.query.trim().toLowerCase();
+  const qDig = q.replace(/\D/g, "");   // digits only (empty when query has none)
+
+  const filtered = q === ""
+    ? picker.items
+    : picker.items
+        .map((c) => {
+          const name  = c.name.toLowerCase();
+          const phone = c.phone.replace(/\D/g, "");
+          let score = 0;
+          if (name.startsWith(q))                   score = 4;
+          else if (qDig && phone.startsWith(qDig))  score = 3;
+          else if (name.includes(q))                score = 2;
+          else if (qDig && phone.includes(qDig))    score = 1;
+          return { c, score };
+        })
+        .filter(({ score }) => score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map(({ c }) => c);
 
   return (
     <div className="mb-4">
@@ -414,13 +465,31 @@ function PropertyPicker({
 }) {
   const picker = usePicker<ApiProperty>("/api/properties");
 
-  const filtered = picker.items.filter((p) => {
-    const q = picker.query.toLowerCase();
-    return (
-      p.address.toLowerCase().includes(q) ||
-      p.city.toLowerCase().includes(q)
-    );
-  });
+  // ── Ranked search ────────────────────────────────────────────────────────────
+  // Scoring (higher = better match):
+  //   4 — address startsWith query
+  //   3 — city startsWith query
+  //   2 — address includes query
+  //   1 — city includes query
+  // Items with score 0 are filtered out. Empty query shows all items unsorted.
+  const q = picker.query.trim().toLowerCase();
+
+  const filtered = q === ""
+    ? picker.items
+    : picker.items
+        .map((p) => {
+          const addr = p.address.toLowerCase();
+          const city = p.city.toLowerCase();
+          let score = 0;
+          if (addr.startsWith(q))      score = 4;
+          else if (city.startsWith(q)) score = 3;
+          else if (addr.includes(q))   score = 2;
+          else if (city.includes(q))   score = 1;
+          return { p, score };
+        })
+        .filter(({ score }) => score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map(({ p }) => p);
 
   const LISTING_LABEL: Record<string, string> = {
     SALE:   "למכירה",
@@ -770,9 +839,15 @@ export function NewContractForm() {
   function handlePropertySelect(p: ApiProperty) {
     setForm((prev) => ({
       ...prev,
-      propertyAddress: p.address,
-      propertyCity:    p.city,
-      // Prefill price only if askingPrice is set; leave existing value otherwise
+      // Full stored address goes into the street field; sub-fields stay empty.
+      // Structured parsing is intentionally skipped — addresses in the DB can
+      // be free-form text from older records; better to show as-is.
+      propertyStreet:    p.address,
+      propertyNumber:    "",
+      propertyFloor:     p.floor != null ? String(p.floor) : "",
+      propertyApartment: "",
+      propertyCity:      p.city,
+      // Prefill price only when askingPrice is set; leave existing value otherwise
       ...(p.askingPrice != null
         ? { priceNis: Math.round(p.askingPrice / 100).toString() }
         : {}),
@@ -781,7 +856,7 @@ export function NewContractForm() {
     setSelectedPropertyAddr(p.address);
     setErrors((prev) => {
       const next = { ...prev };
-      delete next.propertyAddress; delete next.propertyCity; delete next.priceNis;
+      delete next.propertyStreet; delete next.propertyCity; delete next.priceNis;
       return next;
     });
     setStage((s) => s.name === "error" ? { name: "idle" } : s);
@@ -790,7 +865,8 @@ export function NewContractForm() {
   function handlePropertyClear() {
     setForm((prev) => ({
       ...prev,
-      propertyAddress: "", propertyCity: "", priceNis: "",
+      propertyStreet: "", propertyNumber: "", propertyFloor: "",
+      propertyApartment: "", propertyCity: "", priceNis: "",
     }));
     setSelectedPropertyId(null);
     setSelectedPropertyAddr(null);
@@ -812,8 +888,8 @@ export function NewContractForm() {
       if (!form.clientEmail.trim())    e.clientEmail    = "אימייל לקוח הוא שדה חובה (או סמן 'אין לי כרגע')";
       if (!form.clientIdNumber.trim()) e.clientIdNumber = "תעודת זהות היא שדה חובה (או סמן 'אין לי כרגע')";
     }
-    if (!form.propertyAddress.trim()) e.propertyAddress = "כתובת נכס היא שדה חובה";
-    if (!form.propertyCity.trim())    e.propertyCity    = "עיר היא שדה חובה";
+    if (!form.propertyStreet.trim()) e.propertyStreet = "שם רחוב הוא שדה חובה";
+    if (!form.propertyCity.trim())   e.propertyCity   = "עיר היא שדה חובה";
     const priceNis = parseNis(form.priceNis);
     if (isNaN(priceNis) || priceNis <= 0) {
       e.priceNis = form.dealType === "SALE" ? "מחיר הנכס חייב להיות מספר חיובי" : "מחיר שכירות חייב להיות מספר חיובי";
@@ -839,6 +915,45 @@ export function NewContractForm() {
     setStage({ name: "submitting" });
     const priceAgorot      = Math.round(parseNis(form.priceNis) * 100);
     const commissionAgorot = calcCommissionAgorot(form);
+    const propertyAddress  = buildPropertyAddress(form);
+
+    // ── Auto-save new property ────────────────────────────────────────────────
+    // When the broker didn't select an existing property from the picker,
+    // create a new Property record so it appears in future searches.
+    // POST /api/properties already exists and requires address + city + type.
+    // We default type to "OTHER" since the contract form doesn't ask for it.
+    // This is best-effort: if property save fails, contract creation continues
+    // (the address string is still stored on the contract).
+    let resolvedPropertyId = selectedPropertyId;
+    if (!resolvedPropertyId && form.propertyStreet.trim() && form.propertyCity.trim()) {
+      try {
+        const floorNum = parseInt(form.propertyFloor.trim(), 10);
+        const propPayload: Record<string, unknown> = {
+          address:     propertyAddress,
+          city:        form.propertyCity.trim(),
+          type:        "OTHER",
+          listingType: form.dealType === "SALE" ? "SALE" : "RENTAL",
+          ...(Number.isInteger(floorNum) && form.propertyFloor.trim() !== ""
+            ? { floor: floorNum }
+            : {}),
+          ...(form.dealType === "SALE" && priceAgorot > 0
+            ? { askingPrice: priceAgorot }
+            : {}),
+        };
+        const propRes = await fetch("/api/properties", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify(propPayload),
+        });
+        if (propRes.ok) {
+          const saved = await propRes.json() as { id: string };
+          resolvedPropertyId = saved.id;
+        }
+      } catch {
+        // Silently continue — contract creation is the primary action.
+      }
+    }
+
     const payload = {
       contractType:    "החתמת מתעניין",
       language:        form.language,
@@ -847,15 +962,14 @@ export function NewContractForm() {
       clientPhone:     form.clientPhone.trim(),
       clientEmail:     form.skipEmailId ? "" : form.clientEmail.trim(),
       clientIdNumber:  form.skipEmailId ? "" : form.clientIdNumber.trim(),
-      propertyAddress: form.propertyAddress.trim(),
+      propertyAddress,
       propertyCity:    form.propertyCity.trim(),
       propertyPrice:   priceAgorot,
       commission:      commissionAgorot,
-      // Pass existingClientDbId when broker picked an existing client,
-      // so the API links the contract to the existing Client row instead
-      // of creating a duplicate. The API already supports this field.
-      ...(selectedClientId   ? { existingClientDbId: selectedClientId }   : {}),
-      ...(selectedPropertyId ? { propertyId:          selectedPropertyId } : {}),
+      // Pass existingClientDbId when broker picked an existing client so the
+      // API links the contract to the existing Client row (no duplicate).
+      ...(selectedClientId      ? { existingClientDbId: selectedClientId }      : {}),
+      ...(resolvedPropertyId    ? { propertyId:          resolvedPropertyId }    : {}),
     };
     try {
       const res = await fetch("/api/contracts", {
@@ -1035,18 +1149,78 @@ export function NewContractForm() {
             onClear={handlePropertyClear}
           />
 
-          {/* Manual fields — always editable */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="sm:col-span-2">
-              <FieldLabel htmlFor="propertyAddress">כתובת נכס</FieldLabel>
-              <TextInput id="propertyAddress" value={form.propertyAddress} onChange={(v) => set("propertyAddress", v)}
-                placeholder="רחוב הרצל 1" error={errors.propertyAddress} />
-            </div>
+          {/* Structured address fields — always editable */}
+          <div className="space-y-4">
+
+            {/* Row 1: Street name (full-width) */}
             <div>
-              <FieldLabel htmlFor="propertyCity">עיר</FieldLabel>
-              <TextInput id="propertyCity" value={form.propertyCity} onChange={(v) => set("propertyCity", v)}
-                placeholder="תל אביב" error={errors.propertyCity} />
+              <FieldLabel htmlFor="propertyStreet">שם רחוב</FieldLabel>
+              <TextInput
+                id="propertyStreet"
+                value={form.propertyStreet}
+                onChange={(v) => set("propertyStreet", v)}
+                placeholder="הרצל"
+                error={errors.propertyStreet}
+              />
             </div>
+
+            {/* Row 2: Building number · Floor · Apartment (3 equal columns) */}
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <FieldLabel htmlFor="propertyNumber">מספר בניין</FieldLabel>
+                <TextInput
+                  id="propertyNumber"
+                  value={form.propertyNumber}
+                  onChange={(v) => set("propertyNumber", v)}
+                  placeholder="15"
+                />
+              </div>
+              <div>
+                <FieldLabel htmlFor="propertyFloor" optional>קומה</FieldLabel>
+                <TextInput
+                  id="propertyFloor"
+                  value={form.propertyFloor}
+                  onChange={(v) => set("propertyFloor", v)}
+                  placeholder="3"
+                />
+              </div>
+              <div>
+                <FieldLabel htmlFor="propertyApartment" optional>דירה</FieldLabel>
+                <TextInput
+                  id="propertyApartment"
+                  value={form.propertyApartment}
+                  onChange={(v) => set("propertyApartment", v)}
+                  placeholder="8"
+                />
+              </div>
+            </div>
+
+            {/* Row 3: City */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <FieldLabel htmlFor="propertyCity">עיר</FieldLabel>
+                <TextInput
+                  id="propertyCity"
+                  value={form.propertyCity}
+                  onChange={(v) => set("propertyCity", v)}
+                  placeholder="תל אביב"
+                  error={errors.propertyCity}
+                />
+              </div>
+            </div>
+
+            {/* Helper text — auto-save notice */}
+            <p className="text-xs text-gray-400 flex items-center gap-1.5">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                className="flex-shrink-0 text-gray-400">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              אם זה נכס חדש, המערכת תשמור אותו אוטומטית לשימוש עתידי.
+            </p>
+
           </div>
         </Section>
 
