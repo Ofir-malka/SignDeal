@@ -10,17 +10,15 @@ import { SectionWrapper } from "@/components/marketing/ui/SectionWrapper";
 /**
  * ProductShowcase — interactive 4-panel product walkthrough.
  *
- * Four tabs, each with a premium mock UI card:
- *   1. חוזה חדש בדקה     — contract creation form mock
- *   2. חתימה מהנייד      — SMS + signing page mock
- *   3. תשלום מאובטח     — payment request + card mock
- *   4. דשבורד מעקב      — dashboard overview mock
+ * Visual upgrade (Phase 6.5):
+ *   • Premium browser/app frame wraps the active mock panel
+ *   • Soft violet/indigo gradient glow sits behind the frame for depth
+ *   • 3 floating mini status chips around the frame (desktop only, aria-hidden)
+ *   • Tab bar: stronger active ring + shadow; easier tap targets
+ *   • Panel container: overflow-hidden to prevent mobile scroll bleed
  *
- * Client component — tabs use local useState; no router/query-param state
- * needed since it's purely decorative + storytelling.
- *
- * Performance: all 4 panels render in the DOM but only one is visible
- * (opacity/translate transition) so there's no mount cost on tab switch.
+ * Client component — tabs use local useState.
+ * All 4 panels render in the DOM (opacity transition) for instant tab switches.
  */
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
@@ -39,7 +37,7 @@ type TabId = (typeof TABS)[number]["id"];
 /** Panel 1 — contract creation form */
 function ContractPanel() {
   return (
-    <GlassCard variant="elevated" className="p-5 md:p-6 shadow-2xl shadow-black/50 w-full">
+    <GlassCard variant="elevated" className="p-5 shadow-xl shadow-black/40 w-full">
       <div dir="rtl" className="space-y-4">
 
         {/* Top bar */}
@@ -106,7 +104,7 @@ function ContractPanel() {
 /** Panel 2 — SMS + signing page mock */
 function SigningPanel() {
   return (
-    <GlassCard variant="elevated" className="p-5 md:p-6 shadow-2xl shadow-black/50 w-full">
+    <GlassCard variant="elevated" className="p-5 shadow-xl shadow-black/40 w-full">
       <div dir="rtl" className="space-y-4">
 
         {/* Top bar */}
@@ -183,7 +181,7 @@ function SigningPanel() {
 /** Panel 3 — payment request + card mock */
 function PaymentPanel() {
   return (
-    <GlassCard variant="elevated" className="p-5 md:p-6 shadow-2xl shadow-black/50 w-full">
+    <GlassCard variant="elevated" className="p-5 shadow-xl shadow-black/40 w-full">
       <div dir="rtl" className="space-y-4">
 
         {/* Top bar */}
@@ -252,7 +250,7 @@ function DashboardPanel() {
   ] as const;
 
   return (
-    <GlassCard variant="elevated" className="p-5 md:p-6 shadow-2xl shadow-black/50 w-full">
+    <GlassCard variant="elevated" className="p-5 shadow-xl shadow-black/40 w-full">
       <div dir="rtl" className="space-y-4">
 
         {/* Dashboard header */}
@@ -283,7 +281,7 @@ function DashboardPanel() {
           {CONTRACTS.map((row) => (
             <div
               key={row.name}
-              className="flex items-center justify-between bg-white/5 hover:bg-white/8 rounded-xl px-3 py-2.5 gap-3 transition-colors"
+              className="flex items-center justify-between bg-white/5 hover:bg-white/[0.08] rounded-xl px-3 py-2.5 gap-3 transition-colors"
             >
               <div className="min-w-0 flex-1 text-right">
                 <p className="text-xs font-semibold text-white truncate">{row.name}</p>
@@ -350,6 +348,112 @@ const PANEL_COPY: Record<TabId, { eyebrow: string; heading: string; body: string
   },
 };
 
+// ─── Floating status chips (desktop decorative) ───────────────────────────────
+
+const FLOAT_CHIPS = [
+  {
+    label: "SMS נשלח",
+    color: "text-green-300",
+    dot:   "bg-green-400",
+    cls:   "top-6 -right-5 lg:-right-8",
+  },
+  {
+    label: "חוזה נחתם ✓",
+    color: "text-violet-300",
+    dot:   "bg-violet-400",
+    cls:   "bottom-20 -right-5 lg:-right-10",
+  },
+  {
+    label: "תשלום התקבל",
+    color: "text-emerald-300",
+    dot:   "bg-emerald-400",
+    cls:   "-bottom-4 left-8",
+  },
+] as const;
+
+// ─── Browser / app frame ──────────────────────────────────────────────────────
+
+function AppFrame({ children }: { children: React.ReactNode }) {
+  return (
+    /* Outer wrapper: relative anchor for glow + floating chips */
+    <div className="relative">
+
+      {/* Background depth glow */}
+      <div
+        aria-hidden="true"
+        className="absolute -inset-8 rounded-[2.5rem] bg-violet-600/[0.09] blur-3xl pointer-events-none"
+      />
+      {/* Secondary inner glow */}
+      <div
+        aria-hidden="true"
+        className="absolute -inset-2 rounded-3xl bg-indigo-500/[0.06] blur-xl pointer-events-none"
+      />
+
+      {/* Frame shell */}
+      <div
+        className="relative rounded-2xl overflow-hidden
+                   border border-white/[0.13]
+                   shadow-[0_28px_60px_-8px_rgba(0,0,0,0.65),0_0_0_1px_rgba(255,255,255,0.04)]
+                   bg-indigo-950/90 backdrop-blur-xl"
+      >
+        {/* ── Fake browser chrome bar ── */}
+        <div className="flex items-center gap-3 px-4 py-3 bg-white/[0.04] border-b border-white/[0.08]">
+          {/* Traffic-light dots */}
+          <div className="flex gap-1.5 shrink-0" aria-hidden="true">
+            <div className="w-3 h-3 rounded-full bg-red-400/60" />
+            <div className="w-3 h-3 rounded-full bg-amber-400/60" />
+            <div className="w-3 h-3 rounded-full bg-emerald-400/60" />
+          </div>
+
+          {/* Fake URL bar */}
+          <div className="flex-1 flex justify-center">
+            <div className="flex items-center gap-1.5 bg-white/[0.05] border border-white/[0.08]
+                            rounded-md px-3 py-1 max-w-[190px] w-full">
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none"
+                stroke="#6366f1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <rect x="3" y="11" width="18" height="11" rx="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+              </svg>
+              <span className="text-[10px] text-indigo-400/70 font-mono tracking-tight truncate">
+                app.signdeal.co.il
+              </span>
+            </div>
+          </div>
+
+          {/* Right spacer to visually center URL bar */}
+          <div className="w-[42px] shrink-0" aria-hidden="true" />
+        </div>
+
+        {/* ── Panel content ── */}
+        <div className="p-4 sm:p-5">
+          {children}
+        </div>
+      </div>
+
+      {/* ── Floating status chips — desktop only, purely decorative ── */}
+      {FLOAT_CHIPS.map(({ label, color, dot, cls }) => (
+        <div
+          key={label}
+          aria-hidden="true"
+          className={[
+            "hidden xl:flex items-center gap-2 absolute z-20",
+            "bg-indigo-900/90 border border-white/[0.12] backdrop-blur-md",
+            "rounded-xl px-3 py-2 shadow-lg shadow-black/40",
+            "text-xs font-semibold",
+            color,
+            cls,
+          ].join(" ")}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 animate-pulse ${dot}`} />
+          {label}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Exported section ─────────────────────────────────────────────────────────
 
 export function ProductShowcase() {
@@ -392,17 +496,22 @@ export function ProductShowcase() {
                 aria-controls={`panel-${tab.id}`}
                 onClick={() => setActive(tab.id)}
                 className={[
-                  "inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold",
+                  "inline-flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold",
                   "transition-all duration-200 border",
+                  "min-h-[44px]", /* accessible touch target */
                   isActive
-                    ? "bg-violet-600 border-violet-500 text-white shadow-lg shadow-violet-900/40"
-                    : "bg-white/5 border-white/10 text-indigo-300 hover:bg-white/10 hover:text-white",
+                    ? [
+                        "bg-violet-600 border-violet-500/80 text-white",
+                        "shadow-lg shadow-violet-500/35",
+                        "ring-2 ring-violet-400/30 ring-offset-1 ring-offset-indigo-950",
+                      ].join(" ")
+                    : "bg-white/[0.05] border-white/10 text-indigo-200 hover:bg-white/10 hover:text-white hover:border-white/20",
                 ].join(" ")}
               >
                 <span
                   className={[
                     "w-5 h-5 rounded-full text-[10px] font-black flex items-center justify-center shrink-0",
-                    isActive ? "bg-white/20 text-white" : "bg-white/10 text-indigo-400",
+                    isActive ? "bg-white/25 text-white" : "bg-white/10 text-indigo-400",
                   ].join(" ")}
                   aria-hidden="true"
                 >
@@ -476,12 +585,12 @@ export function ProductShowcase() {
         <div
           id={`panel-${active}`}
           role="tabpanel"
-          className="w-full max-w-sm lg:max-w-md mx-auto order-1 lg:order-2"
+          className="w-full max-w-sm lg:max-w-md mx-auto order-1 lg:order-2 overflow-visible"
           aria-label={TABS.find(t => t.id === active)?.label}
         >
-          <div aria-hidden="true" className="transition-all duration-300">
+          <AppFrame>
             {PANELS[active]}
-          </div>
+          </AppFrame>
         </div>
       </div>
 
