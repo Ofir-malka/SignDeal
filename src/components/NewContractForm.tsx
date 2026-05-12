@@ -1139,7 +1139,47 @@ export function NewContractForm() {
           </div>
         </Section>
 
-        {/* ══ 4. Property details ═══════════════════════════════════════════ */}
+        {/* ══ 4. Deal type ══════════════════════════════════════════════════ */}
+        {/* Must appear before Property Details so the price field label
+            ("מחיר הנכס" vs "שכירות חודשית") is correct when the broker
+            reaches that section.
+            NOTE: schema/API support one DealType per contract (SALE | RENTAL).
+            "BOTH" is not supported at the DB/API layer — see limitation note
+            in the Financial section comment below. */}
+        <Section title="סוג עסקה" subtitle="בחר סוג עסקה אחד לחוזה זה">
+          <div className="flex gap-3">
+            {(["SALE", "RENTAL"] as const).map((dt) => {
+              const label = dt === "SALE" ? "מכירה" : "שכירות";
+              const icon  = dt === "SALE"
+                ? (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" /><rect x="9" y="13" width="6" height="8" rx="0.5" />
+                  </svg>)
+                : (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M8 21V10M16 21V10M3 9h18" />
+                  </svg>);
+              return (
+                <button key={dt} type="button"
+                  onClick={() => {
+                    setForm((prev) => ({ ...prev, dealType: dt, priceNis: "", commissionNis: "", commissionPct: "" }));
+                    setErrors((prev) => { const n = { ...prev }; delete n.priceNis; delete n.commissionNis; delete n.commissionPct; return n; });
+                    setStage((s) => s.name === "error" ? { name: "idle" } : s);
+                  }}
+                  className={[
+                    "flex items-center gap-2.5 px-5 py-3 rounded-xl border text-sm font-semibold transition-all",
+                    form.dealType === dt
+                      ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
+                      : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
+                  ].join(" ")}>
+                  {icon}{label}
+                </button>
+              );
+            })}
+          </div>
+        </Section>
+
+        {/* ══ 5. Property details ═══════════════════════════════════════════ */}
+        {/* Appears after Deal Type so the price label ("מחיר הנכס" / "שכירות
+            חודשית") is always correct when the broker reaches this section. */}
         <Section title="פרטי נכס">
 
           {/* Existing property picker */}
@@ -1209,6 +1249,24 @@ export function NewContractForm() {
               </div>
             </div>
 
+            {/* Row 4: Property price
+                SALE   → "מחיר הנכס (₪)"      — used as askingPrice on the Property record
+                RENTAL → "שכירות חודשית (₪)"   — stored as propertyPrice (agorot) on Contract
+                BOTH   → not supported at DB/API layer (DealType is SALE | RENTAL enum).
+                          Current safe behavior: single price field, label follows dealType. */}
+            <div>
+              <FieldLabel htmlFor="priceNis">
+                {form.dealType === "SALE" ? "מחיר הנכס (₪)" : "שכירות חודשית (₪)"}
+              </FieldLabel>
+              <TextInput
+                id="priceNis"
+                value={form.priceNis}
+                onChange={(v) => set("priceNis", v)}
+                placeholder={form.dealType === "SALE" ? "1,500,000" : "5,000"}
+                error={errors.priceNis}
+              />
+            </div>
+
             {/* Helper text — auto-save notice */}
             <p className="text-xs text-gray-400 flex items-center gap-1.5">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
@@ -1224,49 +1282,9 @@ export function NewContractForm() {
           </div>
         </Section>
 
-        {/* ══ 5. Deal type ══════════════════════════════════════════════════ */}
-        {/* NOTE: schema/API support one DealType per contract (SALE | RENTAL). */}
-        <Section title="סוג עסקה" subtitle="בחר סוג עסקה אחד לחוזה זה">
-          <div className="flex gap-3">
-            {(["SALE", "RENTAL"] as const).map((dt) => {
-              const label = dt === "SALE" ? "מכירה" : "שכירות";
-              const icon  = dt === "SALE"
-                ? (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" /><rect x="9" y="13" width="6" height="8" rx="0.5" />
-                  </svg>)
-                : (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M8 21V10M16 21V10M3 9h18" />
-                  </svg>);
-              return (
-                <button key={dt} type="button"
-                  onClick={() => {
-                    setForm((prev) => ({ ...prev, dealType: dt, priceNis: "", commissionNis: "", commissionPct: "" }));
-                    setErrors((prev) => { const n = { ...prev }; delete n.priceNis; delete n.commissionNis; delete n.commissionPct; return n; });
-                    setStage((s) => s.name === "error" ? { name: "idle" } : s);
-                  }}
-                  className={[
-                    "flex items-center gap-2.5 px-5 py-3 rounded-xl border text-sm font-semibold transition-all",
-                    form.dealType === dt
-                      ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
-                      : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
-                  ].join(" ")}>
-                  {icon}{label}
-                </button>
-              );
-            })}
-          </div>
-        </Section>
-
         {/* ══ 6. Financial ══════════════════════════════════════════════════ */}
-        <Section title="פרטים פיננסיים" subtitle={form.dealType === "SALE" ? "עסקת מכירה" : "עסקת שכירות"}>
+        <Section title="עמלת תיווך">
           <div className="space-y-5">
-            <div>
-              <FieldLabel htmlFor="priceNis">
-                {form.dealType === "SALE" ? "מחיר הנכס (₪)" : "שכירות חודשית (₪)"}
-              </FieldLabel>
-              <TextInput id="priceNis" value={form.priceNis} onChange={(v) => set("priceNis", v)}
-                placeholder={form.dealType === "SALE" ? "1,500,000" : "5,000"} error={errors.priceNis} />
-            </div>
             <div>
               <FieldLabel>עמלת תיווך</FieldLabel>
               {form.dealType === "SALE" && (
