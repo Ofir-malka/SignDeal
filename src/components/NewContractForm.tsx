@@ -177,10 +177,19 @@ function usePicker<T>(fetchUrl: string) {
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  // Scroll: recompute position (trigger may shift) — close is simplest UX
+  // Scroll: close picker when the user scrolls after it opens.
+  // Mobile exception: when the virtual keyboard appears (triggered by autofocus
+  // on the search input), iOS/Android scroll the viewport to keep the focused
+  // element visible. This fires a scroll event within ~50–150ms of opening and
+  // would immediately close the picker. We ignore all scroll events for the
+  // first 300ms after opening so the keyboard animation can complete.
   useEffect(() => {
     if (!open) return;
-    function onScroll() { setOpen(false); }
+    const openedAt = Date.now();
+    function onScroll() {
+      if (Date.now() - openedAt < 300) return;
+      setOpen(false);
+    }
     window.addEventListener("scroll", onScroll, true);
     return () => window.removeEventListener("scroll", onScroll, true);
   }, [open]);
