@@ -1,37 +1,30 @@
-import { DashboardShell }   from "@/components/DashboardShell";
-import { NewContractWizard } from "@/components/NewContractWizard";
+import { DashboardShell }  from "@/components/DashboardShell";
+import { NewContractForm } from "@/components/NewContractForm";
 
-// ── Allowed values coming in via query params ──────────────────────────────────
-const VALID_TYPES  = ["interested", "exclusivity", "cooperation"] as const;
-const VALID_DEALS  = ["rental", "sale"] as const;
-type ContractType  = typeof VALID_TYPES[number];
-type DealType      = typeof VALID_DEALS[number];
+/**
+ * /contracts/new — unified one-page contract creation form.
+ *
+ * Replaces the 5-step NewContractWizard as the default creation UX.
+ * The wizard component is preserved in code for reference / rollback.
+ *
+ * All existing href="/contracts/new" buttons throughout the app now land here.
+ *
+ * Scroll note: DashboardShell uses `h-screen overflow-hidden` on the outer
+ * wrapper. Every dashboard page must supply its own `flex-1 overflow-y-auto`
+ * <main> to get a scrollable content area. This page follows that pattern.
+ */
+export const metadata = {
+  title: "חוזה חדש | SignDeal",
+};
 
-// ── Page ───────────────────────────────────────────────────────────────────────
-// searchParams opts this page into dynamic rendering (fine — it's an auth-gated
-// dashboard page that is never statically pre-rendered anyway).
-
-export default async function NewContractPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
-}) {
-  const sp         = await searchParams;
-  const rawType    = typeof sp.type === "string" ? sp.type : undefined;
-  const rawDeal    = typeof sp.deal === "string" ? sp.deal : undefined;
-
-  // Only accept known values; anything else is treated as "not set"
-  const initialType = VALID_TYPES.includes(rawType as ContractType)
-    ? (rawType as ContractType)
-    : undefined;
-
-  const initialDeal = VALID_DEALS.includes(rawDeal as DealType)
-    ? (rawDeal as DealType)
-    : undefined;
-
+export default function NewContractPage() {
   return (
     <DashboardShell>
-      <NewContractWizard initialType={initialType} initialDeal={initialDeal} />
+      <main className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 sm:py-8">
+        <div className="max-w-3xl mx-auto">
+          <NewContractForm />
+        </div>
+      </main>
     </DashboardShell>
   );
 }

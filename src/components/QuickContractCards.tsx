@@ -182,7 +182,7 @@ function IconTransfer() {
 
 const CARDS: CardDef[] = [
   {
-    href:     "/contracts/quick/interested",
+    href:     "/contracts/new",
     icon:     <IconInterestedBuyer />,
     title:    "החתמת מתעניין",
     subtitle: "רישום הסכמת רוכש או שוכר פוטנציאלי",
