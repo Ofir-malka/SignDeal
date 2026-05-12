@@ -84,6 +84,46 @@ html {
   50%      { opacity: 0.55; }
 }
 
+/* ── ProblemSection icon personality animations ─────────────────────────────
+   All use transform only — GPU composited, no layout.
+   Applied via group-hover: — play on card hover, reset when hover ends.
+   The global reduced-motion rule below collapses duration to 0.01ms so
+   they are imperceptible on devices with that preference.
+─────────────────────────────────────────────────────────────────────────── */
+
+/* PDF card: document corner-fold tilt then settle */
+@keyframes problem-doc-tilt {
+  0%   { transform: rotate(0deg)   translateY(0);     }
+  25%  { transform: rotate(-6deg)  translateY(-2px);  }
+  55%  { transform: rotate(3.5deg) translateY(-1px);  }
+  80%  { transform: rotate(-1deg)  translateY(-0.5px);}
+  100% { transform: rotate(0deg)   translateY(0);     }
+}
+
+/* Money card: urgent coin-chase — oscillating tilt, loops while hovering */
+@keyframes problem-coin-pulse {
+  0%, 100% { transform: rotate(0deg)  scaleY(1);    }
+  25%       { transform: rotate(-9deg) scaleY(1.04); }
+  75%       { transform: rotate(9deg)  scaleY(1.04); }
+}
+
+/* Grid/Excel card: expanding data pulse, loops while hovering */
+@keyframes problem-grid-pulse {
+  0%, 100% { transform: scale(1);    }
+  50%       { transform: scale(1.10); }
+}
+
+/* Bell card: ring swing — plays once on hover */
+@keyframes problem-bell-ring {
+  0%   { transform: rotate(0deg);   transform-origin: top center; }
+  15%  { transform: rotate(14deg);  transform-origin: top center; }
+  35%  { transform: rotate(-11deg); transform-origin: top center; }
+  55%  { transform: rotate(7deg);   transform-origin: top center; }
+  75%  { transform: rotate(-4deg);  transform-origin: top center; }
+  90%  { transform: rotate(2deg);   transform-origin: top center; }
+  100% { transform: rotate(0deg);   transform-origin: top center; }
+}
+
 /* Respect reduced-motion preference — stop float & all transitions */
 @media (prefers-reduced-motion: reduce) {
   *,

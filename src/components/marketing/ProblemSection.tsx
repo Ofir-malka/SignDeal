@@ -23,6 +23,8 @@ const PAIN_POINTS = [
         <line x1="9" y1="11" x2="15" y2="11" />
       </svg>
     ),
+    // One-shot tilt then settle — "I'm flipping this document open"
+    iconHoverAnim: "group-hover:animate-[problem-doc-tilt_0.5s_ease-in-out_1_both]",
     accent: "text-amber-400",
     border: "border-amber-400/20",
     glow:   "bg-amber-400/5",
@@ -36,6 +38,8 @@ const PAIN_POINTS = [
         <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
       </svg>
     ),
+    // Looping coin wobble — restless urgency
+    iconHoverAnim: "group-hover:animate-[problem-coin-pulse_0.6s_ease-in-out_infinite]",
     accent: "text-red-400",
     border: "border-red-400/20",
     glow:   "bg-red-400/5",
@@ -52,6 +56,8 @@ const PAIN_POINTS = [
         <line x1="15" y1="3"  x2="15" y2="21" />
       </svg>
     ),
+    // Looping data pulse — expanding grid, information overload
+    iconHoverAnim: "group-hover:animate-[problem-grid-pulse_0.4s_ease-in-out_infinite]",
     accent: "text-orange-400",
     border: "border-orange-400/20",
     glow:   "bg-orange-400/5",
@@ -66,6 +72,8 @@ const PAIN_POINTS = [
         <line x1="12" y1="2" x2="12" y2="4" />
       </svg>
     ),
+    // One-shot bell ring then settle
+    iconHoverAnim: "group-hover:animate-[problem-bell-ring_0.5s_ease-in-out_1_both]",
     accent: "text-amber-400",
     border: "border-amber-400/20",
     glow:   "bg-amber-400/5",
@@ -99,24 +107,35 @@ export function ProblemSection() {
         dir="rtl"
         className="grid grid-cols-1 sm:grid-cols-2 gap-5"
       >
-        {PAIN_POINTS.map(({ title, body, icon, accent, border, glow }, i) => (
+        {PAIN_POINTS.map(({ title, body, icon, iconHoverAnim, accent, border, glow }, i) => (
           <AnimateIn key={title} delay={i * 80} from="bottom">
             <GlassCard
               className={[
+                "group",                          // enables group-hover: on descendants
                 "p-6 flex gap-5 items-start h-full border",
                 border,
                 glow,
-                "hover:border-white/20 transition-colors duration-300",
+                // Lift + glow shadow + border brighten on hover
+                "hover:-translate-y-1.5",
+                "hover:shadow-[0_16px_40px_-8px_rgba(0,0,0,0.55)]",
+                "hover:border-white/25",
+                "transition-all duration-300 ease-out",
+                "cursor-default",
               ].join(" ")}
             >
-              {/* Icon */}
+              {/* Icon container — scales + brightens on card hover */}
               <div
                 className={[
                   "shrink-0 mt-0.5 p-2.5 rounded-xl bg-white/5 border border-white/10",
+                  "group-hover:scale-[1.05] group-hover:bg-white/[0.09] group-hover:border-white/20",
+                  "transition-all duration-200 ease-out will-change-transform",
                   accent,
                 ].join(" ")}
               >
-                {icon}
+                {/* Icon span — personality animation fires on group-hover */}
+                <span className={`inline-flex will-change-transform ${iconHoverAnim}`}>
+                  {icon}
+                </span>
               </div>
 
               {/* Text */}
