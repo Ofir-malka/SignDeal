@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import {
   type ApiPropertyResponse,
   type Property,
@@ -28,9 +28,37 @@ const LISTING_BADGE: Record<string, string> = {
 
 // ─── PropertyCard ─────────────────────────────────────────────────────────────
 
-function PropertyCard({ p }: { p: Property }) {
+type DeleteState =
+  | { phase: "idle" }
+  | { phase: "confirming" }
+  | { phase: "deleting" }
+  | { phase: "error"; message: string };
+
+function PropertyCard({
+  p,
+  onDeleted,
+}: {
+  p: Property;
+  onDeleted: (id: string) => void;
+}) {
   const badge = TYPE_BADGE[p.typeKey] ?? TYPE_BADGE.OTHER;
   const hasAnyMeta = p.rooms != null || p.floor != null || p.sizeSqm != null;
+  const [del, setDel] = useState<DeleteState>({ phase: "idle" });
+
+  async function handleDelete() {
+    setDel({ phase: "deleting" });
+    try {
+      const res = await fetch(`/api/properties/${p.id}`, { method: "DELETE" });
+      if (res.ok) {
+        onDeleted(p.id);
+        return;
+      }
+      const body = await res.json().catch(() => ({}));
+      setDel({ phase: "error", message: body.error ?? "שגיאה במחיקת הנכס" });
+    } catch {
+      setDel({ phase: "error", message: "שגיאה בחיבור לשרת. נסה שוב." });
+    }
+  }
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 flex flex-col gap-4 hover:shadow-md transition-shadow">
@@ -90,18 +118,85 @@ function PropertyCard({ p }: { p: Property }) {
         </div>
       )}
 
+      {/* Delete error */}
+      {del.phase === "error" && (
+        <div className="bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5 text-xs text-red-700" dir="rtl">
+          {del.message}
+          <button
+            type="button"
+            onClick={() => setDel({ phase: "idle" })}
+            className="block mt-1.5 text-red-500 underline hover:text-red-700"
+          >
+            סגור
+          </button>
+        </div>
+      )}
+
       {/* Footer */}
-      <div className="pt-3 border-t border-gray-100 flex items-center justify-between mt-auto">
-        <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${
-          p.contractCount > 0 ? "text-indigo-600" : "text-gray-400"
-        }`}>
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-            <polyline points="14 2 14 8 20 8" />
-          </svg>
-          {p.contractCount === 0 ? "אין חוזים" : `${p.contractCount} חוזים`}
-        </span>
-        <span className="text-xs text-gray-400">{p.createdDate}</span>
+      <div className="pt-3 border-t border-gray-100 mt-auto" dir="rtl">
+        {del.phase === "confirming" ? (
+          /* Confirmation row */
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs text-gray-600 font-medium">האם למחוק את הנכס?</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setDel({ phase: "idle" })}
+                className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 transition-all"
+              >
+                ביטול
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                className="text-xs px-3 py-1.5 rounded-lg bg-red-600 text-white font-semibold hover:bg-red-700 transition-all"
+              >
+                מחק
+              </button>
+            </div>
+          </div>
+        ) : del.phase === "deleting" ? (
+          /* Deleting spinner */
+          <div className="flex items-center justify-center gap-2 py-0.5">
+            <svg className="animate-spin text-red-500" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+            </svg>
+            <span className="text-xs text-gray-500">מוחק...</span>
+          </div>
+        ) : (
+          /* Normal footer */
+          <div className="flex items-center justify-between">
+            <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${
+              p.contractCount > 0 ? "text-indigo-600" : "text-gray-400"
+            }`}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <polyline points="14 2 14 8 20 8" />
+              </svg>
+              {p.contractCount === 0 ? "אין חוזים" : `${p.contractCount} חוזים`}
+            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-gray-400">{p.createdDate}</span>
+              {/* Delete trigger — only shown in idle/error phase */}
+              {del.phase !== "error" && (
+                <button
+                  type="button"
+                  onClick={() => setDel({ phase: "confirming" })}
+                  title="מחק נכס"
+                  className="text-gray-300 hover:text-red-400 transition-colors"
+                  aria-label="מחק נכס"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    <path d="M10 11v6M14 11v6" />
+                    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                  </svg>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -432,6 +527,10 @@ export function PropertiesPage() {
     setShowModal(false);
   }
 
+  const handleDeleted = useCallback((id: string) => {
+    setProperties((prev) => prev.filter((p) => p.id !== id));
+  }, []);
+
   return (
     <>
       {/* Page header */}
@@ -470,7 +569,7 @@ export function PropertiesPage() {
             <p className="text-xs text-gray-400 mb-5">{properties.length} נכסים</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-5">
               {properties.map((p) => (
-                <PropertyCard key={p.id} p={p} />
+                <PropertyCard key={p.id} p={p} onDeleted={handleDeleted} />
               ))}
             </div>
           </>

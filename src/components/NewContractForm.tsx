@@ -116,6 +116,28 @@ const LANGS: { id: Lang; flag: string; label: string }[] = [
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
+/**
+ * Split a clean Hebrew street address into street name and house/building number.
+ *
+ * Israeli address convention: "<street name> <number>[suffix]"
+ * The number is the last whitespace-separated token and matches /^\d+[א-תa-zA-Z]?$/
+ * (plain digits, optionally followed by a single Hebrew or Latin letter).
+ *
+ * Examples:
+ *   "רוטשילד 42"         → { street: "רוטשילד",        number: "42"   }
+ *   "הרצל 15א"           → { street: "הרצל",            number: "15א"  }
+ *   "שדרות רוטשילד 10"   → { street: "שדרות רוטשילד",  number: "10"   }
+ *   "רוטשילד"            → { street: "רוטשילד",        number: ""     }  (no number)
+ *   "12"                 → { street: "12",              number: ""     }  (only digits — keep as-is)
+ */
+function splitHebrewAddress(addr: string): { street: string; number: string } {
+  const trimmed = addr.trim();
+  // Match: everything up to the last whitespace + a number token (digits + optional letter suffix)
+  const m = trimmed.match(/^(.+)\s+(\d+[א-תa-zA-Z]?)$/);
+  if (!m) return { street: trimmed, number: "" };
+  return { street: m[1].trim(), number: m[2] };
+}
+
 function parseNis(raw: string): number {
   return parseFloat(raw.replace(/[, ]/g, ""));
 }
@@ -848,16 +870,23 @@ export function NewContractForm() {
 
   // ── Property selection handlers ───────────────────────────────────────────
   function handlePropertySelect(p: ApiProperty) {
-    // Decode the stored address — new records use "street||floor||apt" encoding;
-    // legacy plain-text records have no "||" so parsePropertyAddress returns the
-    // full string as `address` with empty floor/apartment.
+    // Step 1: decode the "street||floor||apt" encoding (new format).
+    // Legacy records have no "||" — parsePropertyAddress returns the full
+    // string as `address` with empty floor/apartment.
     const parsed = parsePropertyAddress(p.address);
+
+    // Step 2: split the clean address into street name + house number.
+    // "רוטשילד 42" → street "רוטשילד", number "42"
+    // "שדרות רוטשילד 10" → street "שדרות רוטשילד", number "10"
+    // If splitting fails (e.g. address has no number), keep full in street.
+    const { street, number } = splitHebrewAddress(parsed.address);
+
     setForm((prev) => ({
       ...prev,
-      propertyStreet:    parsed.address,
-      propertyNumber:    "",
-      // Floor: prefer the encoded value (new format); fall back to the numeric
-      // Property.floor column (old format); finally leave empty.
+      propertyStreet:    street,
+      propertyNumber:    number,
+      // Floor: prefer the value encoded in the address (new format);
+      // fall back to the numeric Property.floor column (legacy); otherwise empty.
       propertyFloor:     parsed.floor || (p.floor != null ? String(p.floor) : ""),
       propertyApartment: parsed.apartment,
       propertyCity:      p.city,
@@ -1222,7 +1251,7 @@ export function NewContractForm() {
             {/* Row 2: Building number · Floor · Apartment (3 equal columns) */}
             <div className="grid grid-cols-3 gap-3">
               <div>
-                <FieldLabel htmlFor="propertyNumber">מספר בניין</FieldLabel>
+                <FieldLabel htmlFor="propertyNumber">מספר בית</FieldLabel>
                 <TextInput
                   id="propertyNumber"
                   value={form.propertyNumber}
