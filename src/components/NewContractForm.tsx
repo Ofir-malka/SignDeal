@@ -141,7 +141,29 @@ function usePicker<T>(fetchUrl: string) {
   const triggerRef  = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Fetch once on first open
+  // ── Helpers ──────────────────────────────────────────────────────────────────
+
+  /** True when the primary pointing device is coarse (finger). */
+  function isTouchPrimary(): boolean {
+    return typeof window !== "undefined" &&
+           window.matchMedia("(pointer: coarse)").matches;
+  }
+
+  /** Recompute fixed-position coordinates from the trigger's live bounding rect.
+   *  Called on open and again whenever the viewport changes (keyboard open/close). */
+  function recomputePos() {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    setDropPos({
+      top:      rect.bottom + 4,
+      // Align right edge of dropdown to right edge of trigger (RTL-safe).
+      right:    window.innerWidth - rect.right,
+      minWidth: Math.max(rect.width, 280),
+    });
+  }
+
+  // ── Fetch on first open ───────────────────────────────────────────────────────
+
   useEffect(() => {
     if (!open) return;
     if (fetched.status !== "idle") return;
@@ -153,7 +175,9 @@ function usePicker<T>(fetchUrl: string) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // Outside-click: close when clicking outside both trigger and panel
+  // ── Outside-tap / outside-click ───────────────────────────────────────────────
+  // Works on both mobile (touch → mousedown) and desktop.
+
   useEffect(() => {
     if (!open) return;
     function onMouseDown(e: MouseEvent) {
@@ -169,7 +193,8 @@ function usePicker<T>(fetchUrl: string) {
     return () => document.removeEventListener("mousedown", onMouseDown);
   }, [open]);
 
-  // Escape key
+  // ── Escape key ────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     if (!open) return;
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") setOpen(false); }
@@ -177,14 +202,17 @@ function usePicker<T>(fetchUrl: string) {
     return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
-  // Scroll: close picker when the user scrolls after it opens.
-  // Mobile exception: when the virtual keyboard appears (triggered by autofocus
-  // on the search input), iOS/Android scroll the viewport to keep the focused
-  // element visible. This fires a scroll event within ~50–150ms of opening and
-  // would immediately close the picker. We ignore all scroll events for the
-  // first 300ms after opening so the keyboard animation can complete.
+  // ── Scroll-to-close — desktop only ───────────────────────────────────────────
+  // On touch devices (pointer: coarse) we intentionally skip this listener so
+  // the picker survives natural finger scrolling and virtual-keyboard-induced
+  // viewport shifts. Outside-tap already handles dismissal on mobile.
+  // On desktop (pointer: fine) we keep the 300ms debounce from the previous
+  // fix as a safety net against sub-pixel scroll noise on trackpads.
+
   useEffect(() => {
     if (!open) return;
+    if (isTouchPrimary()) return;          // ← mobile: no scroll-to-close
+
     const openedAt = Date.now();
     function onScroll() {
       if (Date.now() - openedAt < 300) return;
@@ -194,12 +222,39 @@ function usePicker<T>(fetchUrl: string) {
     return () => window.removeEventListener("scroll", onScroll, true);
   }, [open]);
 
+  // ── Viewport-resize position tracking ────────────────────────────────────────
+  // On mobile, the virtual keyboard opening/closing fires visualViewport resize
+  // (and sometimes scroll) events, shifting the layout without a window resize.
+  // We recompute the fixed-position coordinates so the dropdown stays anchored
+  // to the trigger button throughout the keyboard animation.
+
+  useEffect(() => {
+    if (!open) return;
+
+    const vv = window.visualViewport;   // null in some older browsers
+    if (vv) {
+      vv.addEventListener("resize", recomputePos);
+      vv.addEventListener("scroll", recomputePos);
+    }
+    window.addEventListener("resize", recomputePos);
+
+    return () => {
+      if (vv) {
+        vv.removeEventListener("resize", recomputePos);
+        vv.removeEventListener("scroll", recomputePos);
+      }
+      window.removeEventListener("resize", recomputePos);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // ── Actions ───────────────────────────────────────────────────────────────────
+
   function openPicker() {
     if (triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
       setDropPos({
         top:      rect.bottom + 4,
-        // align right edge of dropdown to right edge of trigger (RTL-friendly)
         right:    window.innerWidth - rect.right,
         minWidth: Math.max(rect.width, 280),
       });
