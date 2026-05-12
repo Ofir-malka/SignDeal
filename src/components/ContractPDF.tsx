@@ -3,7 +3,7 @@ import { Document, Page, View, Text, Image, StyleSheet, Font } from "@react-pdf/
 import type { Contract } from "@/lib/contracts-data";
 import { parseDocumentLines, splitAtClauses } from "@/lib/contracts/resolve-template";
 import { getLabels, isRtlLang } from "@/lib/contracts/labels";
-import { formatPropertyAddress } from "@/lib/format-address";
+import { formatPropertyAddress, parsePropertyAddress } from "@/lib/format-address";
 
 // ── Broker info passed from the PDF route ─────────────────────────────────────
 export type BrokerInfo = {
@@ -402,8 +402,11 @@ export function ContractPDF({ contract: c, broker }: { contract: Contract; broke
     // Strip title + subtitle — show remaining preamble as body
     const bodyPreamble = preamble.filter((l) => l.type !== "title" && l.type !== "subtitle");
 
+    const { floor: propFloor, apartment: propApt } = parsePropertyAddress(c.propertyAddress);
     const propertyRows: [string, string][] = [
       [labels.address,    formatPropertyAddress(c.propertyAddress, c.propertyCity, revealFullAddress)],
+      ...(propFloor ? [[labels.floor,     propFloor] as [string, string]] : []),
+      ...(propApt   ? [[labels.apartment, propApt  ] as [string, string]] : []),
       [labels.dealType,   c.dealType],
       [labels.price,      c.propertyPrice],
       [labels.commission, c.commission],
@@ -472,8 +475,11 @@ export function ContractPDF({ contract: c, broker }: { contract: Contract; broke
   }
 
   // ── Fallback layout (no generatedText) ────────────────────────────────────
+  const { floor: fbFloor, apartment: fbApt } = parsePropertyAddress(c.propertyAddress);
   const propertyRows: [string, string][] = [
     [labels.address,  formatPropertyAddress(c.propertyAddress, c.propertyCity, revealFullAddress)],
+    ...(fbFloor ? [[labels.floor,     fbFloor] as [string, string]] : []),
+    ...(fbApt   ? [[labels.apartment, fbApt  ] as [string, string]] : []),
     [labels.dealType, c.dealType],
     [labels.price,    c.propertyPrice],
   ];

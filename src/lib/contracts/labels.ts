@@ -17,6 +17,8 @@ export interface LabelSet {
   docNumber:       string;
   date:            string;
   address:         string;
+  floor:           string;
+  apartment:       string;
   dealType:        string;
   price:           string;
   commission:      string;
@@ -73,6 +75,8 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     docNumber:          "מסמך מס׳",
     date:               "תאריך",
     address:            "כתובת הנכס",
+    floor:              "קומה",
+    apartment:          "דירה",
     dealType:           "סוג עסקה",
     price:              "מחיר",
     commission:         "עמלת תיווך",
@@ -128,6 +132,8 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     docNumber:          "Doc. No.",
     date:               "Date",
     address:            "Property Address",
+    floor:              "Floor",
+    apartment:          "Apartment",
     dealType:           "Deal Type",
     price:              "Price",
     commission:         "Brokerage Fee",
@@ -183,6 +189,8 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     docNumber:          "Doc. n°",
     date:               "Date",
     address:            "Adresse du bien",
+    floor:              "Étage",
+    apartment:          "Appartement",
     dealType:           "Type de transaction",
     price:              "Prix",
     commission:         "Honoraires de courtage",
@@ -238,6 +246,8 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     docNumber:          "Документ №",
     date:               "Дата",
     address:            "Адрес объекта",
+    floor:              "Этаж",
+    apartment:          "Квартира",
     dealType:           "Тип сделки",
     price:              "Цена",
     commission:         "Брокерское вознаграждение",

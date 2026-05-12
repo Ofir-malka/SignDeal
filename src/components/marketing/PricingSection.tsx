@@ -165,13 +165,16 @@ function PlanCard({ plan, period, index }: { plan: Plan; period: Period; index: 
         className={[
           "flex flex-col flex-1 rounded-2xl",
           isHighlighted
-            ? "ring-2 ring-violet-500/70 shadow-2xl shadow-violet-500/30"
+            ? "ring-2 ring-violet-400 shadow-2xl shadow-violet-500/40"
             : "",
         ].join(" ")}
       >
         <GlassCard
           variant={isHighlighted ? "elevated" : "base"}
-          className="flex flex-col h-full p-7"
+          className={[
+            "flex flex-col h-full p-7",
+            isHighlighted ? "bg-gradient-to-b from-violet-500/10 to-transparent" : "",
+          ].join(" ")}
         >
           <div dir="rtl" className="flex flex-col h-full gap-6">
 
@@ -319,6 +322,16 @@ export function PricingSection() {
             </button>
           </div>
         </div>
+      </AnimateIn>
+
+      {/* ── Trial note ────────────────────────────────────────────────── */}
+      <AnimateIn delay={220}>
+        <p
+          dir="rtl"
+          className="text-center text-sm text-indigo-300/70 mb-10 -mt-6"
+        >
+          כל התוכניות כוללות ניסיון חינם של 14 יום — ללא כרטיס אשראי.
+        </p>
       </AnimateIn>
 
       {/* ── Plan cards ────────────────────────────────────────────────── */}

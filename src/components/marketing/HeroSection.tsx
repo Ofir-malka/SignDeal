@@ -45,23 +45,25 @@ export function HeroSection() {
             </div>
           </AnimateIn>
 
-          {/* H1 */}
+          {/* H1 — benefit-first headline; keywords for SEO */}
           <AnimateIn delay={100}>
-            <h1 className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight leading-tight">
+            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-tight">
               <span
                 className="bg-gradient-to-l from-white via-white to-violet-300
                            bg-clip-text text-transparent"
               >
-                חתמו. גבו. סגרו.
+                חוזי תיווך דיגיטליים,
+                <br />
+                חתימה וגבייה — בלחיצה אחת.
               </span>
             </h1>
           </AnimateIn>
 
-          {/* Subheadline */}
+          {/* Subheadline — describes the full end-to-end workflow */}
           <AnimateIn delay={200}>
-            <p className="text-xl sm:text-2xl text-indigo-200 leading-relaxed max-w-lg">
-              ניהול חוזי תיווך, חתימות דיגיטליות וגביית עמלות
-              — הכל במקום אחד, בלי ניירת, בלי מרדף.
+            <p className="text-lg sm:text-xl text-indigo-200 leading-relaxed max-w-lg">
+              SignDeal בונה את החוזה, שולח לחתימה ב-SMS, ומאפשר ללקוח
+              לשלם את העמלה ישירות מהנייד — בלי ניירת, בלי מרדף.
             </p>
           </AnimateIn>
 
@@ -87,7 +89,6 @@ export function HeroSection() {
                            transition-all"
               >
                 צפה איך זה עובד
-                {/* Down arrow — flipped for LTR svg in RTL context */}
                 <svg
                   width="14" height="14" viewBox="0 0 24 24"
                   fill="none" stroke="currentColor" strokeWidth="2.5"
@@ -101,9 +102,65 @@ export function HeroSection() {
             </div>
           </AnimateIn>
 
-          {/* Micro trust-copy */}
+          {/* 3-stat mini strip — concrete workflow proof-points */}
           <AnimateIn delay={400}>
-            <p className="text-xs text-indigo-300/60">
+            <div
+              dir="rtl"
+              className="flex flex-wrap items-center justify-center lg:justify-start gap-x-4 gap-y-2"
+            >
+              {(
+                [
+                  {
+                    label: "3 דקות לחוזה",
+                    icon: (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" strokeWidth="2.5"
+                        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="10" />
+                        <polyline points="12 6 12 12 16 14" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    label: "חתימה ב-SMS",
+                    icon: (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" strokeWidth="2.5"
+                        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                      </svg>
+                    ),
+                  },
+                  {
+                    label: "תשלום מאובטח",
+                    icon: (
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                        stroke="currentColor" strokeWidth="2.5"
+                        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
+                        <line x1="1" y1="10" x2="23" y2="10" />
+                      </svg>
+                    ),
+                  },
+                ] as const
+              ).map(({ label, icon }, i) => (
+                <span key={label} className="flex items-center gap-1.5">
+                  {i > 0 && (
+                    <span
+                      className="w-1 h-1 rounded-full bg-indigo-500/50 mx-0.5"
+                      aria-hidden="true"
+                    />
+                  )}
+                  <span className="text-violet-400 flex-shrink-0">{icon}</span>
+                  <span className="text-sm font-medium text-indigo-200/80">{label}</span>
+                </span>
+              ))}
+            </div>
+          </AnimateIn>
+
+          {/* Micro trust-copy */}
+          <AnimateIn delay={500}>
+            <p className="text-xs text-indigo-300/50">
               ללא כרטיס אשראי · ביטול בכל עת · תמיכה בעברית
             </p>
           </AnimateIn>

@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 const NAV_LINKS = [
-  { label: "יתרונות",       href: "#features" },
+  { label: "מוצר",          href: "#features" },
   { label: "איך זה עובד",  href: "#how"      },
   { label: "מחירים",        href: "#pricing"  },
   { label: "שאלות נפוצות", href: "#faq"      },

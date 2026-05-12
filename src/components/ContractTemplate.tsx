@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import type { Contract } from "@/lib/contracts-data";
 import { parseDocumentLines, splitAtClauses } from "@/lib/contracts/resolve-template";
 import { getLabels, isRtlLang } from "@/lib/contracts/labels";
-import { formatPropertyAddress } from "@/lib/format-address";
+import { formatPropertyAddress, parsePropertyAddress } from "@/lib/format-address";
 
 // ─── Document-body renderer ───────────────────────────────────────────────────
 // Parses a generatedText string (from the DB snapshot) into styled React nodes.
@@ -66,8 +66,11 @@ function PropertyTable({
   revealFullAddress: boolean;
   labels:            ReturnType<typeof getLabels>;
 }) {
+  const { floor, apartment } = parsePropertyAddress(c.propertyAddress);
   const rows: [string, string][] = [
     [labels.address,    formatPropertyAddress(c.propertyAddress, c.propertyCity, revealFullAddress)],
+    ...(floor     ? [[labels.floor,     floor    ] as [string, string]] : []),
+    ...(apartment ? [[labels.apartment, apartment] as [string, string]] : []),
     [labels.dealType,   c.dealType],
     [labels.price,      c.propertyPrice],
     [labels.commission, c.commission],
@@ -265,13 +268,16 @@ export function ContractTemplate({
           <div className="border border-gray-200 rounded-lg overflow-hidden mt-1">
             <table className="w-full text-sm">
               <tbody>
-                {(
-                  [
-                    [labels.address,  formatPropertyAddress(c.propertyAddress, c.propertyCity, revealFullAddress)],
-                    [labels.dealType, c.dealType],
-                    [labels.price,    c.propertyPrice],
-                  ] as [string, string][]
-                ).map(([label, value]) => (
+                {((() => {
+                  const { floor: fl, apartment: apt } = parsePropertyAddress(c.propertyAddress);
+                  return [
+                    [labels.address,  formatPropertyAddress(c.propertyAddress, c.propertyCity, revealFullAddress)] as [string, string],
+                    ...(fl  ? [[labels.floor,     fl ] as [string, string]] : []),
+                    ...(apt ? [[labels.apartment, apt] as [string, string]] : []),
+                    [labels.dealType, c.dealType] as [string, string],
+                    [labels.price,    c.propertyPrice] as [string, string],
+                  ];
+                })()).map(([label, value]) => (
                   <tr key={label} className="border-b border-gray-100 last:border-0">
                     <td className="px-4 py-2.5 text-gray-500 bg-gray-50 w-1/3 font-medium">{label}</td>
                     <td className="px-4 py-2.5 text-gray-900">{value}</td>

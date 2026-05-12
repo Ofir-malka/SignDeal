@@ -12,14 +12,34 @@ import { FAQSection }        from "@/components/marketing/FAQSection";
 import { FinalCTA }          from "@/components/marketing/FinalCTA";
 import { MarketingFooter }   from "@/components/marketing/MarketingFooter";
 
+// ── Page constants ─────────────────────────────────────────────────────────────
+const SITE_URL    = "https://www.signdeal.co.il";
+const TITLE       = "SignDeal – חוזי תיווך דיגיטליים, חתימה וגבייה לסוכני נדל׳ן";
+const DESCRIPTION =
+  "צרו חוזי תיווך בשניות, שלחו לחתימה דיגיטלית ב-SMS, וגבו עמלות בכרטיס אשראי — " +
+  "הכל בפלטפורמה אחת לסוכני נדל׳ן בישראל.";
+
+// ── Metadata ───────────────────────────────────────────────────────────────────
 export const metadata: Metadata = {
-  title:       "SignDeal – ניהול חוזים לסוכני נדל\"ן",
-  description: "פלטפורמה לניהול חוזי תיווך, חתימות דיגיטליות וגביית עמלות לסוכני נדל\"ן בישראל.",
-  robots:      { index: true, follow: true },
+  title:       TITLE,
+  description: DESCRIPTION,
+  keywords:    [
+    "חוזי תיווך דיגיטליים",
+    "חתימה אלקטרונית",
+    "גביית עמלות תיווך",
+    "ניהול חוזים נדל\"ן",
+    "מתווכי נדל\"ן ישראל",
+    "חוזה תיווך מקרקעין",
+    "SignDeal",
+  ],
+  robots: { index: true, follow: true },
+  alternates: {
+    canonical: SITE_URL,
+  },
   openGraph: {
-    title:       "SignDeal – ניהול חוזים לסוכני נדל\"ן",
-    description: "פלטפורמה לניהול חוזי תיווך, חתימות דיגיטליות וגביית עמלות לסוכני נדל\"ן בישראל.",
-    url:         "https://www.signdeal.co.il",
+    title:       TITLE,
+    description: DESCRIPTION,
+    url:         SITE_URL,
     siteName:    "SignDeal",
     locale:      "he_IL",
     type:        "website",
@@ -27,44 +47,82 @@ export const metadata: Metadata = {
   },
   twitter: {
     card:        "summary_large_image",
-    title:       "SignDeal – ניהול חוזים לסוכני נדל\"ן",
-    description: "פלטפורמה לניהול חוזי תיווך, חתימות דיגיטליות וגביית עמלות לסוכני נדל\"ן בישראל.",
+    title:       TITLE,
+    description: DESCRIPTION,
     images:      ["/og-image.png"],
+  },
+};
+
+// ── JSON-LD structured data ────────────────────────────────────────────────────
+// SoftwareApplication schema helps Google understand the product category
+// and may generate rich results (star ratings, price info) in SERPs.
+const jsonLd = {
+  "@context":           "https://schema.org",
+  "@type":              "SoftwareApplication",
+  name:                 "SignDeal",
+  applicationCategory:  "BusinessApplication",
+  operatingSystem:      "Web",
+  inLanguage:           "he-IL",
+  url:                  SITE_URL,
+  description:          DESCRIPTION,
+  offers: {
+    "@type":      "Offer",
+    price:        "0",
+    priceCurrency:"ILS",
+    description:  "תוכנית Starter חינמית לתמיד",
+  },
+  publisher: {
+    "@type": "Organization",
+    name:    "SignDeal",
+    url:     SITE_URL,
   },
 };
 
 /**
  * Public marketing homepage.
  *
- * Authenticated users are redirected to /dashboard by proxy.ts before
+ * Authenticated users are redirected to /dashboard by middleware before
  * this page renders.
  *
- * Sections implemented:
- *  ✓ NavBar
- *  ✓ HeroSection
+ * Phase 1 changes (2026-05):
+ *  • Updated title, description, keywords, canonical
+ *  • Added JSON-LD SoftwareApplication schema
+ *
+ * Sections:
+ *  ✓ NavBar          — "מוצר" anchor added
+ *  ✓ HeroSection     — new H1, subheadline, 3-stat strip
  *  ✓ TrustStrip
  *  ✓ ProblemSection
  *  ✓ FeaturesGrid
  *  ✓ HowItWorks
  *  ✓ FeatureSpotlight
- *  ✓ PricingSection
- *  ✓ FAQSection
+ *  ✓ PricingSection  — Pro visual polish, trial line
+ *  ✓ FAQSection      — 2 new questions
+ *  ✓ FinalCTA        — new copy + WhatsApp CTA
  *  ✓ MarketingFooter
  */
 export default function HomePage() {
   return (
-    <div className="min-h-screen bg-indigo-950 overflow-x-hidden">
-      <NavBar />
-      <HeroSection />
-      <TrustStrip />
-      <ProblemSection />
-      <FeaturesGrid />
-      <HowItWorks />
-      <FeatureSpotlight />
-      <PricingSection />
-      <FAQSection />
-      <FinalCTA />
-      <MarketingFooter />
-    </div>
+    <>
+      {/* Structured data — injected into <head> by Next.js */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+
+      <div className="min-h-screen bg-indigo-950 overflow-x-hidden">
+        <NavBar />
+        <HeroSection />
+        <TrustStrip />
+        <ProblemSection />
+        <FeaturesGrid />
+        <HowItWorks />
+        <FeatureSpotlight />
+        <PricingSection />
+        <FAQSection />
+        <FinalCTA />
+        <MarketingFooter />
+      </div>
+    </>
   );
 }

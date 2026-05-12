@@ -58,19 +58,22 @@ interface FormState {
   clientIdNumber:    string;
   skipEmailId:       boolean;
   // ── Structured property address ───────────────────────────────────────────
-  // Built into a single readable string before sending to the API.
+  // Street + number are stored in `propertyAddress` as "<street> <number>".
+  // Floor and apartment are appended with "||" separators and rendered as
+  // separate rows in the contract table (not part of the address string).
   // When an existing property is selected via the picker, `propertyStreet`
   // receives the full stored address and the other sub-fields are left empty.
-  propertyStreet:    string;   // street name (required)
-  propertyNumber:    string;   // building number — can contain letters, e.g. "15א"
-  propertyFloor:     string;   // optional; integer-parseable
-  propertyApartment: string;   // optional; apartment / unit identifier
-  propertyCity:      string;
-  dealType:          DealType;
-  priceNis:          string;
-  commissionMode:    CommissionMode;
-  commissionNis:     string;
-  commissionPct:     string;
+  propertyStreet:              string;   // street name (required)
+  propertyNumber:              string;   // building number — can contain letters, e.g. "15א"
+  propertyFloor:               string;   // optional; integer-parseable
+  propertyApartment:           string;   // optional; apartment / unit identifier
+  propertyCity:                string;
+  hideFullAddressFromClient:   boolean;  // hide building number from client until signed
+  dealType:                    DealType;
+  priceNis:                    string;
+  commissionMode:              CommissionMode;
+  commissionNis:               string;
+  commissionPct:               string;
 }
 
 type Stage =
@@ -84,22 +87,23 @@ interface FieldError { [key: string]: string }
 // ── Constants ──────────────────────────────────────────────────────────────────
 
 const INITIAL: FormState = {
-  language:          "HE",
-  clientName:        "",
-  clientPhone:       "",
-  clientEmail:       "",
-  clientIdNumber:    "",
-  skipEmailId:       false,
-  propertyStreet:    "",
-  propertyNumber:    "",
-  propertyFloor:     "",
-  propertyApartment: "",
-  propertyCity:      "",
-  dealType:          "SALE",
-  priceNis:          "",
-  commissionMode:    "percent",
-  commissionNis:     "",
-  commissionPct:     "",
+  language:                  "HE",
+  clientName:                "",
+  clientPhone:               "",
+  clientEmail:               "",
+  clientIdNumber:            "",
+  skipEmailId:               false,
+  propertyStreet:            "",
+  propertyNumber:            "",
+  propertyFloor:             "",
+  propertyApartment:         "",
+  propertyCity:              "",
+  hideFullAddressFromClient: false,
+  dealType:                  "SALE",
+  priceNis:                  "",
+  commissionMode:            "percent",
+  commissionNis:             "",
+  commissionPct:             "",
 };
 
 const LANGS: { id: Lang; flag: string; label: string }[] = [
@@ -119,13 +123,20 @@ function fmtNis(agorot: number): string {
   return Math.round(agorot / 100).toLocaleString("he-IL");
 }
 
-/** Build a single readable Hebrew address string from the structured form fields.
- *  Sent as `propertyAddress` to POST /api/contracts and POST /api/properties.
+/**
+ * Build the structured address string stored in Contract.propertyAddress.
  *
- *  Examples:
- *    street="הרצל"   number="15" floor="3" apt="8" → "רחוב הרצל 15, קומה 3, דירה 8"
- *    street="הרצל"   number="15"                    → "רחוב הרצל 15"
- *    street="שדרות רוטשילד"                          → "רחוב שדרות רוטשילד"
+ * Format: "<street> <number>||<floor>||<apartment>"
+ *  • Street + number go into the address row of the contract table.
+ *  • Floor and apartment are encoded after "||" separators so ContractTemplate
+ *    and ContractPDF can render them as separate labeled rows.
+ *  • City is always sent separately as `propertyCity` — never part of this string.
+ *  • The "||" separator is safe in Hebrew addresses (never used in practice).
+ *
+ * Examples:
+ *   street="רוטשילד" number="15" floor="4" apt="8" → "רוטשילד 15||4||8"
+ *   street="הרצל"    number="22" floor=""  apt=""  → "הרצל 22"  (no separators)
+ *   street="הרצל"    number=""   floor="3" apt=""  → "הרצל||3||"
  */
 function buildPropertyAddress(f: FormState): string {
   const street = f.propertyStreet.trim();
@@ -134,10 +145,9 @@ function buildPropertyAddress(f: FormState): string {
   const floor = f.propertyFloor.trim();
   const apt   = f.propertyApartment.trim();
 
-  const parts: string[] = [num ? `רחוב ${street} ${num}` : `רחוב ${street}`];
-  if (floor) parts.push(`קומה ${floor}`);
-  if (apt)   parts.push(`דירה ${apt}`);
-  return parts.join(", ");
+  const baseAddr = num ? `${street} ${num}` : street;
+  if (!floor && !apt) return baseAddr;
+  return `${baseAddr}||${floor}||${apt}`;
 }
 
 function calcCommissionAgorot(f: FormState): number {
@@ -955,21 +965,22 @@ export function NewContractForm() {
     }
 
     const payload = {
-      contractType:    "החתמת מתעניין",
-      language:        form.language,
-      dealType:        form.dealType,
-      clientName:      form.clientName.trim(),
-      clientPhone:     form.clientPhone.trim(),
-      clientEmail:     form.skipEmailId ? "" : form.clientEmail.trim(),
-      clientIdNumber:  form.skipEmailId ? "" : form.clientIdNumber.trim(),
+      contractType:              "החתמת מתעניין",
+      language:                  form.language,
+      dealType:                  form.dealType,
+      clientName:                form.clientName.trim(),
+      clientPhone:               form.clientPhone.trim(),
+      clientEmail:               form.skipEmailId ? "" : form.clientEmail.trim(),
+      clientIdNumber:            form.skipEmailId ? "" : form.clientIdNumber.trim(),
       propertyAddress,
-      propertyCity:    form.propertyCity.trim(),
-      propertyPrice:   priceAgorot,
-      commission:      commissionAgorot,
+      propertyCity:              form.propertyCity.trim(),
+      propertyPrice:             priceAgorot,
+      commission:                commissionAgorot,
+      hideFullAddressFromClient: form.hideFullAddressFromClient,
       // Pass existingClientDbId when broker picked an existing client so the
       // API links the contract to the existing Client row (no duplicate).
-      ...(selectedClientId      ? { existingClientDbId: selectedClientId }      : {}),
-      ...(resolvedPropertyId    ? { propertyId:          resolvedPropertyId }    : {}),
+      ...(selectedClientId   ? { existingClientDbId: selectedClientId }   : {}),
+      ...(resolvedPropertyId ? { propertyId:         resolvedPropertyId } : {}),
     };
     try {
       const res = await fetch("/api/contracts", {
@@ -1248,6 +1259,38 @@ export function NewContractForm() {
                 />
               </div>
             </div>
+
+            {/* Hide-address toggle */}
+            <label className="flex items-start gap-3 cursor-pointer select-none group">
+              <div className="relative mt-0.5 flex-shrink-0">
+                <input
+                  type="checkbox"
+                  className="sr-only peer"
+                  checked={form.hideFullAddressFromClient}
+                  onChange={(e) => set("hideFullAddressFromClient", e.target.checked)}
+                />
+                <div className={[
+                  "w-4 h-4 rounded border-2 transition-all flex items-center justify-center",
+                  form.hideFullAddressFromClient
+                    ? "bg-indigo-600 border-indigo-600"
+                    : "bg-white border-gray-300 group-hover:border-indigo-400",
+                ].join(" ")}>
+                  {form.hideFullAddressFromClient && (
+                    <svg className="text-white" width="9" height="9" viewBox="0 0 24 24"
+                      fill="none" stroke="currentColor" strokeWidth="3.5"
+                      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                </div>
+              </div>
+              <div>
+                <p className="text-sm font-medium text-gray-700">הסתר כתובת נכס מהלקוח</p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  הלקוח יראה רק שם הרחוב. הכתובת המלאה תוצג אוטומטית לאחר חתימה.
+                </p>
+              </div>
+            </label>
 
             {/* Row 4: Property price
                 SALE   → "מחיר הנכס (₪)"      — used as askingPrice on the Property record
