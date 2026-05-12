@@ -119,10 +119,12 @@ function PropertyCard({
         </div>
       )}
 
-      {/* Asking price */}
+      {/* Asking price / monthly rent */}
       {p.askingPrice && (
         <div className="bg-gray-50 rounded-lg px-3.5 py-2.5">
-          <p className="text-xs text-gray-400 mb-0.5">מחיר מבוקש</p>
+          <p className="text-xs text-gray-400 mb-0.5">
+            {p.listingTypeKey === "RENTAL" ? "שכירות חודשית" : "מחיר מבוקש"}
+          </p>
           <p className="text-sm font-bold text-gray-900">{p.askingPrice}</p>
         </div>
       )}
@@ -540,15 +542,36 @@ function NewPropertyModal({
                   className={INPUT_CLS}
                 />
               </div>
+              {/* Price field — label + placeholder change by listingType */}
               <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">מחיר מבוקש (₪)</label>
-                <input
-                  type="text"
-                  placeholder="3,500,000"
-                  value={form.askingPrice}
-                  onChange={(e) => set({ askingPrice: e.target.value })}
-                  className={INPUT_CLS}
-                />
+                {form.listingType === "BOTH" ? (
+                  <>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">מחיר (₪)</label>
+                    <input
+                      type="text"
+                      placeholder="3,500,000"
+                      value={form.askingPrice}
+                      onChange={(e) => set({ askingPrice: e.target.value })}
+                      className={INPUT_CLS}
+                    />
+                    <p className="text-xs text-gray-400 mt-1.5">
+                      כרגע נשמר מחיר אחד בלבד — הזן את המחיר הרלוונטי (מכירה או שכירות)
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      {form.listingType === "RENTAL" ? "שכירות חודשית (₪)" : "מחיר מבוקש (₪)"}
+                    </label>
+                    <input
+                      type="text"
+                      placeholder={form.listingType === "RENTAL" ? "5,500" : "3,500,000"}
+                      value={form.askingPrice}
+                      onChange={(e) => set({ askingPrice: e.target.value })}
+                      className={INPUT_CLS}
+                    />
+                  </>
+                )}
               </div>
             </div>
           </div>
