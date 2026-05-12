@@ -318,6 +318,15 @@ function ClientPicker({
               <button
                 key={c.id}
                 type="button"
+                onMouseDown={(e) => {
+                  // Prevent the search input from blurring (which dismisses the
+                  // virtual keyboard on mobile and causes a viewport scroll that
+                  // would close the picker before onClick fires).
+                  e.preventDefault();
+                  // Stop the document-level mousedown outside-click listener from
+                  // seeing this event and closing the picker prematurely.
+                  e.stopPropagation();
+                }}
                 onClick={() => { onSelect(c); picker.close(); }}
                 className="w-full flex items-start gap-3 px-4 py-3 text-right hover:bg-indigo-50/60 transition-colors border-b border-gray-50 last:border-0"
               >
@@ -446,6 +455,13 @@ function PropertyPicker({
               <button
                 key={p.id}
                 type="button"
+                onMouseDown={(e) => {
+                  // Same fix as ClientPicker: prevent search input blur (no
+                  // keyboard dismiss → no viewport scroll → picker stays open)
+                  // and stop the document outside-click handler from firing.
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
                 onClick={() => { onSelect(p); picker.close(); }}
                 className="w-full flex items-start gap-3 px-4 py-3 text-right hover:bg-indigo-50/60 transition-colors border-b border-gray-50 last:border-0"
               >
