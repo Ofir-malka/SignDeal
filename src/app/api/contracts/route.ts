@@ -9,6 +9,7 @@ import { resolveTemplate, buildContext } from "@/lib/contracts/resolve-template"
 import { rateLimit } from "@/lib/rate-limit";
 import { parsePositiveInt, parseNonNegativeInt, parseEnum, firstError } from "@/lib/validate";
 import { sendEmail, contractSigningEmail } from "@/lib/email";
+import { parsePropertyAddress } from "@/lib/format-address";
 
 // ─── SMS helper ───────────────────────────────────────────────────────────────
 // Fire-and-forget: never throws, never blocks the HTTP response.
@@ -143,7 +144,7 @@ async function sendContractEmail(
     const template = contractSigningEmail({
       clientName,
       brokerName,
-      propertyAddress: contract.propertyAddress,
+      propertyAddress: parsePropertyAddress(contract.propertyAddress).address,
       signingLink,
     });
 

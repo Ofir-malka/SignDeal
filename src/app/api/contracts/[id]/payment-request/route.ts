@@ -7,6 +7,7 @@ import { sendSms, getSmsProviderName } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { rateLimit } from "@/lib/rate-limit";
 import { sendEmail, paymentRequestEmail } from "@/lib/email";
+import { parsePropertyAddress } from "@/lib/format-address";
 
 export async function POST(
   request: Request,
@@ -116,7 +117,7 @@ export async function POST(
       clientName:  contract.client.name,
       clientPhone: contract.client.phone,
       clientEmail: contract.client.email || undefined,
-      description: `עמלת תיווך — ${contract.propertyAddress}, ${contract.propertyCity}`,
+      description: `עמלת תיווך — ${parsePropertyAddress(contract.propertyAddress).address}, ${contract.propertyCity}`,
     });
 
     if (!linkResult.ok) {
@@ -149,7 +150,7 @@ export async function POST(
       id:              contract.id,
       userId,
       clientId:        contract.client.id,
-      propertyAddress: contract.propertyAddress,
+      propertyAddress: parsePropertyAddress(contract.propertyAddress).address,
       client:          contract.client,
     };
     const notifyPayment = { id: updated.id, paymentUrl: updated.paymentUrl };

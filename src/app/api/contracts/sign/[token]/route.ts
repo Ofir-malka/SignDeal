@@ -5,6 +5,7 @@ import { sendSms, getSmsProviderName } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { rateLimit, getRealIp } from "@/lib/rate-limit";
 import { sendEmail, contractSignedEmail } from "@/lib/email";
+import { parsePropertyAddress } from "@/lib/format-address";
 
 // ── UUID format guard — reject obviously invalid tokens before hitting the DB ─
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -389,7 +390,9 @@ export async function PATCH(
         id:              contract.id,
         userId:          contract.userId,
         clientId:        contract.clientId,
-        propertyAddress: contract.propertyAddress,
+        // Decode the stored "street||floor||apt" format — notifications only
+        // need the human-readable address portion.
+        propertyAddress: parsePropertyAddress(contract.propertyAddress).address,
       };
 
       // Both broker notifications run AFTER the signing response is flushed so

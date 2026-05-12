@@ -4,6 +4,7 @@ import { sendSms } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { requireUserId } from "@/lib/require-user";
 import { rateLimit } from "@/lib/rate-limit";
+import { parsePropertyAddress } from "@/lib/format-address";
 
 export async function POST(
   _req: Request,
@@ -58,7 +59,7 @@ export async function POST(
 
     const body =
       `שלום ${client.name},\n` +
-      `לתשלום עמלת התיווך עבור הנכס ${contract.propertyAddress}:\n` +
+      `לתשלום עמלת התיווך עבור הנכס ${parsePropertyAddress(contract.propertyAddress).address}:\n` +
       `${payment.paymentUrl}\n\n` +
       `SignDeal`;
 

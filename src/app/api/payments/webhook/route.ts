@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getPaymentProvider, WebhookSignatureError } from "@/lib/payments";
 import { sendNotification } from "@/lib/messaging/notify";
 import { sendEmail, paymentReceivedEmail } from "@/lib/email";
+import { parsePropertyAddress } from "@/lib/format-address";
 
 /**
  * POST /api/payments/webhook
@@ -234,7 +235,7 @@ async function notifyBrokerPaid(contractId: string, paymentId: string): Promise<
     if (contract.user.phone) {
       const body =
         `התקבל תשלום עבור:\n` +
-        `${contract.propertyAddress}\n\n` +
+        `${parsePropertyAddress(contract.propertyAddress).address}\n\n` +
         `סכום:\n` +
         `₪${amountFormatted}\n\n` +
         `${contract.client.name} השלים/ה את התשלום בהצלחה.\n\n` +
@@ -267,7 +268,7 @@ async function notifyBrokerPaid(contractId: string, paymentId: string): Promise<
       id:              contract.id,
       userId:          contract.userId,
       clientId:        contract.clientId,
-      propertyAddress: contract.propertyAddress,
+      propertyAddress: parsePropertyAddress(contract.propertyAddress).address,
       brokerFullName:  contract.user.fullName,
       brokerEmail:     contract.user.email,
       clientName:      contract.client.name,

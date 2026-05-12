@@ -1,4 +1,5 @@
 import type { Contract, SignatureStatus, PaymentStatus } from "@/lib/contracts-data";
+import { parsePropertyAddress } from "@/lib/format-address";
 
 // ─── API response shape ───────────────────────────────────────────────────────
 
@@ -76,7 +77,7 @@ export function apiToContract(c: ApiContractResponse): Contract {
     id:              c.id,
     client:          c.client.name,
     contractType:    c.contractType,
-    property:        `${c.propertyAddress}, ${c.propertyCity}`,
+    property:        `${parsePropertyAddress(c.propertyAddress).address}, ${c.propertyCity}`,
     dealType:        DEAL_TYPE_MAP[c.dealType]    ?? "שכירות",
     signatureStatus: STATUS_MAP[c.status]          ?? "טיוטה",
     paymentStatus:   c.payment ? (PAY_STATUS_MAP[c.payment.status] ?? null) : null,

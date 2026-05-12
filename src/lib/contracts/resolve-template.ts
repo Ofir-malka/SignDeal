@@ -1,3 +1,5 @@
+import { parsePropertyAddress } from "@/lib/format-address";
+
 // ── Document-body parser ──────────────────────────────────────────────────────
 //
 // Used by both ContractTemplate (HTML signing page) and ContractPDF to render
@@ -133,7 +135,7 @@ export function buildContext(opts: {
     clientIdNumber:  opts.client.idNumber      || "—",
     clientPhone:     opts.client.phone,
     clientEmail:     opts.client.email         || "—",
-    propertyAddress: opts.contract.propertyAddress,
+    propertyAddress: parsePropertyAddress(opts.contract.propertyAddress).address,
     propertyCity:    opts.contract.propertyCity,
     propertyPrice:   formatAgorot(opts.contract.propertyPrice),
     dealType:        DEAL_TYPE_HE[opts.contract.dealType] ?? opts.contract.dealType,

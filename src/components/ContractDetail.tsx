@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import type { Contract, SignatureStatus, PaymentStatus } from "@/lib/contracts-data";
 import { ContractDealWrapper } from "@/components/ContractDealWrapper";
+import { parsePropertyAddress } from "@/lib/format-address";
 
 // ─── Status badges ────────────────────────────────────────────────────────────
 
@@ -179,12 +180,17 @@ export function ContractDetail({ contract: c }: { contract: Contract }) {
           />
           <InfoCard
             title="פרטי נכס"
-            rows={[
-              { label: "כתובת",    value: c.propertyAddress },
-              { label: "עיר",      value: c.propertyCity    },
-              { label: "סוג עסקה", value: c.dealType        },
-              { label: "מחיר",     value: c.propertyPrice   },
-            ]}
+            rows={(() => {
+              const { address, floor, apartment } = parsePropertyAddress(c.propertyAddress);
+              return [
+                { label: "כתובת",    value: address           },
+                { label: "עיר",      value: c.propertyCity    },
+                ...(floor     ? [{ label: "קומה", value: floor     }] : []),
+                ...(apartment ? [{ label: "דירה", value: apartment }] : []),
+                { label: "סוג עסקה", value: c.dealType        },
+                { label: "מחיר",     value: c.propertyPrice   },
+              ];
+            })()}
           />
           <InfoCard
             title="פרטי חוזה"

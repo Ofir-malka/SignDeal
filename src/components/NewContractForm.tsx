@@ -24,6 +24,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import Link from "next/link";
+import { parsePropertyAddress } from "@/lib/format-address";
 
 // ── API response shapes ────────────────────────────────────────────────────────
 
@@ -607,7 +608,7 @@ function PropertyPicker({
                   </svg>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate">{p.address}</p>
+                  <p className="text-sm font-semibold text-gray-900 truncate">{parsePropertyAddress(p.address).address}</p>
                   <p className="text-xs text-gray-400 mt-0.5">
                     {p.city}
                     {p.listingType && ` · ${LISTING_LABEL[p.listingType] ?? p.listingType}`}
@@ -847,15 +848,18 @@ export function NewContractForm() {
 
   // ── Property selection handlers ───────────────────────────────────────────
   function handlePropertySelect(p: ApiProperty) {
+    // Decode the stored address — new records use "street||floor||apt" encoding;
+    // legacy plain-text records have no "||" so parsePropertyAddress returns the
+    // full string as `address` with empty floor/apartment.
+    const parsed = parsePropertyAddress(p.address);
     setForm((prev) => ({
       ...prev,
-      // Full stored address goes into the street field; sub-fields stay empty.
-      // Structured parsing is intentionally skipped — addresses in the DB can
-      // be free-form text from older records; better to show as-is.
-      propertyStreet:    p.address,
+      propertyStreet:    parsed.address,
       propertyNumber:    "",
-      propertyFloor:     p.floor != null ? String(p.floor) : "",
-      propertyApartment: "",
+      // Floor: prefer the encoded value (new format); fall back to the numeric
+      // Property.floor column (old format); finally leave empty.
+      propertyFloor:     parsed.floor || (p.floor != null ? String(p.floor) : ""),
+      propertyApartment: parsed.apartment,
       propertyCity:      p.city,
       // Prefill price only when askingPrice is set; leave existing value otherwise
       ...(p.askingPrice != null
@@ -863,7 +867,7 @@ export function NewContractForm() {
         : {}),
     }));
     setSelectedPropertyId(p.id);
-    setSelectedPropertyAddr(p.address);
+    setSelectedPropertyAddr(parsed.address);
     setErrors((prev) => {
       const next = { ...prev };
       delete next.propertyStreet; delete next.propertyCity; delete next.priceNis;
