@@ -50,7 +50,7 @@ interface ApiProperty {
 type Lang                   = "HE" | "EN" | "FR" | "RU";
 type DealType               = "SALE" | "RENTAL" | "BOTH";
 type CommissionMode         = "fixed" | "percent";
-type RentalCommissionPreset = "one_month" | "half_month" | "two_months" | "fixed";
+type RentalCommissionPreset = "one_month" | "fixed";
 
 interface FormState {
   language:          Lang;
@@ -196,13 +196,10 @@ function calcCommissionAgorot(f: FormState): number {
     if (isNaN(priceNis) || isNaN(pct)) return NaN;
     return Math.round(priceNis * pct);   // priceNis(₪) × pct(%) = commission in agorot
   }
-  // RENTAL and BOTH share the preset logic (priceNis = monthly rent)
+  // RENTAL and BOTH — "one_month" preset: commission = 1 × monthly rent
   if ((f.dealType === "RENTAL" || f.dealType === "BOTH") && f.rentalCommissionPreset !== "fixed") {
     if (isNaN(priceNis)) return NaN;
-    const multiplier =
-      f.rentalCommissionPreset === "half_month"  ? 0.5 :
-      f.rentalCommissionPreset === "two_months"  ? 2   : 1;   // one_month default
-    return Math.round(priceNis * multiplier * 100);
+    return Math.round(priceNis * 100);
   }
   const commNis = parseNis(f.commissionNis);
   return isNaN(commNis) ? NaN : Math.round(commNis * 100);
@@ -361,7 +358,7 @@ function usePicker<T>(fetchUrl: string) {
       setDropPos({
         top:      rect.bottom + 4,
         right:    window.innerWidth - rect.right,
-        minWidth: Math.max(rect.width, 280),
+        minWidth: Math.min(Math.max(rect.width, 220), window.innerWidth - 32),
       });
     }
     setOpen(true);
@@ -419,7 +416,7 @@ function ClientPicker({
     <div className="mb-4">
       {/* Trigger / selected chip */}
       {selectedName ? (
-        <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-xl text-sm w-fit">
+        <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 border border-indigo-200 rounded-xl text-sm w-fit max-w-full">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
             stroke="#4f46e5" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="20 6 9 17 4 12" />
@@ -438,7 +435,7 @@ function ClientPicker({
           ref={picker.triggerRef}
           type="button"
           onClick={picker.openPicker}
-          className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-dashed border-gray-300 text-sm font-medium text-gray-500 hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50/40 transition-all"
+          className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-dashed border-gray-300 text-base sm:text-sm font-medium text-gray-500 hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50/40 transition-all"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -458,7 +455,7 @@ function ClientPicker({
             top:       picker.dropPos.top,
             right:     picker.dropPos.right,
             minWidth:  picker.dropPos.minWidth,
-            maxWidth:  400,
+            maxWidth:  "calc(100vw - 32px)",
             zIndex:    9999,
           }}
           className="bg-white rounded-2xl border border-gray-200 shadow-xl overflow-hidden"
@@ -478,7 +475,7 @@ function ClientPicker({
                 value={picker.query}
                 onChange={(e) => picker.setQuery(e.target.value)}
                 placeholder="חפש לפי שם או טלפון..."
-                className="w-full pe-8 ps-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent placeholder-gray-400"
+                className="w-full pe-8 ps-3 py-2 text-base sm:text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent placeholder-gray-400"
               />
             </div>
           </div>
@@ -593,7 +590,7 @@ function PropertyPicker({
           ref={picker.triggerRef}
           type="button"
           onClick={picker.openPicker}
-          className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-dashed border-gray-300 text-sm font-medium text-gray-500 hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50/40 transition-all"
+          className="flex items-center gap-2 px-3.5 py-2 rounded-xl border border-dashed border-gray-300 text-base sm:text-sm font-medium text-gray-500 hover:border-indigo-300 hover:text-indigo-600 hover:bg-indigo-50/40 transition-all"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
             stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -613,7 +610,7 @@ function PropertyPicker({
             top:       picker.dropPos.top,
             right:     picker.dropPos.right,
             minWidth:  picker.dropPos.minWidth,
-            maxWidth:  440,
+            maxWidth:  "calc(100vw - 32px)",
             zIndex:    9999,
           }}
           className="bg-white rounded-2xl border border-gray-200 shadow-xl overflow-hidden"
@@ -633,7 +630,7 @@ function PropertyPicker({
                 value={picker.query}
                 onChange={(e) => picker.setQuery(e.target.value)}
                 placeholder="חפש לפי כתובת או עיר..."
-                className="w-full pe-8 ps-3 py-2 text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent placeholder-gray-400"
+                className="w-full pe-8 ps-3 py-2 text-base sm:text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent placeholder-gray-400"
               />
             </div>
           </div>
@@ -724,7 +721,7 @@ function TextInput({ id, value, onChange, placeholder, type = "text", error, dis
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder} disabled={disabled}
         className={[
-          "w-full px-3.5 py-2.5 rounded-xl border text-sm text-gray-900",
+          "w-full px-3.5 py-2.5 rounded-xl border text-base sm:text-sm text-gray-900",
           "placeholder-gray-400 focus:outline-none focus:ring-2 focus:border-transparent transition-all",
           disabled ? "bg-gray-50 text-gray-400 cursor-not-allowed" : "bg-white",
           error ? "border-red-300 focus:ring-red-400" : "border-gray-200 focus:ring-indigo-500",
@@ -1134,7 +1131,7 @@ export function NewContractForm() {
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="pb-28" dir="rtl">
+    <div className="pb-28 overflow-x-hidden" dir="rtl">
 
       {/* Header */}
       <div className="mb-8">
@@ -1449,27 +1446,40 @@ export function NewContractForm() {
               </div>
             </label>
 
-            {/* Row 4: Property price
-                SALE   → "מחיר הנכס (₪)"       — stored as propertyPrice on Contract
-                RENTAL → "שכירות חודשית (₪)"   — stored as propertyPrice on Contract
-                BOTH   → "שכירות חודשית (₪)"   — monthly rent; stored as propertyPrice.
-                          Asking price for sale % commission is collected in the commission section. */}
-            <div>
-              <FieldLabel htmlFor="priceNis">
-                {form.dealType === "SALE" ? "מחיר הנכס (₪)" : "שכירות חודשית (₪)"}
-              </FieldLabel>
-              <TextInput
-                id="priceNis"
-                value={form.priceNis}
-                onChange={(v) => set("priceNis", v)}
-                placeholder={form.dealType === "SALE" ? "1,500,000" : "5,000"}
-                error={errors.priceNis}
-              />
+            {/* Row 4: Property price(s)
+                SALE   → "מחיר הנכס (₪)"      — stored as propertyPrice on Contract
+                RENTAL → "שכירות חודשית (₪)"  — stored as propertyPrice on Contract
+                BOTH   → monthly rent + sale price (salePriceNis is local state only) */}
+            <div className={form.dealType === "BOTH" ? "grid grid-cols-1 sm:grid-cols-2 gap-4" : ""}>
+
+              {/* Monthly rent / asking price */}
+              <div>
+                <FieldLabel htmlFor="priceNis">
+                  {form.dealType === "SALE" ? "מחיר הנכס (₪)" : "שכירות חודשית (₪)"}
+                </FieldLabel>
+                <TextInput
+                  id="priceNis"
+                  value={form.priceNis}
+                  onChange={(v) => set("priceNis", v)}
+                  placeholder={form.dealType === "SALE" ? "1,500,000" : "5,000"}
+                  error={errors.priceNis}
+                />
+              </div>
+
+              {/* Sale price — only shown for BOTH; local form state, not stored in DB */}
               {form.dealType === "BOTH" && (
-                <p className="text-xs text-gray-400 mt-1">
-                  השכירות החודשית משמשת לחישוב עמלת השכירות. מחיר המכירה יוזן בהמשך.
-                </p>
+                <div>
+                  <FieldLabel htmlFor="salePriceNis">מחיר מכירה (₪)</FieldLabel>
+                  <TextInput
+                    id="salePriceNis"
+                    value={form.salePriceNis}
+                    onChange={(v) => set("salePriceNis", v)}
+                    placeholder="1,500,000"
+                    error={errors.salePriceNis}
+                  />
+                </div>
               )}
+
             </div>
 
             {/* Helper text — auto-save notice */}
@@ -1495,8 +1505,6 @@ export function NewContractForm() {
             {(form.dealType === "RENTAL" || form.dealType === "BOTH") && (() => {
               const presets: { id: RentalCommissionPreset; label: string; sub?: string }[] = [
                 { id: "one_month",   label: "חודש שכירות",    sub: "×1"   },
-                { id: "half_month",  label: "חצי חודש",       sub: "×0.5" },
-                { id: "two_months",  label: "שני חודשים",     sub: "×2"   },
                 { id: "fixed",       label: "סכום ידני (₪)"              },
               ];
               return (
@@ -1599,19 +1607,14 @@ export function NewContractForm() {
                   ))}
                 </div>
                 {form.commissionSaleMode === "percent" ? (
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">מחיר מכירה (₪)</label>
-                      <TextInput id="salePriceNis" value={form.salePriceNis} onChange={(v) => set("salePriceNis", v)}
-                        placeholder="1,500,000" error={errors.salePriceNis} />
-                      <p className="text-xs text-gray-400 mt-1">משמש לחישוב האחוז בלבד — לא נשמר בחוזה</p>
-                    </div>
-                    <div>
-                      <label className="block text-xs font-medium text-gray-500 mb-1">אחוז עמלה (%)</label>
-                      <TextInput id="commissionSalePct" value={form.commissionSalePct} onChange={(v) => set("commissionSalePct", v)}
-                        placeholder="2" error={errors.commissionSalePct} />
-                      <p className="text-xs text-gray-400 mt-1">לדוגמה: 2 = 2% ממחיר המכירה</p>
-                    </div>
+                  <div>
+                    <TextInput id="commissionSalePct" value={form.commissionSalePct} onChange={(v) => set("commissionSalePct", v)}
+                      placeholder="2" error={errors.commissionSalePct} />
+                    <p className="text-xs text-gray-400 mt-1">
+                      לדוגמה: 2 = 2% ממחיר המכירה{form.salePriceNis.trim() && !isNaN(parseFloat(form.salePriceNis.replace(/[, ]/g, "")))
+                        ? ` (₪${form.salePriceNis.trim()})`
+                        : " — הזן מחיר מכירה בפרטי הנכס"}
+                    </p>
                   </div>
                 ) : (
                   <div>
