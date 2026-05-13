@@ -409,7 +409,10 @@ export function ContractPDF({ contract: c, broker }: { contract: Contract; broke
       ...(propApt   ? [[labels.apartment, propApt  ] as [string, string]] : []),
       [labels.dealType,   c.dealType],
       [labels.price,      c.propertyPrice],
-      [labels.commission, c.commission],
+      // BOTH: split into two commission rows
+      ...(c.dealType === "גם וגם" && c.commissionSale
+        ? [["עמלת שכירות", c.commission] as [string, string], ["עמלת מכירה", c.commissionSale] as [string, string]]
+        : [[labels.commission, c.commission] as [string, string]]),
     ];
 
     const docLang = (c.language ?? "HE").toLowerCase();
@@ -489,7 +492,9 @@ export function ContractPDF({ contract: c, broker }: { contract: Contract; broke
     "הלקוח מתחייב שלא לבצע עסקה הקשורה לנכס זה ללא תיווך המשרד במהלך תקופת ההסכם.",
     c.dealType === "שכירות"
       ? "תקופת ההתקשרות הינה 6 חודשים ממועד החתימה, ותחודש בהסכמת שני הצדדים."
-      : "תקופת ההתקשרות הינה 12 חודשים ממועד החתימה, ותחודש בהסכמת שני הצדדים.",
+      : c.dealType === "גם וגם"
+        ? "תקופת ההתקשרות הינה 12 חודשים ממועד החתימה עבור מכירה ו-6 חודשים עבור השכרה, ותחודש בהסכמת שני הצדדים."
+        : "תקופת ההתקשרות הינה 12 חודשים ממועד החתימה, ותחודש בהסכמת שני הצדדים.",
     'הסכם זה כפוף לחוק המתווכים במקרקעין, תשנ"ו-1996 ולכל דין רלוונטי אחר.',
     "סמכות שיפוטית לבירור כל מחלוקת תהא לבתי המשפט המוסמכים.",
   ];
@@ -537,10 +542,23 @@ export function ContractPDF({ contract: c, broker }: { contract: Contract; broke
         {/* Commission */}
         <View style={S.section}>
           <Text style={[S.sectionTitle, { textAlign: td }]}>ד. {labels.commissionTerms}</Text>
-          <Text style={[S.bodyText, { textAlign: td }]}>
-            {labels.commission}:{" "}
-            <Text style={S.bold}>{c.commission}</Text>
-          </Text>
+          {c.dealType === "גם וגם" ? (
+            <>
+              <Text style={[S.bodyText, { textAlign: td }]}>
+                {"עמלת שכירות: "}<Text style={S.bold}>{c.commission}</Text>
+              </Text>
+              {c.commissionSale && (
+                <Text style={[S.bodyText, { textAlign: td }]}>
+                  {"עמלת מכירה: "}<Text style={S.bold}>{c.commissionSale}</Text>
+                </Text>
+              )}
+            </>
+          ) : (
+            <Text style={[S.bodyText, { textAlign: td }]}>
+              {labels.commission}:{" "}
+              <Text style={S.bold}>{c.commission}</Text>
+            </Text>
+          )}
         </View>
 
         {/* Terms */}

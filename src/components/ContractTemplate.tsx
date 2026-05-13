@@ -73,7 +73,10 @@ function PropertyTable({
     ...(apartment ? [[labels.apartment, apartment] as [string, string]] : []),
     [labels.dealType,   c.dealType],
     [labels.price,      c.propertyPrice],
-    [labels.commission, c.commission],
+    // For BOTH: show rental commission first, then sale commission separately
+    ...(c.dealType === "גם וגם" && c.commissionSale
+      ? [["עמלת שכירות", c.commission] as [string, string], ["עמלת מכירה", c.commissionSale] as [string, string]]
+      : [[labels.commission, c.commission] as [string, string]]),
   ];
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -292,10 +295,19 @@ export function ContractTemplate({
       {/* Commission */}
       <div className="px-6 py-5">
         <Section title={labels.commissionTerms}>
-          <p className="text-sm text-gray-700 leading-relaxed">
-            {labels.commission}:{" "}
-            <span className="font-semibold text-gray-900">{c.commission}</span>
-          </p>
+          {c.dealType === "גם וגם" ? (
+            <div className="space-y-1 text-sm text-gray-700 leading-relaxed">
+              <p>עמלת שכירות:{" "}<span className="font-semibold text-gray-900">{c.commission}</span></p>
+              {c.commissionSale && (
+                <p>עמלת מכירה:{" "}<span className="font-semibold text-gray-900">{c.commissionSale}</span></p>
+              )}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-700 leading-relaxed">
+              {labels.commission}:{" "}
+              <span className="font-semibold text-gray-900">{c.commission}</span>
+            </p>
+          )}
         </Section>
       </div>
 
@@ -308,7 +320,9 @@ export function ContractTemplate({
             <li>
               {c.dealType === "שכירות"
                 ? "תקופת ההתקשרות הינה 6 חודשים ממועד החתימה, ותחודש בהסכמת שני הצדדים."
-                : "תקופת ההתקשרות הינה 12 חודשים ממועד החתימה, ותחודש בהסכמת שני הצדדים."}
+                : c.dealType === "גם וגם"
+                  ? "תקופת ההתקשרות הינה 12 חודשים ממועד החתימה עבור מכירה ו-6 חודשים עבור השכרה, ותחודש בהסכמת שני הצדדים."
+                  : "תקופת ההתקשרות הינה 12 חודשים ממועד החתימה, ותחודש בהסכמת שני הצדדים."}
             </li>
             <li>הסכם זה כפוף לחוק המתווכים במקרקעין, תשנ״ו-1996 ולכל דין רלוונטי אחר.</li>
             <li>סמכות שיפוטית לבירור כל מחלוקת תהא לבתי המשפט המוסמכים.</li>

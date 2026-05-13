@@ -72,8 +72,9 @@ export interface TemplateContext {
   propertyAddress: string;
   propertyCity:    string;
   propertyPrice:   string;   // formatted: "₪1,500,000"
-  dealType:        string;   // "שכירות" | "מכירה"
-  commission:      string;   // formatted: "₪15,000"
+  dealType:        string;   // "שכירות" | "מכירה" | "גם וגם"
+  commission:      string;   // formatted: "₪15,000" (rental commission for BOTH)
+  commissionSale?: string;   // formatted: "₪30,000" — sale commission; set only for BOTH
   // Dates
   today:           string;   // DD.MM.YYYY
   contractId:      string;   // last 8 chars of id, uppercased
@@ -120,9 +121,10 @@ export function buildContext(opts: {
     id:              string;
     propertyAddress: string;
     propertyCity:    string;
-    propertyPrice:   number;   // agorot
-    dealType:        string;   // "RENTAL" | "SALE"
-    commission:      number;   // agorot
+    propertyPrice:   number;    // agorot
+    dealType:        string;    // "RENTAL" | "SALE" | "BOTH"
+    commission:      number;    // agorot (rental commission for BOTH)
+    commissionSale?: number | null;  // agorot; only set for BOTH
     createdAt:       Date | string;
   };
 }): TemplateContext {
@@ -140,6 +142,9 @@ export function buildContext(opts: {
     propertyPrice:   formatAgorot(opts.contract.propertyPrice),
     dealType:        DEAL_TYPE_HE[opts.contract.dealType] ?? opts.contract.dealType,
     commission:      formatAgorot(opts.contract.commission),
+    ...(opts.contract.commissionSale != null
+      ? { commissionSale: formatAgorot(opts.contract.commissionSale) }
+      : {}),
     today:           isoToDateStr(opts.contract.createdAt),
     contractId:      String(opts.contract.id).slice(-8).toUpperCase(),
   };

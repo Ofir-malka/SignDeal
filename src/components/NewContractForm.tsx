@@ -48,7 +48,7 @@ interface ApiProperty {
 // ── Form types ─────────────────────────────────────────────────────────────────
 
 type Lang                   = "HE" | "EN" | "FR" | "RU";
-type DealType               = "SALE" | "RENTAL";
+type DealType               = "SALE" | "RENTAL" | "BOTH";
 type CommissionMode         = "fixed" | "percent";
 type RentalCommissionPreset = "one_month" | "half_month" | "two_months" | "fixed";
 
@@ -77,6 +77,11 @@ interface FormState {
   commissionNis:               string;
   commissionPct:               string;
   rentalCommissionPreset:      RentalCommissionPreset;
+  // ── Sale-side commission (BOTH only) ─────────────────────────────────────
+  commissionSaleMode: CommissionMode;
+  commissionSaleNis:  string;   // BOTH + fixed: sale commission amount in ₪
+  commissionSalePct:  string;   // BOTH + percent: sale commission percentage
+  salePriceNis:       string;   // BOTH + percent: asking price used to calc % (not stored in DB)
 }
 
 type Stage =
@@ -108,6 +113,10 @@ const INITIAL: FormState = {
   commissionNis:             "",
   commissionPct:             "",
   rentalCommissionPreset:    "one_month",
+  commissionSaleMode:        "percent",
+  commissionSaleNis:         "",
+  commissionSalePct:         "",
+  salePriceNis:              "",
 };
 
 const LANGS: { id: Lang; flag: string; label: string }[] = [
@@ -176,6 +185,10 @@ function buildPropertyAddress(f: FormState): string {
   return `${baseAddr}||${floor}||${apt}`;
 }
 
+/**
+ * Rental commission (or full commission for SALE/RENTAL).
+ * For BOTH: this is the rental-side commission only.
+ */
 function calcCommissionAgorot(f: FormState): number {
   const priceNis = parseNis(f.priceNis);
   if (f.dealType === "SALE" && f.commissionMode === "percent") {
@@ -183,7 +196,8 @@ function calcCommissionAgorot(f: FormState): number {
     if (isNaN(priceNis) || isNaN(pct)) return NaN;
     return Math.round(priceNis * pct);   // priceNis(₪) × pct(%) = commission in agorot
   }
-  if (f.dealType === "RENTAL" && f.rentalCommissionPreset !== "fixed") {
+  // RENTAL and BOTH share the preset logic (priceNis = monthly rent)
+  if ((f.dealType === "RENTAL" || f.dealType === "BOTH") && f.rentalCommissionPreset !== "fixed") {
     if (isNaN(priceNis)) return NaN;
     const multiplier =
       f.rentalCommissionPreset === "half_month"  ? 0.5 :
@@ -191,6 +205,22 @@ function calcCommissionAgorot(f: FormState): number {
     return Math.round(priceNis * multiplier * 100);
   }
   const commNis = parseNis(f.commissionNis);
+  return isNaN(commNis) ? NaN : Math.round(commNis * 100);
+}
+
+/**
+ * Sale-side commission — only used when dealType === "BOTH".
+ * salePriceNis (asking price) is a local-only field used for % calc; not stored in DB.
+ */
+function calcCommissionSaleAgorot(f: FormState): number {
+  if (f.dealType !== "BOTH") return NaN;
+  if (f.commissionSaleMode === "percent") {
+    const salePriceNis = parseNis(f.salePriceNis);
+    const pct          = parseFloat(f.commissionSalePct);
+    if (isNaN(salePriceNis) || isNaN(pct)) return NaN;
+    return Math.round(salePriceNis * pct); // salePriceNis(₪) × pct(%) = agorot
+  }
+  const commNis = parseNis(f.commissionSaleNis);
   return isNaN(commNis) ? NaN : Math.round(commNis * 100);
 }
 
@@ -825,6 +855,20 @@ function SuccessScreen({ contractId, signatureToken, clientName, onCreateAnother
   );
 }
 
+// ── Shared commission preview chip ────────────────────────────────────────────
+
+function CommissionPreviewChip({ label }: { label: string }) {
+  return (
+    <div className="mt-3 flex items-center gap-2 px-3.5 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+        stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+      <span className="text-sm font-semibold text-emerald-700">{label}</span>
+    </div>
+  );
+}
+
 // ── Main form ──────────────────────────────────────────────────────────────────
 
 export function NewContractForm() {
@@ -926,10 +970,20 @@ export function NewContractForm() {
   }
 
   // ── Commission preview ────────────────────────────────────────────────────
-  const commAgorot = calcCommissionAgorot(form);
+  const commAgorot     = calcCommissionAgorot(form);
+  const commSaleAgorot = calcCommissionSaleAgorot(form);
+  // BOTH shows two separate previews; SALE/RENTAL show a single line
   const commPreview =
-    !isNaN(commAgorot) && commAgorot >= 0
+    !isNaN(commAgorot) && commAgorot >= 0 && form.dealType !== "BOTH"
       ? `עמלת תיווך: ₪${fmtNis(commAgorot)}`
+      : null;
+  const commRentalPreview =
+    form.dealType === "BOTH" && !isNaN(commAgorot) && commAgorot >= 0
+      ? `עמלת שכירות: ₪${fmtNis(commAgorot)}`
+      : null;
+  const commSalePreview =
+    form.dealType === "BOTH" && !isNaN(commSaleAgorot) && commSaleAgorot >= 0
+      ? `עמלת מכירה: ₪${fmtNis(commSaleAgorot)}`
       : null;
 
   // ── Validation ────────────────────────────────────────────────────────────
@@ -945,16 +999,31 @@ export function NewContractForm() {
     if (!form.propertyCity.trim())   e.propertyCity   = "עיר היא שדה חובה";
     const priceNis = parseNis(form.priceNis);
     if (isNaN(priceNis) || priceNis <= 0) {
-      e.priceNis = form.dealType === "SALE" ? "מחיר הנכס חייב להיות מספר חיובי" : "מחיר שכירות חייב להיות מספר חיובי";
+      e.priceNis = form.dealType === "SALE"
+        ? "מחיר הנכס חייב להיות מספר חיובי"
+        : "שכירות חודשית חייבת להיות מספר חיובי";
     }
+    // ── Rental commission (RENTAL + BOTH) ────────────────────────────────────
     if (form.dealType === "SALE" && form.commissionMode === "percent") {
       const pct = parseFloat(form.commissionPct);
       if (isNaN(pct) || pct < 0 || pct > 100) e.commissionPct = "אחוז עמלה חייב להיות בין 0 ל-100";
-    } else if (form.dealType === "RENTAL" && form.rentalCommissionPreset !== "fixed") {
+    } else if ((form.dealType === "RENTAL" || form.dealType === "BOTH") && form.rentalCommissionPreset !== "fixed") {
       // preset auto-calculates from monthly rent — no manual input to validate
     } else {
       const commNis = parseNis(form.commissionNis);
       if (isNaN(commNis) || commNis < 0) e.commissionNis = "עמלת תיווך חייבת להיות מספר חיובי או 0";
+    }
+    // ── Sale commission (BOTH only) ───────────────────────────────────────────
+    if (form.dealType === "BOTH") {
+      if (form.commissionSaleMode === "percent") {
+        const salePriceNis = parseNis(form.salePriceNis);
+        if (isNaN(salePriceNis) || salePriceNis <= 0) e.salePriceNis = "מחיר מכירה חייב להיות מספר חיובי";
+        const pct = parseFloat(form.commissionSalePct);
+        if (isNaN(pct) || pct < 0 || pct > 100) e.commissionSalePct = "אחוז עמלה למכירה חייב להיות בין 0 ל-100";
+      } else {
+        const commSaleNis = parseNis(form.commissionSaleNis);
+        if (isNaN(commSaleNis) || commSaleNis < 0) e.commissionSaleNis = "עמלת מכירה חייבת להיות מספר חיובי או 0";
+      }
     }
     return e;
   }
@@ -968,9 +1037,10 @@ export function NewContractForm() {
       return;
     }
     setStage({ name: "submitting" });
-    const priceAgorot      = Math.round(parseNis(form.priceNis) * 100);
-    const commissionAgorot = calcCommissionAgorot(form);
-    const propertyAddress  = buildPropertyAddress(form);
+    const priceAgorot          = Math.round(parseNis(form.priceNis) * 100);
+    const commissionAgorot     = calcCommissionAgorot(form);
+    const commissionSaleAgorot = form.dealType === "BOTH" ? calcCommissionSaleAgorot(form) : null;
+    const propertyAddress      = buildPropertyAddress(form);
 
     // ── Auto-save new property ────────────────────────────────────────────────
     // When the broker didn't select an existing property from the picker,
@@ -987,7 +1057,7 @@ export function NewContractForm() {
           address:     propertyAddress,
           city:        form.propertyCity.trim(),
           type:        "OTHER",
-          listingType: form.dealType === "SALE" ? "SALE" : "RENTAL",
+          listingType: form.dealType === "SALE" ? "SALE" : form.dealType === "BOTH" ? "BOTH" : "RENTAL",
           ...(Number.isInteger(floorNum) && form.propertyFloor.trim() !== ""
             ? { floor: floorNum }
             : {}),
@@ -1021,6 +1091,7 @@ export function NewContractForm() {
       propertyCity:              form.propertyCity.trim(),
       propertyPrice:             priceAgorot,
       commission:                commissionAgorot,
+      ...(commissionSaleAgorot !== null ? { commissionSale: commissionSaleAgorot } : {}),
       hideFullAddressFromClient: form.hideFullAddressFromClient,
       // Pass existingClientDbId when broker picked an existing client so the
       // API links the contract to the existing Client row (no duplicate).
@@ -1179,10 +1250,7 @@ export function NewContractForm() {
         {/* ══ 4. Deal type ══════════════════════════════════════════════════ */}
         {/* Must appear before Property Details so the price field label
             ("מחיר הנכס" vs "שכירות חודשית") is correct when the broker
-            reaches that section.
-            NOTE: schema/API support one DealType per contract (SALE | RENTAL).
-            "BOTH" is not supported at the DB/API layer yet — button is shown
-            but disabled with "בקרוב" badge. */}
+            reaches that section. */}
         <Section title="סוג עסקה" subtitle="בחר סוג עסקה אחד לחוזה זה">
           <div className="flex gap-3 flex-wrap">
 
@@ -1238,15 +1306,40 @@ export function NewContractForm() {
               מכירה
             </button>
 
-            {/* גם וגם — not yet supported at DB level */}
-            <button type="button" disabled
-              className="flex items-center gap-2.5 px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 text-sm font-semibold text-gray-300 cursor-not-allowed select-none">
+            {/* גם וגם */}
+            <button type="button"
+              onClick={() => {
+                setForm((prev) => ({
+                  ...prev,
+                  dealType: "BOTH",
+                  priceNis: "",
+                  commissionNis: "",
+                  commissionPct: "",
+                  commissionSaleNis: "",
+                  commissionSalePct: "",
+                  salePriceNis: "",
+                  rentalCommissionPreset: "one_month",
+                  commissionSaleMode: "percent",
+                }));
+                setErrors((prev) => {
+                  const n = { ...prev };
+                  delete n.priceNis; delete n.commissionNis; delete n.commissionPct;
+                  delete n.commissionSaleNis; delete n.commissionSalePct; delete n.salePriceNis;
+                  return n;
+                });
+                setStage((s) => s.name === "error" ? { name: "idle" } : s);
+              }}
+              className={[
+                "flex items-center gap-2.5 px-5 py-3 rounded-xl border text-sm font-semibold transition-all",
+                form.dealType === "BOTH"
+                  ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
+                  : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
+              ].join(" ")}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" /><rect x="9" y="13" width="6" height="8" rx="0.5" />
-                <rect x="3" y="3" width="7" height="7" rx="1" fill="currentColor" stroke="none" opacity="0.4" />
+                <rect x="3" y="3" width="7" height="7" rx="1" fill="currentColor" stroke="none" opacity="0.3" />
               </svg>
               גם וגם
-              <span className="text-[10px] font-medium bg-gray-200 text-gray-400 px-1.5 py-0.5 rounded-full">בקרוב</span>
             </button>
 
           </div>
@@ -1357,10 +1450,10 @@ export function NewContractForm() {
             </label>
 
             {/* Row 4: Property price
-                SALE   → "מחיר הנכס (₪)"      — used as askingPrice on the Property record
-                RENTAL → "שכירות חודשית (₪)"   — stored as propertyPrice (agorot) on Contract
-                BOTH   → not supported at DB/API layer (DealType is SALE | RENTAL enum).
-                          Current safe behavior: single price field, label follows dealType. */}
+                SALE   → "מחיר הנכס (₪)"       — stored as propertyPrice on Contract
+                RENTAL → "שכירות חודשית (₪)"   — stored as propertyPrice on Contract
+                BOTH   → "שכירות חודשית (₪)"   — monthly rent; stored as propertyPrice.
+                          Asking price for sale % commission is collected in the commission section. */}
             <div>
               <FieldLabel htmlFor="priceNis">
                 {form.dealType === "SALE" ? "מחיר הנכס (₪)" : "שכירות חודשית (₪)"}
@@ -1372,6 +1465,11 @@ export function NewContractForm() {
                 placeholder={form.dealType === "SALE" ? "1,500,000" : "5,000"}
                 error={errors.priceNis}
               />
+              {form.dealType === "BOTH" && (
+                <p className="text-xs text-gray-400 mt-1">
+                  השכירות החודשית משמשת לחישוב עמלת השכירות. מחיר המכירה יוזן בהמשך.
+                </p>
+              )}
             </div>
 
             {/* Helper text — auto-save notice */}
@@ -1391,100 +1489,141 @@ export function NewContractForm() {
 
         {/* ══ 6. Financial ══════════════════════════════════════════════════ */}
         <Section title="עמלת תיווך">
-          <div className="space-y-5">
-            <div>
-              <FieldLabel>עמלת תיווך</FieldLabel>
+          <div className="space-y-6">
 
-              {/* ── RENTAL: preset buttons ──────────────────────────────── */}
-              {form.dealType === "RENTAL" && (() => {
-                const presets: { id: RentalCommissionPreset; label: string; sub?: string }[] = [
-                  { id: "one_month",   label: "חודש שכירות",    sub: "×1"   },
-                  { id: "half_month",  label: "חצי חודש",       sub: "×0.5" },
-                  { id: "two_months",  label: "שני חודשים",     sub: "×2"   },
-                  { id: "fixed",       label: "סכום ידני (₪)"              },
-                ];
-                return (
-                  <>
-                    <div className="flex flex-wrap gap-2 mb-3">
-                      {presets.map((p) => (
-                        <button key={p.id} type="button"
-                          onClick={() => {
-                            set("rentalCommissionPreset", p.id);
-                            setErrors((prev) => { const n = { ...prev }; delete n.commissionNis; return n; });
-                          }}
-                          className={[
-                            "flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all",
-                            form.rentalCommissionPreset === p.id
-                              ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
-                              : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
-                          ].join(" ")}>
-                          {p.label}
-                          {p.sub && (
-                            <span className={[
-                              "text-[10px] font-medium px-1 py-0.5 rounded",
-                              form.rentalCommissionPreset === p.id ? "bg-indigo-100 text-indigo-500" : "bg-gray-100 text-gray-400",
-                            ].join(" ")}>{p.sub}</span>
-                          )}
-                        </button>
-                      ))}
-                    </div>
-                    {form.rentalCommissionPreset === "fixed" && (
-                      <div>
-                        <TextInput id="commissionNis" value={form.commissionNis} onChange={(v) => set("commissionNis", v)}
-                          placeholder="5,000" error={errors.commissionNis} />
-                        <p className="text-xs text-gray-400 mt-1">הזן 0 לעמלת תיווך ללא עלות</p>
-                      </div>
-                    )}
-                  </>
-                );
-              })()}
-
-              {/* ── SALE: percent / fixed toggle (unchanged) ───────────── */}
-              {form.dealType === "SALE" && (
-                <>
-                  <div className="flex gap-2 mb-3">
-                    {(["percent", "fixed"] as const).map((mode) => (
-                      <button key={mode} type="button"
+            {/* ── RENTAL presets (shared between RENTAL and the rental half of BOTH) */}
+            {(form.dealType === "RENTAL" || form.dealType === "BOTH") && (() => {
+              const presets: { id: RentalCommissionPreset; label: string; sub?: string }[] = [
+                { id: "one_month",   label: "חודש שכירות",    sub: "×1"   },
+                { id: "half_month",  label: "חצי חודש",       sub: "×0.5" },
+                { id: "two_months",  label: "שני חודשים",     sub: "×2"   },
+                { id: "fixed",       label: "סכום ידני (₪)"              },
+              ];
+              return (
+                <div>
+                  <FieldLabel>{form.dealType === "BOTH" ? "עמלת שכירות" : "עמלת תיווך"}</FieldLabel>
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {presets.map((p) => (
+                      <button key={p.id} type="button"
                         onClick={() => {
-                          set("commissionMode", mode);
-                          setErrors((prev) => { const n = { ...prev }; delete n.commissionNis; delete n.commissionPct; return n; });
+                          set("rentalCommissionPreset", p.id);
+                          setErrors((prev) => { const n = { ...prev }; delete n.commissionNis; return n; });
                         }}
                         className={[
-                          "px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all",
-                          form.commissionMode === mode
-                            ? "border-indigo-300 bg-indigo-50 text-indigo-700"
-                            : "border-gray-200 bg-white text-gray-500 hover:border-gray-300",
+                          "flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all",
+                          form.rentalCommissionPreset === p.id
+                            ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
+                            : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
                         ].join(" ")}>
-                        {mode === "percent" ? "אחוז (%)" : "סכום קבוע (₪)"}
+                        {p.label}
+                        {p.sub && (
+                          <span className={[
+                            "text-[10px] font-medium px-1 py-0.5 rounded",
+                            form.rentalCommissionPreset === p.id ? "bg-indigo-100 text-indigo-500" : "bg-gray-100 text-gray-400",
+                          ].join(" ")}>{p.sub}</span>
+                        )}
                       </button>
                     ))}
                   </div>
-                  {form.commissionMode === "percent" ? (
-                    <div>
-                      <TextInput id="commissionPct" value={form.commissionPct} onChange={(v) => set("commissionPct", v)}
-                        placeholder="2" error={errors.commissionPct} />
-                      <p className="text-xs text-gray-400 mt-1">לדוגמה: 2 = 2% ממחיר הנכס</p>
-                    </div>
-                  ) : (
+                  {form.rentalCommissionPreset === "fixed" && (
                     <div>
                       <TextInput id="commissionNis" value={form.commissionNis} onChange={(v) => set("commissionNis", v)}
-                        placeholder="11,000" error={errors.commissionNis} />
+                        placeholder="5,000" error={errors.commissionNis} />
                       <p className="text-xs text-gray-400 mt-1">הזן 0 לעמלת תיווך ללא עלות</p>
                     </div>
                   )}
-                </>
-              )}
-
-              {commPreview && (
-                <div className="mt-3 flex items-center gap-2 px-3.5 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                    stroke="#16a34a" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                  <span className="text-sm font-semibold text-emerald-700">{commPreview}</span>
+                  {/* commRentalPreview is set for BOTH; commPreview is set for RENTAL (never both at once) */}
+                  {commRentalPreview && <CommissionPreviewChip label={commRentalPreview} />}
+                  {commPreview       && <CommissionPreviewChip label={commPreview} />}
                 </div>
-              )}
-            </div>
+              );
+            })()}
+
+            {/* ── SALE commission (SALE only) ──────────────────────────────── */}
+            {form.dealType === "SALE" && (
+              <div>
+                <FieldLabel>עמלת תיווך</FieldLabel>
+                <div className="flex gap-2 mb-3">
+                  {(["percent", "fixed"] as const).map((mode) => (
+                    <button key={mode} type="button"
+                      onClick={() => {
+                        set("commissionMode", mode);
+                        setErrors((prev) => { const n = { ...prev }; delete n.commissionNis; delete n.commissionPct; return n; });
+                      }}
+                      className={[
+                        "px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all",
+                        form.commissionMode === mode
+                          ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                          : "border-gray-200 bg-white text-gray-500 hover:border-gray-300",
+                      ].join(" ")}>
+                      {mode === "percent" ? "אחוז (%)" : "סכום קבוע (₪)"}
+                    </button>
+                  ))}
+                </div>
+                {form.commissionMode === "percent" ? (
+                  <div>
+                    <TextInput id="commissionPct" value={form.commissionPct} onChange={(v) => set("commissionPct", v)}
+                      placeholder="2" error={errors.commissionPct} />
+                    <p className="text-xs text-gray-400 mt-1">לדוגמה: 2 = 2% ממחיר הנכס</p>
+                  </div>
+                ) : (
+                  <div>
+                    <TextInput id="commissionNis" value={form.commissionNis} onChange={(v) => set("commissionNis", v)}
+                      placeholder="11,000" error={errors.commissionNis} />
+                    <p className="text-xs text-gray-400 mt-1">הזן 0 לעמלת תיווך ללא עלות</p>
+                  </div>
+                )}
+                {commPreview && <CommissionPreviewChip label={commPreview} />}
+              </div>
+            )}
+
+            {/* ── Sale-side commission (BOTH only) ─────────────────────────── */}
+            {form.dealType === "BOTH" && (
+              <div className="border-t border-gray-100 pt-5">
+                <FieldLabel>עמלת מכירה</FieldLabel>
+                <div className="flex gap-2 mb-3">
+                  {(["percent", "fixed"] as const).map((mode) => (
+                    <button key={mode} type="button"
+                      onClick={() => {
+                        set("commissionSaleMode", mode);
+                        setErrors((prev) => { const n = { ...prev }; delete n.commissionSaleNis; delete n.commissionSalePct; delete n.salePriceNis; return n; });
+                      }}
+                      className={[
+                        "px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all",
+                        form.commissionSaleMode === mode
+                          ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                          : "border-gray-200 bg-white text-gray-500 hover:border-gray-300",
+                      ].join(" ")}>
+                      {mode === "percent" ? "אחוז (%)" : "סכום קבוע (₪)"}
+                    </button>
+                  ))}
+                </div>
+                {form.commissionSaleMode === "percent" ? (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">מחיר מכירה (₪)</label>
+                      <TextInput id="salePriceNis" value={form.salePriceNis} onChange={(v) => set("salePriceNis", v)}
+                        placeholder="1,500,000" error={errors.salePriceNis} />
+                      <p className="text-xs text-gray-400 mt-1">משמש לחישוב האחוז בלבד — לא נשמר בחוזה</p>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-500 mb-1">אחוז עמלה (%)</label>
+                      <TextInput id="commissionSalePct" value={form.commissionSalePct} onChange={(v) => set("commissionSalePct", v)}
+                        placeholder="2" error={errors.commissionSalePct} />
+                      <p className="text-xs text-gray-400 mt-1">לדוגמה: 2 = 2% ממחיר המכירה</p>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <TextInput id="commissionSaleNis" value={form.commissionSaleNis} onChange={(v) => set("commissionSaleNis", v)}
+                      placeholder="30,000" error={errors.commissionSaleNis} />
+                    <p className="text-xs text-gray-400 mt-1">הזן 0 לעמלת מכירה ללא עלות</p>
+                  </div>
+                )}
+                {commSalePreview && <CommissionPreviewChip label={commSalePreview} />}
+              </div>
+            )}
+
           </div>
         </Section>
 

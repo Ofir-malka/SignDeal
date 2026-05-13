@@ -368,7 +368,7 @@ export async function POST(request: Request) {
         const ctx = buildContext({
           broker:   { fullName: user.fullName, licenseNumber: user.licenseNumber ?? null, phone: user.phone ?? null, idNumber: user.idNumber ?? null },
           client:   { name: clientName, idNumber: clientIdNumber || "", phone: clientPhone, email: clientEmail || "" },
-          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: validatedCommission, createdAt: new Date() },
+          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: validatedCommission, commissionSale: validatedCommissionSale, createdAt: new Date() },
         });
         generatedText      = resolveTemplate(tpl.content, ctx);
         resolvedTemplateId = tpl.id;
