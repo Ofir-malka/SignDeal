@@ -43,16 +43,19 @@ export function getSmsProviderName(): "twilio" | "infobip" {
 async function sendViaTwilio({ to, body }: SendSmsParams): Promise<SmsResult> {
   const accountSid = process.env.TWILIO_ACCOUNT_SID?.trim();
   const authToken  = process.env.TWILIO_AUTH_TOKEN?.trim();
-  const from       = process.env.TWILIO_PHONE_NUMBER?.trim();
+  const senderId   = process.env.TWILIO_SENDER_ID?.trim();
+  const phoneNumber = process.env.TWILIO_PHONE_NUMBER?.trim();
+  const from       = senderId || phoneNumber;
 
   if (!accountSid || !authToken || !from) {
     return {
       ok:     false,
-      reason: "SMS provider not configured: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, or TWILIO_PHONE_NUMBER is missing",
+      reason: "SMS provider not configured: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and either TWILIO_SENDER_ID or TWILIO_PHONE_NUMBER are required",
     };
   }
 
-  console.log(`[sendSms/twilio] to=${to} from=${from}`);
+  const senderType = senderId ? "senderId" : "phoneNumber";
+  console.log(`[sendSms/twilio] to=${to} senderType=${senderType}`);
 
   try {
     const client  = twilio(accountSid, authToken);
