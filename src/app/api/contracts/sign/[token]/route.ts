@@ -63,6 +63,7 @@ export async function GET(
       propertyCity:    contract.propertyCity,
       propertyPrice:   contract.propertyPrice,
       commission:      contract.commission,
+      commissionSale:  contract.commissionSale ?? null,
       dealClosed:      contract.dealClosed,
       sentAt:          contract.sentAt?.toISOString()       ?? null,
       signedAt:        contract.signedAt?.toISOString()     ?? null,

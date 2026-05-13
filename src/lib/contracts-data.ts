@@ -15,13 +15,14 @@ export interface Contract {
   client:           string;
   contractType:     string;
   property:         string;   // full "street, city" for table display
-  dealType:         "שכירות" | "מכירה";
+  dealType:         "שכירות" | "מכירה" | "גם וגם";
   signatureStatus:  SignatureStatus;
   paymentStatus:    PaymentStatus;
   dealClosed:                boolean;
   hideFullAddressFromClient: boolean;
   dealClosedDate:            string | null;
-  commission:       string;
+  commission:       string;   // rental commission for BOTH; full commission for SALE/RENTAL
+  commissionSale?:  string | null;   // sale commission; only present when dealType = "גם וגם"
   sentDate:         string;
   // ── Detail fields (ContractDetail) ───────────────────
   clientPhone:      string;

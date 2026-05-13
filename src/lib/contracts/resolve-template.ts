@@ -99,7 +99,7 @@ function isoToDateStr(iso: string | Date): string {
   return `${String(d.getDate()).padStart(2, "0")}.${String(d.getMonth() + 1).padStart(2, "0")}.${d.getFullYear()}`;
 }
 
-const DEAL_TYPE_HE: Record<string, string> = { RENTAL: "שכירות", SALE: "מכירה" };
+const DEAL_TYPE_HE: Record<string, string> = { RENTAL: "שכירות", SALE: "מכירה", BOTH: "גם וגם" };
 
 // ── Context builder ───────────────────────────────────────────────────────────
 

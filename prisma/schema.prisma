@@ -133,7 +133,8 @@ model Contract {
   propertyAddress String
   propertyCity    String
   propertyPrice   Int             // stored in agorot (smallest currency unit)
-  commission      Int             // stored in agorot
+  commission      Int             // stored in agorot (rental commission for BOTH; full commission for SALE/RENTAL)
+  commissionSale  Int?            // stored in agorot; only set when dealType = BOTH (sale-side commission)
 
   // Dates
   createdAt       DateTime        @default(now())
@@ -224,6 +225,7 @@ enum SignatureStatus {
 enum DealType {
   RENTAL    // שכירות
   SALE      // מכירה
+  BOTH      // גם וגם — rental + sale commissions stored separately
 }
 
 enum PaymentStatus {

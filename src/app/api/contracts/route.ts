@@ -258,6 +258,7 @@ export async function POST(request: Request) {
       propertyCity,
       propertyPrice,
       commission,
+      commissionSale,      // only expected when dealType === "BOTH"
       clientName,
       clientPhone,
       clientEmail,
@@ -283,7 +284,7 @@ export async function POST(request: Request) {
     }
 
     // ── Numeric + enum validation ─────────────────────────────────────────────
-    const vDealType      = parseEnum(dealType,      ["SALE", "RENTAL"] as const, "סוג העסקה");
+    const vDealType      = parseEnum(dealType,      ["SALE", "RENTAL", "BOTH"] as const, "סוג העסקה");
     const vPropertyPrice = parsePositiveInt(propertyPrice, "מחיר הנכס");
     const vCommission    = parseNonNegativeInt(commission, "עמלה");
     const validationError = firstError(vDealType, vPropertyPrice, vCommission);
@@ -297,6 +298,18 @@ export async function POST(request: Request) {
     const validatedDealType      = vDealType.value;
     const validatedPropertyPrice = vPropertyPrice.value;
     const validatedCommission    = vCommission.value;
+
+    // ── BOTH deal type: validate commissionSale (sale-side commission) ────────
+    // SALE and RENTAL contracts must NOT include commissionSale.
+    // BOTH contracts must include a non-negative integer for the sale commission.
+    let validatedCommissionSale: number | null = null;
+    if (validatedDealType === "BOTH") {
+      const vCommissionSale = parseNonNegativeInt(commissionSale, "עמלת מכירה");
+      if (!vCommissionSale.ok) {
+        return NextResponse.json({ error: vCommissionSale.error }, { status: 400 });
+      }
+      validatedCommissionSale = vCommissionSale.value;
+    }
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -373,6 +386,7 @@ export async function POST(request: Request) {
         propertyCity,
         propertyPrice: validatedPropertyPrice,
         commission:    validatedCommission,
+        ...(validatedCommissionSale !== null ? { commissionSale: validatedCommissionSale } : {}),
         userId:        user.id,
         clientId:      client.id,
         signatureToken,

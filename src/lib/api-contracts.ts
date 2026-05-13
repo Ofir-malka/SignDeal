@@ -12,6 +12,7 @@ export type ApiContractResponse = {
   propertyCity: string;
   propertyPrice: number;
   commission: number;
+  commissionSale: number | null;   // set only when dealType = "BOTH"; null for SALE/RENTAL
   dealClosed: boolean;
   sentAt: string | null;
   signedAt: string | null;
@@ -59,8 +60,8 @@ const STATUS_MAP: Record<string, SignatureStatus> = {
   CANCELED:        "בוטל",
 };
 
-const DEAL_TYPE_MAP: Record<string, "שכירות" | "מכירה"> = {
-  RENTAL: "שכירות", SALE: "מכירה",
+const DEAL_TYPE_MAP: Record<string, "שכירות" | "מכירה" | "גם וגם"> = {
+  RENTAL: "שכירות", SALE: "מכירה", BOTH: "גם וגם",
 };
 
 const PAY_STATUS_MAP: Record<string, NonNullable<PaymentStatus>> = {
@@ -79,6 +80,7 @@ export function apiToContract(c: ApiContractResponse): Contract {
     contractType:    c.contractType,
     property:        `${parsePropertyAddress(c.propertyAddress).address}, ${c.propertyCity}`,
     dealType:        DEAL_TYPE_MAP[c.dealType]    ?? "שכירות",
+    commissionSale:  c.commissionSale != null ? formatAgorot(c.commissionSale) : null,
     signatureStatus: STATUS_MAP[c.status]          ?? "טיוטה",
     paymentStatus:   c.payment ? (PAY_STATUS_MAP[c.payment.status] ?? null) : null,
     dealClosed:      c.dealClosed,
