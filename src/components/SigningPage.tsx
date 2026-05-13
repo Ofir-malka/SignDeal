@@ -30,7 +30,38 @@ function Logo() {
 }
 
 
-export function SigningPage({ token }: { token: string }) {
+// ── Preview-mode banner ───────────────────────────────────────────────────────
+// Shown to the contract owner (broker) instead of the signing UI.
+// Replaces the signature canvas, consent checkbox, submit button, and client
+// completion fields — the contract document itself remains visible.
+
+function PreviewBanner() {
+  return (
+    <div
+      dir="rtl"
+      className="flex items-start gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-4"
+      role="status"
+      aria-label="מצב צפייה בלבד"
+    >
+      {/* Lock icon */}
+      <span className="shrink-0 mt-0.5 text-indigo-500" aria-hidden="true">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </svg>
+      </span>
+      <div>
+        <p className="text-sm font-semibold text-indigo-800">מצב צפייה בלבד</p>
+        <p className="text-sm text-indigo-700 mt-0.5 leading-relaxed">
+          מצב צפייה בלבד — רק הלקוח יכול לחתום על החוזה דרך הקישור שנשלח אליו.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export function SigningPage({ token, previewMode = false }: { token: string; previewMode?: boolean }) {
   const [contract, setContract]               = useState<Contract | null>(null);
   const [checked, setChecked]                 = useState(false);
   const [signed, setSigned]                   = useState(false);
@@ -209,11 +240,14 @@ export function SigningPage({ token }: { token: string }) {
           <p className="text-sm text-gray-500 mt-1">{contract.contractType}</p>
         </div>
 
-        {/* Contract document */}
+        {/* Preview-mode notice — shown to the broker/owner instead of the signing UI */}
+        {previewMode && <PreviewBanner />}
+
+        {/* Contract document — always shown (broker can preview what the client sees) */}
         <ContractTemplate contract={contract} hideAddress={contract.hideFullAddressFromClient} />
 
-        {/* Client info form — required when fields are missing */}
-        {needsClientInfo && !clientFormDone && (
+        {/* Client info form — hidden entirely in preview mode */}
+        {!previewMode && needsClientInfo && !clientFormDone && (
           <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-5 space-y-4">
             <p className="text-sm font-semibold text-amber-800">{L.completeDetails}</p>
             {!contract!.clientEmail && (
@@ -257,8 +291,8 @@ export function SigningPage({ token }: { token: string }) {
           </div>
         )}
 
-        {/* Checkbox + Sign button — visible only when client info is complete */}
-        {(!needsClientInfo || clientFormDone) && (
+        {/* Signature section — hidden entirely in preview mode */}
+        {!previewMode && (!needsClientInfo || clientFormDone) && (
           <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 space-y-4">
             <label className="flex items-start gap-3 cursor-pointer">
               <input

@@ -1,6 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma";
+import { auth }  from "@/lib/auth";
 import { sendSms, getSmsProviderName } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { rateLimit, getRealIp } from "@/lib/rate-limit";
@@ -325,6 +326,19 @@ export async function PATCH(
     }
     if (signatureStatus === "SIGNED" && contract.status === "SIGNED") {
       return NextResponse.json({ error: "החוזה כבר נחתם" }, { status: 409 });
+    }
+
+    // ── Owner guard (defence-in-depth) ────────────────────────────────────────
+    // The signing page already renders in read-only preview mode for the broker,
+    // so this path should never be reached in normal use.  It exists to reject
+    // any direct API call where the authenticated session user is the contract
+    // owner — preventing self-signing regardless of how the request originated.
+    const session = await auth();
+    if (session?.user?.id && session.user.id === contract.userId) {
+      return NextResponse.json(
+        { error: "בעל החוזה אינו יכול לחתום על החוזה בשם הלקוח" },
+        { status: 403 },
+      );
     }
 
     const data: Record<string, unknown> = {};
