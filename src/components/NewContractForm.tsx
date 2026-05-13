@@ -275,11 +275,16 @@ function usePicker<T>(fetchUrl: string) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // ── Outside-tap / outside-click ───────────────────────────────────────────────
-  // Works on both mobile (touch → mousedown) and desktop.
+  // ── Outside-tap / outside-click — desktop only ───────────────────────────────
+  // On mobile the sheet uses its own backdrop div for tap-to-close, so we must
+  // NOT run this listener there: the sheet's DOM is outside dropdownRef (which
+  // is null on mobile), so every tap inside the sheet would look like an
+  // "outside click" and immediately re-close it.
 
   useEffect(() => {
     if (!open) return;
+    if (isMobile) return;   // ← mobile: backdrop handles close, not document mousedown
+
     function onMouseDown(e: MouseEvent) {
       const t = e.target as Node;
       if (
@@ -291,7 +296,7 @@ function usePicker<T>(fetchUrl: string) {
     }
     document.addEventListener("mousedown", onMouseDown);
     return () => document.removeEventListener("mousedown", onMouseDown);
-  }, [open]);
+  }, [open, isMobile]);
 
   // ── Escape key ────────────────────────────────────────────────────────────────
 
@@ -322,14 +327,16 @@ function usePicker<T>(fetchUrl: string) {
     return () => window.removeEventListener("scroll", onScroll, true);
   }, [open, isMobile]);
 
-  // ── Viewport-resize position tracking ────────────────────────────────────────
-  // On mobile, the virtual keyboard opening/closing fires visualViewport resize
-  // (and sometimes scroll) events, shifting the layout without a window resize.
-  // We recompute the fixed-position coordinates so the dropdown stays anchored
-  // to the trigger button throughout the keyboard animation.
+  // ── Viewport-resize position tracking — desktop only ─────────────────────────
+  // On desktop, the virtual keyboard doesn't exist and window/visualViewport
+  // resize only happens when the user resizes the browser. We recompute the
+  // fixed-position coordinates so the dropdown stays anchored to the trigger.
+  // On mobile we skip this entirely: the sheet layout is viewport-relative
+  // (inset-x-3, top-[8%]) and needs no repositioning math.
 
   useEffect(() => {
     if (!open) return;
+    if (isMobile) return;   // ← mobile: sheet is static, no repositioning needed
 
     const vv = window.visualViewport;   // null in some older browsers
     if (vv) {
@@ -346,7 +353,7 @@ function usePicker<T>(fetchUrl: string) {
       window.removeEventListener("resize", recomputePos);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
+  }, [open, isMobile]);
 
   // ── Actions ───────────────────────────────────────────────────────────────────
 
@@ -447,12 +454,18 @@ function ClientPicker({
       {/* Dropdown — mobile sheet OR desktop floating panel */}
       {picker.open && (
         picker.isMobile ? (
-          /* ── Mobile: full-viewport modal sheet ── */
-          <>
-            <div className="fixed inset-0 z-50 bg-black/40" onClick={picker.close} />
+          /* ── Mobile: full-viewport modal sheet ──────────────────────────
+             The sheet is a CHILD of the backdrop (not a sibling) so that
+             onClick={(e) => e.stopPropagation()} on the sheet panel stops
+             taps inside the sheet from bubbling to the backdrop's close
+             handler. On iOS, sibling fixed elements at the same z-index can
+             have ambiguous touch routing; parent-child + stopPropagation is
+             reliable across all mobile browsers.                          ── */
+          <div className="fixed inset-0 z-50 bg-black/40" onClick={picker.close}>
             <div
               className="fixed inset-x-3 z-50 bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
               style={{ top: "8%", maxHeight: "80vh" }}
+              onClick={(e) => e.stopPropagation()}
               dir="rtl"
             >
               <div className="flex items-center justify-between px-4 py-3.5 border-b border-gray-100">
@@ -508,7 +521,7 @@ function ClientPicker({
                 ))}
               </div>
             </div>
-          </>
+          </div>
         ) : (
           /* ── Desktop: fixed-position floating dropdown ── */
           picker.dropPos && (
@@ -663,12 +676,12 @@ function PropertyPicker({
       {/* Dropdown — mobile sheet OR desktop floating panel */}
       {picker.open && (
         picker.isMobile ? (
-          /* ── Mobile: full-viewport modal sheet ── */
-          <>
-            <div className="fixed inset-0 z-50 bg-black/40" onClick={picker.close} />
+          /* ── Mobile: full-viewport modal sheet ── (see ClientPicker comment) ── */
+          <div className="fixed inset-0 z-50 bg-black/40" onClick={picker.close}>
             <div
               className="fixed inset-x-3 z-50 bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
               style={{ top: "8%", maxHeight: "80vh" }}
+              onClick={(e) => e.stopPropagation()}
               dir="rtl"
             >
               <div className="flex items-center justify-between px-4 py-3.5 border-b border-gray-100">
@@ -732,7 +745,7 @@ function PropertyPicker({
                 ))}
               </div>
             </div>
-          </>
+          </div>
         ) : (
           /* ── Desktop: fixed-position floating dropdown ── */
           picker.dropPos && (
