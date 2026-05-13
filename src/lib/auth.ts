@@ -59,7 +59,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           select: { plan: true, status: true, trialEndsAt: true },
         });
 
-        token.plan               = subscription?.plan   ?? "STARTER";
+        token.plan               = subscription?.plan   ?? "STANDARD";
         token.subscriptionStatus = subscription?.status ?? "EXPIRED";
         // Store as ISO string — JWT values must be JSON-serialisable.
         token.trialEndsAt        =
@@ -105,8 +105,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           "BROKER" | "ADMIN";
 
         session.user.plan =
-          ((token?.plan as string | undefined) ?? "STARTER") as
-          "STARTER" | "PRO" | "ENTERPRISE";
+          ((token?.plan as string | undefined) ?? "STANDARD") as
+          "STANDARD" | "GROWTH" | "PRO" | "AGENCY" | "STARTER" | "ENTERPRISE";
 
         session.user.subscriptionStatus =
           ((token?.subscriptionStatus as string | undefined) ?? "EXPIRED") as

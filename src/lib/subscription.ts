@@ -4,200 +4,274 @@
  * Centralized subscription enforcement layer.
  *
  * ── Layer hierarchy ───────────────────────────────────────────────────────────
- *   plans.ts        — plan definitions, limits, pure logic (no DB, no Prisma)
- *   usage.ts        — DB queries: getActiveContractCount, ACTIVE_CONTRACT_STATUSES
+ *   plans.ts        — plan definitions, monthly doc limits, pure logic (no DB)
+ *   usage.ts        — DB queries: getMonthlyDocumentUsage
  *   subscription.ts — orchestration: composes plans.ts + usage.ts; single entry
  *                     point for all "can this user do X?" decisions
  *
  * ── Design decisions ──────────────────────────────────────────────────────────
- * • TRIALING (active trial) is treated as PRO for limit purposes.
- * • CANCELED / EXPIRED / PAST_DUE block contract creation entirely regardless
- *   of active count.
- * • `limit` and `remaining` are TypeScript `number` values. `Infinity` is used
- *   internally for ENTERPRISE (unlimited). Callers that serialise to JSON must
- *   convert: `isFinite(v) ? v : null`.
+ * • Monthly document limit (not simultaneous active contracts) is the enforced
+ *   dimension. "Document" = any Contract row, any status.
+ * • TRIALING (active trial) → TRIAL_MONTHLY_DOC_LIMIT (10) regardless of plan.
+ * • CANCELED / EXPIRED / PAST_DUE / trial-expired → block immediately; user can
+ *   still read existing data (proxy.ts does not enforce at the page level).
+ * • Backward-compat aliases (activeCount, limit, remaining) are populated with
+ *   the same values as the new canonical fields (monthlyDocCount, monthlyDocLimit,
+ *   monthlyRemaining) so all existing callers continue to work without changes.
+ *   Remove aliases in Phase 2 once usage/route.ts and UI components are updated.
  * • No duplicate DB calls — subscription is fetched once per check.
  *
  * ── Usage ─────────────────────────────────────────────────────────────────────
- *   import { canUserCreateContract } from "@/lib/subscription";
+ *   import { canCreateContract } from "@/lib/subscription";
  *
- *   const check = await canUserCreateContract(userId);
+ *   const check = await canCreateContract(userId);
  *   if (!check.allowed) {
  *     return NextResponse.json({ error: check.reason }, { status: 403 });
  *   }
  */
 
-import { prisma }            from "@/lib/prisma";
+import { NextResponse }              from "next/server";
+import { prisma }                    from "@/lib/prisma";
 import {
   getEffectivePlan,
-  getPlanLimits,
-  STARTER_LIMIT,
-  PRO_LIMIT,
-  ENTERPRISE_LIMIT,
+  getMonthlyDocLimit,
+  PLAN_MONTHLY_DOC_LIMITS,
+  TRIAL_MONTHLY_DOC_LIMIT,
 } from "@/lib/plans";
 import type { SubscriptionForPlan, PlanType } from "@/lib/plans";
-import { getActiveContractCount }             from "@/lib/usage";
+import { getMonthlyDocumentUsage }   from "@/lib/usage";
 
-// ── Reason codes (match what the frontend checks) ────────────────────────────
+// ── Reason codes ──────────────────────────────────────────────────────────────
+// MONTHLY_LIMIT_REACHED replaces the old CONTRACT_LIMIT_REACHED.
+// No frontend component currently switches on the reason string value, so
+// this rename is safe. The comment in contracts/route.ts references the old
+// name — update it in Phase 2.
 export type ContractBlockReason =
-  | "SUBSCRIPTION_INACTIVE"   // EXPIRED / CANCELED / PAST_DUE / trial-expired
-  | "CONTRACT_LIMIT_REACHED"; // active count ≥ plan limit
+  | "SUBSCRIPTION_INACTIVE"    // expired trial / EXPIRED / CANCELED / PAST_DUE
+  | "MONTHLY_LIMIT_REACHED";   // monthlyDocCount >= plan monthly limit
 
-// ── Primary result type ───────────────────────────────────────────────────────
+// ── Result type ───────────────────────────────────────────────────────────────
 export interface ContractCreationCheck {
-  /** Whether the user may create a new contract right now. */
-  allowed: boolean;
-  /** Defined only when allowed === false. */
-  reason?: ContractBlockReason;
-  /** Effective plan after trial-expiry logic. */
-  plan:        PlanType;
-  isTrialing:  boolean;
-  isActive:    boolean;
-  isExpired:   boolean;
-  /** How many active (non-expired, non-canceled) contracts the user has. */
+  allowed:    boolean;
+  reason?:    ContractBlockReason;
+  plan:       PlanType;
+  isTrialing: boolean;
+  isActive:   boolean;
+  isExpired:  boolean;
+
+  // ── Canonical fields (Phase 1+) ───────────────────────────────────────────
+  monthlyDocCount:  number;
+  /** null = AGENCY unlimited. */
+  monthlyDocLimit:  number | null;
+  /** null = unlimited (AGENCY). 0 when at/over limit or inactive. */
+  monthlyRemaining: number | null;
+
+  // ── Backward-compat aliases — same values, deprecated, removed in Phase 2 ──
+  // usage/route.ts, UsageCard, and UpgradeBanner still read these field names.
+  /** @deprecated Phase 2: use monthlyDocCount */
   activeCount: number;
-  /**
-   * Maximum allowed by their effective plan.
-   * ENTERPRISE → Infinity (not JSON-safe; callers that serialise must convert).
-   */
-  limit:     number;
-  /**
-   * How many more contracts they can create.
-   * ENTERPRISE → Infinity. Zero when at limit or subscription inactive.
-   */
-  remaining: number;
-  /** ISO string or null — for display in the UI. */
+  /** @deprecated Phase 2: use monthlyDocLimit */
+  limit:       number | null;
+  /** @deprecated Phase 2: use monthlyRemaining */
+  remaining:   number | null;
+
   trialEndsAt: string | null;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Internal helpers ──────────────────────────────────────────────────────────
 
 /**
- * Converts the nullable `maxActiveContracts` from PLAN_LIMITS to a TypeScript
- * number, using Infinity for "unlimited" (null sentinel from plans.ts).
+ * Builds a fully-populated inactive result.
+ * Both canonical fields and backward-compat aliases are set.
  */
-export function planToNumericLimit(plan: PlanType): number {
-  if (plan === "STARTER")    return STARTER_LIMIT;
-  if (plan === "PRO")        return PRO_LIMIT;
-  return ENTERPRISE_LIMIT; // Infinity
-}
-
-/**
- * Returns true when the subscription allows new activity.
- *
- * Active = TRIALING with a non-expired trial, OR ACTIVE.
- * Everything else (PAST_DUE, CANCELED, EXPIRED, trial-expired) is inactive.
- */
-export function isSubscriptionActive(subscription: SubscriptionForPlan): boolean {
-  const { isExpired } = getEffectivePlan(subscription);
-  if (isExpired) return false;
-  return subscription.status === "TRIALING" || subscription.status === "ACTIVE";
-}
-
-// ── Null-subscription fallback ─────────────────────────────────────────────────
 function inactiveResult(
-  override: Partial<ContractCreationCheck> = {},
+  plan:        PlanType,
+  isTrialing:  boolean,
+  trialEndsAt: string | null,
 ): ContractCreationCheck {
+  // Show the plan's normal limit in the result so the UI can tell the user
+  // "you need to subscribe to get 30 docs/month on STANDARD" etc.
+  const monthlyDocLimit = isTrialing
+    ? TRIAL_MONTHLY_DOC_LIMIT
+    : PLAN_MONTHLY_DOC_LIMITS[plan];
+
   return {
-    allowed:     false,
-    reason:      "SUBSCRIPTION_INACTIVE",
-    plan:        "STARTER",
-    isTrialing:  false,
-    isActive:    false,
-    isExpired:   true,
-    activeCount: 0,
-    limit:       STARTER_LIMIT,
-    remaining:   0,
-    trialEndsAt: null,
-    ...override,
+    allowed:          false,
+    reason:           "SUBSCRIPTION_INACTIVE",
+    plan,
+    isTrialing,
+    isActive:         false,
+    isExpired:        true,
+    monthlyDocCount:  0,
+    monthlyDocLimit,
+    monthlyRemaining: 0,
+    // backward-compat aliases
+    activeCount:      0,
+    limit:            monthlyDocLimit,
+    remaining:        0,
+    trialEndsAt,
   };
 }
 
-// ── Primary API ───────────────────────────────────────────────────────────────
+/** null → null (unlimited); finite → Math.max(0, limit - used). */
+function computeRemaining(limit: number | null, used: number): number | null {
+  if (limit === null) return null;
+  return Math.max(0, limit - used);
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Full subscription + usage check for a single user.
+ * Fetches the user's subscription row.
+ * Returns null if no subscription exists (edge case — all registered users
+ * should have one created at registration).
+ */
+export async function getUserSubscription(userId: string) {
+  return prisma.subscription.findUnique({
+    where:  { userId },
+    select: {
+      id:                 true,
+      plan:               true,
+      status:             true,
+      trialEndsAt:        true,
+      billingInterval:    true,
+      currentPeriodStart: true,
+      currentPeriodEnd:   true,
+      canceledAt:         true,
+    },
+  });
+}
+
+/**
+ * Full subscription + monthly usage check for a single user.
  *
  * Fetches the subscription from DB (one query), resolves the effective plan,
- * checks activity, and — only when active — queries the active contract count.
+ * checks activity, and — only when active — queries the monthly document count.
+ *
+ * Returns a ContractCreationCheck with both canonical (Phase 1) and
+ * backward-compat (Phase 2 to remove) field names populated identically.
  *
  * @example
- *   const check = await canUserCreateContract(userId);
+ *   const check = await canCreateContract(userId);
  *   if (!check.allowed) {
  *     return NextResponse.json({ error: check.reason }, { status: 403 });
  *   }
  */
-export async function canUserCreateContract(
+export async function canCreateContract(
   userId: string,
 ): Promise<ContractCreationCheck> {
-  // ── 1. Load subscription ─────────────────────────────────────────────────
-  const subscription = await prisma.subscription.findUnique({
+  // ── 1. Load subscription ──────────────────────────────────────────────────
+  const sub = await prisma.subscription.findUnique({
     where:  { userId },
     select: { plan: true, status: true, trialEndsAt: true },
   });
 
-  const trialEndsAt = subscription?.trialEndsAt?.toISOString() ?? null;
-
-  // No subscription row at all → treat as worst-case inactive STARTER
-  if (!subscription) {
-    return inactiveResult({ trialEndsAt: null });
+  // No subscription row → block (all registered users should have one)
+  if (!sub) {
+    return inactiveResult("STANDARD", false, null);
   }
+
+  const trialEndsAt = sub.trialEndsAt?.toISOString() ?? null;
 
   // ── 2. Resolve effective plan and activity ────────────────────────────────
-  const { plan: effectivePlan, isTrialing, isExpired } = getEffectivePlan(subscription);
-  const isActive = isSubscriptionActive(subscription);
+  const { plan, isTrialing, isExpired } = getEffectivePlan(
+    sub as SubscriptionForPlan,
+  );
 
-  // ── 3. Inactive subscription → block immediately (no contract count needed)
+  // Active = TRIALING (non-expired) or ACTIVE.
+  // PAST_DUE, CANCELED, EXPIRED, and trial-expired are all inactive.
+  const isActive = !isExpired && (sub.status === "TRIALING" || sub.status === "ACTIVE");
+
+  // ── 3. Inactive → block immediately (no doc count needed) ─────────────────
   if (!isActive) {
-    return inactiveResult({
-      plan:        effectivePlan,
-      isTrialing,
-      isExpired,
-      trialEndsAt,
-    });
+    return inactiveResult(plan, isTrialing, trialEndsAt);
   }
 
-  // ── 4. Active subscription → check contract limit ─────────────────────────
-  const limit      = planToNumericLimit(effectivePlan);
-  const activeCount = await getActiveContractCount(userId);
-  const remaining  = limit === Infinity
-    ? Infinity
-    : Math.max(0, limit - activeCount);
+  // ── 4. Active → apply monthly document limit ──────────────────────────────
+  const monthlyDocLimit  = getMonthlyDocLimit(plan, isTrialing);
+  const monthlyDocCount  = await getMonthlyDocumentUsage(userId);
+  const monthlyRemaining = computeRemaining(monthlyDocLimit, monthlyDocCount);
 
-  if (activeCount >= limit) {
+  if (monthlyDocLimit !== null && monthlyDocCount >= monthlyDocLimit) {
     return {
-      allowed:     false,
-      reason:      "CONTRACT_LIMIT_REACHED",
-      plan:        effectivePlan,
+      allowed:          false,
+      reason:           "MONTHLY_LIMIT_REACHED",
+      plan,
       isTrialing,
-      isActive:    true,
-      isExpired:   false,
-      activeCount,
-      limit,
-      remaining:   0,
+      isActive:         true,
+      isExpired:        false,
+      monthlyDocCount,
+      monthlyDocLimit,
+      monthlyRemaining: 0,
+      // backward-compat aliases
+      activeCount:      monthlyDocCount,
+      limit:            monthlyDocLimit,
+      remaining:        0,
       trialEndsAt,
     };
   }
 
   // ── 5. Allowed ────────────────────────────────────────────────────────────
   return {
-    allowed:    true,
-    plan:       effectivePlan,
+    allowed:          true,
+    plan,
     isTrialing,
-    isActive:   true,
-    isExpired:  false,
-    activeCount,
-    limit,
-    remaining,
+    isActive:         true,
+    isExpired:        false,
+    monthlyDocCount,
+    monthlyDocLimit,
+    monthlyRemaining,
+    // backward-compat aliases
+    activeCount:      monthlyDocCount,
+    limit:            monthlyDocLimit,
+    remaining:        monthlyRemaining,
     trialEndsAt,
   };
 }
 
 /**
- * Convenience wrapper — returns how many more contracts the user can create.
- * Returns Infinity for unlimited plans. Returns 0 for inactive subscriptions.
+ * Convenience wrapper: returns a 403 NextResponse if the user's subscription
+ * is inactive, null if the caller may proceed.
+ *
+ * Use at the top of API route handlers that gate paid actions (payment requests,
+ * SMS sends, etc.) before the main action logic.
+ *
+ * @example
+ *   const blocked = await requireActiveSubscription(userId);
+ *   if (blocked) return blocked;
  */
-export async function getRemainingContracts(userId: string): Promise<number> {
-  const check = await canUserCreateContract(userId);
-  return check.remaining;
+export async function requireActiveSubscription(
+  userId: string,
+): Promise<NextResponse | null> {
+  const sub = await prisma.subscription.findUnique({
+    where:  { userId },
+    select: { plan: true, status: true, trialEndsAt: true },
+  });
+
+  if (!sub) {
+    return NextResponse.json(
+      { error: "SUBSCRIPTION_INACTIVE", message: "No active subscription found." },
+      { status: 403 },
+    );
+  }
+
+  const { isExpired } = getEffectivePlan(sub as SubscriptionForPlan);
+  const isActive =
+    !isExpired && (sub.status === "TRIALING" || sub.status === "ACTIVE");
+
+  if (!isActive) {
+    return NextResponse.json(
+      { error: "SUBSCRIPTION_INACTIVE", message: "Subscription is not active." },
+      { status: 403 },
+    );
+  }
+
+  return null;
 }
+
+/**
+ * @deprecated Renamed to canCreateContract(). Alias kept for one release cycle
+ * so callers (contracts/route.ts) do not need to change in Phase 1.
+ * Remove in Phase 2.
+ */
+export const canUserCreateContract = canCreateContract;

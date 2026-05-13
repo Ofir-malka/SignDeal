@@ -12,15 +12,28 @@ datasource db {
 
 // ── Subscription enums ────────────────────────────────────────────────────────
 
+enum BillingInterval {
+  MONTHLY   // charged per calendar month
+  YEARLY    // charged annually at a reduced rate
+}
+
 enum UserRole {
   BROKER   // default — every registered broker
   ADMIN    // SignDeal staff — grants access to /admin
 }
 
 enum PlanType {
-  STARTER     // Free tier — up to 3 active contracts, no reminders/payments
-  PRO         // Paid tier — unlimited contracts, reminders, payment requests
-  ENTERPRISE  // Custom — reserved for agencies; negotiated terms
+  // ── Deprecated values — DO NOT write from app code ──────────────────────────
+  // Kept in enum for Postgres referential integrity.
+  // All rows migrated away in migration 002_billing_interval_and_new_plan_types.
+  STARTER
+  ENTERPRISE
+
+  // ── Active values (Phase 1+) ─────────────────────────────────────────────────
+  STANDARD    // 30 docs/month — ₪39/mo or ₪29/mo annually
+  GROWTH      // 60 docs/month — ₪49/mo or ₪39/mo annually
+  PRO         // 100 docs/month — ₪110/mo or ₪99/mo annually
+  AGENCY      // Custom — null doc limit, contact sales
 }
 
 enum SubscriptionStatus {
@@ -402,15 +415,21 @@ model Subscription {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   // ── Plan & status ──────────────────────────────────────────────────────────
-  plan   PlanType           @default(STARTER)
+  plan   PlanType           @default(STANDARD)
   status SubscriptionStatus @default(TRIALING)
 
   // ── Trial ──────────────────────────────────────────────────────────────────
   // Set to now()+14 days at registration. Null for admin-assigned STARTER rows.
   trialEndsAt DateTime?
 
+  // ── Billing interval ───────────────────────────────────────────────────────
+  // MONTHLY: charged per month. YEARLY: charged annually.
+  // Filled by billing provider webhook when payment is live.
+  // Default MONTHLY is correct for all existing TRIALING rows (no committed interval yet).
+  billingInterval BillingInterval @default(MONTHLY)
+
   // ── Billing provider (filled when payment integration goes live) ───────────
-  billingProvider       String?  // "rapyd" | "stripe" — provider slug
+  billingProvider       String?  // "hyp" | future provider slug
   billingCustomerId     String?  // provider's customer object ID
   billingSubscriptionId String?  // provider's subscription object ID
 

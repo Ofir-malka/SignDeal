@@ -80,8 +80,8 @@ export const authConfig: NextAuthConfig = {
           "BROKER" | "ADMIN";
 
         session.user.plan =
-          ((token?.plan as string | undefined) ?? "STARTER") as
-          "STARTER" | "PRO" | "ENTERPRISE";
+          ((token?.plan as string | undefined) ?? "STANDARD") as
+          "STANDARD" | "GROWTH" | "PRO" | "AGENCY" | "STARTER" | "ENTERPRISE";
 
         session.user.subscriptionStatus =
           ((token?.subscriptionStatus as string | undefined) ?? "EXPIRED") as

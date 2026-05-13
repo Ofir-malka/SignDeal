@@ -22,9 +22,12 @@ import { NextResponse }          from "next/server";
 import { requireUserId }         from "@/lib/require-user";
 import { canUserCreateContract } from "@/lib/subscription";
 
-// JSON cannot represent Infinity — convert to null so the client can display
-// "unlimited" while keeping the data typed.
-function finiteOrNull(n: number): number | null {
+// JSON cannot represent Infinity or null limits — normalise both to null so
+// the client receives a consistent "unlimited" sentinel.
+// Phase 1: limit/remaining are now number | null (null = AGENCY unlimited).
+//          Infinity no longer appears; null passes through as-is.
+function finiteOrNull(n: number | null): number | null {
+  if (n === null) return null;
   return isFinite(n) ? n : null;
 }
 

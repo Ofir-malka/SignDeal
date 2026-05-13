@@ -1,23 +1,33 @@
 "use client";
 
 // ── Type (mirrors GET /api/subscription/usage response) ───────────────────────
+// Phase 1: response still uses backward-compat field names (activeCount, limit,
+// remaining). Canonical names (monthlyDocCount, monthlyDocLimit, monthlyRemaining)
+// added in Phase 2 when usage/route.ts is updated.
 export interface UsageData {
-  plan:        "STARTER" | "PRO" | "ENTERPRISE";
+  // Active plan values + deprecated values that may appear in old JWT tokens.
+  plan:        "STANDARD" | "GROWTH" | "PRO" | "AGENCY" | "STARTER" | "ENTERPRISE";
   isTrialing:  boolean;
   isActive:    boolean;
   isExpired:   boolean;
+  // Backward-compat field names (removed in Phase 2)
   activeCount: number;
-  limit:       number | null;   // null = unlimited
-  remaining:   number | null;   // null = unlimited
+  limit:       number | null;   // null = unlimited (AGENCY)
+  remaining:   number | null;   // null = unlimited (AGENCY)
   trialEndsAt: string | null;   // ISO date string
   allowed:     boolean;
-  reason?:     "SUBSCRIPTION_INACTIVE" | "CONTRACT_LIMIT_REACHED";
+  reason?:     "SUBSCRIPTION_INACTIVE" | "CONTRACT_LIMIT_REACHED" | "MONTHLY_LIMIT_REACHED";
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const PLAN_LABELS: Record<UsageData["plan"], string> = {
-  STARTER:    "Starter",
+  // Active plan values (Phase 1+)
+  STANDARD:   "Standard",
+  GROWTH:     "Growth",
   PRO:        "Pro",
+  AGENCY:     "Agency",
+  // Deprecated — kept so stale JWT tokens don't render "undefined"
+  STARTER:    "Starter",
   ENTERPRISE: "Enterprise",
 };
 

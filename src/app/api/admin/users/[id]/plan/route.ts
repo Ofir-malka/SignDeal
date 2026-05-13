@@ -9,7 +9,9 @@ import { NextResponse }   from "next/server";
 import { prisma }         from "@/lib/prisma";
 import { requireAdmin }   from "@/lib/require-admin";
 
-const VALID_PLANS = ["STARTER", "PRO", "ENTERPRISE"] as const;
+// Active plan values only — STARTER and ENTERPRISE are deprecated.
+// Admin UI will show these four options; old values are rejected.
+const VALID_PLANS = ["STANDARD", "GROWTH", "PRO", "AGENCY"] as const;
 type ValidPlan = (typeof VALID_PLANS)[number];
 
 export async function PATCH(

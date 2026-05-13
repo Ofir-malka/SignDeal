@@ -2,161 +2,146 @@
  * plans.ts
  *
  * Single source of truth for:
- *   • Plan feature limits (what each tier can do)
+ *   • Plan types and billing intervals (string literal unions = Prisma enum values)
+ *   • Monthly document limits per plan
+ *   • Trial document limit
+ *   • Pricing constants (used by pricing UI — NOT used for enforcement)
  *   • Effective plan evaluation (handles trial expiry transparently)
- *   • Trial duration constant
  *
  * ── Design decisions ──────────────────────────────────────────────────────────
  * • Limits are defined in code, NOT the database.
  *   Changing a limit = deploy, not migration. Correct for beta.
+ * • The limit dimension is now monthly document creation (not simultaneous
+ *   active contracts). "Document" = any Contract row regardless of status.
  * • No Prisma import — pure data/logic. Safe to import from any context
- *   (server components, API routes, future client components).
- * • String literal union types match the Prisma enums exactly so callers
- *   can use values from either source without casting.
+ *   (server components, API routes, edge middleware).
+ * • STARTER and ENTERPRISE are kept as deprecated string values so that any
+ *   JWT tokens written before the migration (which may contain "STARTER" or
+ *   "ENTERPRISE") do not crash callers. They are NOT valid plan choices for
+ *   new subscriptions and are not present in PLAN_MONTHLY_DOC_LIMITS.
  *
  * ── Usage ─────────────────────────────────────────────────────────────────────
- *   import { getPlanLimits, getEffectivePlan, TRIAL_DAYS } from "@/lib/plans";
+ *   import { getEffectivePlan, getMonthlyDocLimit, TRIAL_MONTHLY_DOC_LIMIT } from "@/lib/plans";
  *
- *   // Enforce a feature gate in an API route:
- *   const { plan } = getEffectivePlan(subscription);
- *   const limits   = getPlanLimits(plan);
- *   if (!limits.smsReminders) return 403;
+ *   const { plan, isTrialing, isExpired } = getEffectivePlan(subscription);
+ *   const limit = getMonthlyDocLimit(plan, isTrialing);
+ *   if (limit !== null && monthlyCount >= limit) return 403;
  */
 
-// ── Shared type aliases (string literal unions = Prisma enum values) ───────────
-export type PlanType           = "STARTER" | "PRO" | "ENTERPRISE";
-export type SubscriptionStatus = "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED";
+// ── Active plan types (new model, Phase 1+) ───────────────────────────────────
+// These are the only values written to new Subscription rows.
+export type PlanType =
+  | "STANDARD"   // 30 docs/month — ₪39/mo or ₪29/mo annually
+  | "GROWTH"     // 60 docs/month — ₪49/mo or ₪39/mo annually
+  | "PRO"        // 100 docs/month — ₪110/mo or ₪99/mo annually
+  | "AGENCY";    // Custom — null doc limit, contact sales
 
-// ── Trial ──────────────────────────────────────────────────────────────────────
-/** Number of days in the free Pro trial, applied at registration. */
+export type BillingInterval = "MONTHLY" | "YEARLY";
+
+export type SubscriptionStatus =
+  | "TRIALING"
+  | "ACTIVE"
+  | "PAST_DUE"
+  | "CANCELED"
+  | "EXPIRED";
+
+// ── Trial ─────────────────────────────────────────────────────────────────────
+/** Number of days in the free trial, applied at registration. */
 export const TRIAL_DAYS = 14;
 
-// ── Plan limit constants ───────────────────────────────────────────────────────
-// Single source of truth for numeric limits used throughout the codebase.
-// ENTERPRISE_LIMIT is Infinity in TypeScript — not JSON-serialisable; callers
-// that write API responses should convert to null (representing "unlimited").
-export const STARTER_LIMIT    = 3;
-export const PRO_LIMIT        = 25;
-export const ENTERPRISE_LIMIT = Infinity;
-
-// ── Feature limits per plan ────────────────────────────────────────────────────
-export interface PlanLimits {
-  /**
-   * Maximum number of simultaneously active contracts.
-   * `null` = unlimited.
-   * "Active" = any status that is not CANCELED or EXPIRED.
-   */
-  maxActiveContracts: number | null;
-
-  /** SMS signing/payment reminders sent automatically. */
-  smsReminders: boolean;
-
-  /** WhatsApp reminders. */
-  whatsappReminders: boolean;
-
-  /** Payment request links sent from a contract. */
-  paymentRequests: boolean;
-
-  /** Full dashboard analytics and client history. */
-  advancedDashboard: boolean;
-
-  /** Elevated support queue. */
-  prioritySupport: boolean;
-}
-
-export const PLAN_LIMITS = {
-  STARTER: {
-    maxActiveContracts: STARTER_LIMIT,   // 3
-    smsReminders:       false,
-    whatsappReminders:  false,
-    paymentRequests:    false,
-    advancedDashboard:  false,
-    prioritySupport:    false,
-  },
-  PRO: {
-    maxActiveContracts: PRO_LIMIT,        // 25
-    smsReminders:       true,
-    whatsappReminders:  true,
-    paymentRequests:    true,
-    advancedDashboard:  true,
-    prioritySupport:    true,
-  },
-  ENTERPRISE: {
-    maxActiveContracts: null,             // unlimited (null sentinel)
-    smsReminders:       true,
-    whatsappReminders:  true,
-    paymentRequests:    true,
-    advancedDashboard:  true,
-    prioritySupport:    true,
-    // multiUser / apiAccess: added in a future phase
-  },
-} as const satisfies Record<PlanType, PlanLimits>;
-
 /**
- * Returns the feature limits for a given plan type.
- *
- * @example
- *   const limits = getPlanLimits("PRO");
- *   if (!limits.paymentRequests) throw new Error("Upgrade required");
+ * Max documents a TRIALING user may create per calendar month.
+ * Consistent with paid-plan semantics (monthly cap, not a total-trial cap).
+ * Revisit if we want a total-trial-lifetime cap instead.
  */
-export function getPlanLimits(plan: PlanType): PlanLimits {
-  return PLAN_LIMITS[plan];
-}
+export const TRIAL_MONTHLY_DOC_LIMIT = 10;
 
-// ── Effective plan evaluation ──────────────────────────────────────────────────
+// ── Monthly document limits per plan ─────────────────────────────────────────
+// null = no enforced limit (AGENCY — custom contract).
+// After trial expiry the subscription is INACTIVE — no limit applies because
+// creation is blocked entirely (not degraded to a lower limit).
+export const PLAN_MONTHLY_DOC_LIMITS: Record<PlanType, number | null> = {
+  STANDARD: 30,
+  GROWTH:   60,
+  PRO:      100,
+  AGENCY:   null,
+};
 
-/** Minimal subscription shape needed for plan evaluation — no Prisma import. */
+// ── Pricing (ILS) ─────────────────────────────────────────────────────────────
+// Not used for enforcement. Source of truth for pricing UI and admin displays.
+// AGENCY = contact sales, no published price.
+export const PLAN_PRICES = {
+  STANDARD: { monthly: 39,  yearly: 29  },
+  GROWTH:   { monthly: 49,  yearly: 39  },
+  PRO:      { monthly: 110, yearly: 99  },
+  AGENCY:   null,
+} as const;
+
+// ── Minimal subscription shape for plan evaluation (no Prisma import) ─────────
 export interface SubscriptionForPlan {
   plan:        PlanType;
   status:      SubscriptionStatus;
   trialEndsAt: Date | null;
 }
 
+// ── Effective plan result ─────────────────────────────────────────────────────
 export interface EffectivePlanResult {
-  /** The plan that should be enforced right now. */
-  plan: PlanType;
-  /** True when the user is within an active trial period. */
+  /** The plan stored in DB (returned as-is — no degradation for expired state). */
+  plan:       PlanType;
+  /** True when the user is within an active, non-expired trial. */
   isTrialing: boolean;
   /**
-   * True when a trial or subscription has expired with no active payment.
-   * Callers should degrade to STARTER limits and prompt for upgrade.
+   * True when the subscription is inactive:
+   *   • Trial period has expired (TRIALING + trialEndsAt < now)
+   *   • status is EXPIRED or CANCELED
+   *   • status is PAST_DUE (grace period — block creation, allow read)
+   * Callers must block paid actions and show an upgrade/reactivate prompt.
    */
-  isExpired: boolean;
+  isExpired:  boolean;
 }
 
 /**
- * Derives the plan that should be enforced for a user right now.
+ * Derives the subscription state that should be enforced right now.
+ * Pure and synchronous — safe to call from any context.
  *
- * Handles the case where a TRIALING subscription has passed its trialEndsAt
- * date: the effective plan degrades to STARTER even though the DB still says
- * PRO/TRIALING (the DB row is updated lazily by the API route that detects this).
- *
- * This function is pure and synchronous — safe to call in any context.
- *
- * @example
- *   const { plan, isTrialing, isExpired } = getEffectivePlan(subscription);
- *   const limits = getPlanLimits(plan);
+ * Note: unlike the previous version, isExpired does NOT change the `plan`
+ * field. The stored plan is always returned so callers can tell the user
+ * "you're on STANDARD — subscribe to re-activate" rather than a generic
+ * STARTER fallback message.
  */
-export function getEffectivePlan(subscription: SubscriptionForPlan): EffectivePlanResult {
+export function getEffectivePlan(sub: SubscriptionForPlan): EffectivePlanResult {
   const now = new Date();
 
-  // Trial is expired when the subscription is still TRIALING in the DB but
-  // the trialEndsAt date has passed.
   const trialExpired =
-    subscription.status === "TRIALING" &&
-    subscription.trialEndsAt !== null &&
-    subscription.trialEndsAt < now;
+    sub.status === "TRIALING" &&
+    sub.trialEndsAt !== null &&
+    sub.trialEndsAt < now;
 
-  // A subscription is expired if it was explicitly set to EXPIRED, or if the
-  // trial period has silently passed without a payment method being attached.
   const isExpired =
-    subscription.status === "EXPIRED" || trialExpired;
+    sub.status === "EXPIRED"   ||
+    sub.status === "CANCELED"  ||   // canceled: block actions, allow read
+    sub.status === "PAST_DUE"  ||   // grace period: block creation, allow read
+    trialExpired;
 
-  // When expired, degrade to the free tier regardless of what the DB plan says.
-  const effectivePlan: PlanType = isExpired ? "STARTER" : subscription.plan;
+  const isTrialing = sub.status === "TRIALING" && !trialExpired;
 
-  const isTrialing =
-    subscription.status === "TRIALING" && !trialExpired;
+  return { plan: sub.plan, isTrialing, isExpired };
+}
 
-  return { plan: effectivePlan, isTrialing, isExpired };
+/**
+ * Returns the effective monthly document limit for a user.
+ *
+ *   • Trialing users: always TRIAL_MONTHLY_DOC_LIMIT (10), regardless of plan.
+ *   • Active paid users: PLAN_MONTHLY_DOC_LIMITS[plan] (null = unlimited).
+ *   • Inactive/expired: callers should block before reaching this; returns 0.
+ *
+ * @param plan       — the effective plan (from getEffectivePlan().plan)
+ * @param isTrialing — from getEffectivePlan().isTrialing
+ */
+export function getMonthlyDocLimit(
+  plan:       PlanType,
+  isTrialing: boolean,
+): number | null {
+  if (isTrialing) return TRIAL_MONTHLY_DOC_LIMIT;
+  return PLAN_MONTHLY_DOC_LIMITS[plan];
 }

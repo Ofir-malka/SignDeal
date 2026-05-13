@@ -5,8 +5,19 @@ import type { JWT } from "next-auth/jwt";
 // We use string literals (not Prisma enum imports) so this declaration file
 // stays edge-safe — no Prisma runtime dependency is introduced here.
 
-type UserRole           = "BROKER" | "ADMIN";
-type PlanType           = "STARTER" | "PRO" | "ENTERPRISE";
+type UserRole = "BROKER" | "ADMIN";
+
+// Active plan values (Phase 1+). STARTER and ENTERPRISE are deprecated —
+// kept as union members so stale JWT tokens written before the migration
+// do not cause TypeScript errors in the session callback.
+type PlanType =
+  | "STANDARD"
+  | "GROWTH"
+  | "PRO"
+  | "AGENCY"
+  | "STARTER"     // deprecated — no new rows written; may appear in old JWTs
+  | "ENTERPRISE"; // deprecated — no new rows written; may appear in old JWTs
+
 type SubscriptionStatus = "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED";
 
 declare module "next-auth" {
