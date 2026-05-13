@@ -18,9 +18,11 @@
  *   HYP_USER              API username  (from HYP merchant portal)
  *   HYP_PASSWORD          API password  (from HYP merchant portal)
  *   HYP_TERMINAL_NUMBER   10-char terminal ID, e.g. "AB12345678"
- *   HYP_MID               Merchant ID
  *
  * Optional env vars:
+ *   HYP_MID               Merchant ID — omit <mid> tag entirely if unset.
+ *                         Some terminals work without it; include only if
+ *                         HYP support confirms it is needed for your account.
  *   HYP_BASE_URL          Defaults to UAT sandbox (cguat2.creditguard.co.il)
  *                         Set to your assigned production domain for live.
  */
@@ -59,7 +61,7 @@ function escapeXml(s: string): string {
 
 interface DoDealXmlParams {
   terminalNumber: string;
-  mid:            string;
+  mid?:           string;   // optional — tag omitted entirely when absent
   total:          number;   // in agorot
   uniqueid:       string;   // ≤64 chars, unique within 24 h
   successUrl:     string;
@@ -86,7 +88,7 @@ function buildDoDealXml(p: DoDealXmlParams): string {
     <command>doDeal</command>
     <doDeal>
       <terminalNumber>${escapeXml(p.terminalNumber)}</terminalNumber>
-      <mid>${escapeXml(p.mid)}</mid>
+      ${p.mid ? `<mid>${escapeXml(p.mid)}</mid>` : "<!-- mid omitted: HYP_MID not set -->"}
       <cardNo>CGMPI</cardNo>
       <total>${p.total}</total>
       <transactionType>Debit</transactionType>
@@ -119,7 +121,8 @@ function extractXmlTag(xml: string, tag: string): string {
 
 interface RelayResponse {
   result:           string;   // "000" = success; anything else = error
-  message:          string;   // human-readable result message
+  message:          string;   // system result message
+  userMessage:      string;   // localised user-facing message (often more descriptive)
   tranId:           string;   // HYP transaction identifier
   cgUid:            string;   // CreditGuard internal unique ID
   mpiHostedPageUrl: string;   // one-time payment page URL (valid 10 min)
@@ -129,10 +132,24 @@ function parseRelayResponse(xml: string): RelayResponse {
   return {
     result:           extractXmlTag(xml, "result"),
     message:          extractXmlTag(xml, "message"),
+    userMessage:      extractXmlTag(xml, "userMessage"),
     tranId:           extractXmlTag(xml, "tranId"),
     cgUid:            extractXmlTag(xml, "cgUid"),
     mpiHostedPageUrl: extractXmlTag(xml, "mpiHostedPageUrl"),
   };
+}
+
+/**
+ * Strip the mpiHostedPageUrl value from a raw XML response string before
+ * logging. The URL contains a single-use session token — never log it.
+ */
+function sanitizeResponseForLog(xml: string): string {
+  return xml
+    .replace(/<mpiHostedPageUrl>[^<]*<\/mpiHostedPageUrl>/g,
+      "<mpiHostedPageUrl>[redacted]</mpiHostedPageUrl>")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 600);   // cap at 600 chars; enough for any error response
 }
 
 // ── Callback MAC verification ─────────────────────────────────────────────────
@@ -199,15 +216,25 @@ export class HypBillingProvider implements BillingProvider {
     const user           = process.env.HYP_USER?.trim();
     const password       = process.env.HYP_PASSWORD?.trim();
     const terminalNumber = process.env.HYP_TERMINAL_NUMBER?.trim();
-    const mid            = process.env.HYP_MID?.trim();
+    const mid            = process.env.HYP_MID?.trim() || undefined;  // optional
     const baseUrl        = (process.env.HYP_BASE_URL?.trim() ?? UAT_BASE_URL).replace(/\/$/, "");
 
-    if (!user || !password || !terminalNumber || !mid) {
+    // Log which vars are set — never log their values.
+    console.log(
+      `[billing/hyp] config check:` +
+      ` HYP_USER=${Boolean(user)}` +
+      ` HYP_PASSWORD=${Boolean(password)}` +
+      ` HYP_TERMINAL_NUMBER=${Boolean(terminalNumber)}` +
+      ` HYP_MID=${Boolean(mid)} (optional)` +
+      ` HYP_BASE_URL=${baseUrl}`,
+    );
+
+    if (!user || !password || !terminalNumber) {
       return {
         ok:     false,
         reason:
-          "HYP not configured: HYP_USER, HYP_PASSWORD, " +
-          "HYP_TERMINAL_NUMBER, and HYP_MID are all required.",
+          "HYP not configured: HYP_USER, HYP_PASSWORD, and " +
+          "HYP_TERMINAL_NUMBER are required. HYP_MID is optional.",
       };
     }
 
@@ -274,27 +301,38 @@ export class HypBillingProvider implements BillingProvider {
     // ── Parse XML response ───────────────────────────────────────────────────
     const parsed = parseRelayResponse(rawResponse);
 
-    // Log result code — never log mpiHostedPageUrl (contains one-time token).
-    console.log(
-      `[billing/hyp] relay result=${parsed.result}` +
-      ` tranId=${parsed.tranId || "(none)"}` +
-      ` hasUrl=${Boolean(parsed.mpiHostedPageUrl)}` +
-      (parsed.result !== "000" ? ` message="${parsed.message}"` : ""),
-    );
-
     if (parsed.result !== "000") {
+      // On error: log sanitized body (mpiHostedPageUrl redacted) + both message fields.
+      // This is the primary debugging surface for 405 / terminal config errors.
+      console.error(
+        `[billing/hyp] relay ERROR` +
+        ` result=${parsed.result}` +
+        ` message="${parsed.message}"` +
+        ` userMessage="${parsed.userMessage}"` +
+        ` tranId=${parsed.tranId || "(none)"}` +
+        `\n[billing/hyp] sanitized response: ${sanitizeResponseForLog(rawResponse)}`,
+      );
       return {
         ok:     false,
-        reason: `HYP error ${parsed.result}: ${parsed.message || "no message returned"}`,
+        reason:
+          `HYP error ${parsed.result}: ${parsed.userMessage || parsed.message || "no message"}`,
       };
     }
+
+    // On success: log minimal info — never log the hosted URL (one-time token).
+    console.log(
+      `[billing/hyp] relay OK` +
+      ` result=${parsed.result}` +
+      ` tranId=${parsed.tranId}` +
+      ` hasUrl=${Boolean(parsed.mpiHostedPageUrl)}`,
+    );
 
     if (!parsed.mpiHostedPageUrl) {
       return {
         ok:     false,
         reason:
-          "HYP returned result=000 but mpiHostedPageUrl was absent in the response. " +
-          "Check terminal configuration.",
+          "HYP returned result=000 but mpiHostedPageUrl was absent. " +
+          "Check terminal configuration with HYP support.",
       };
     }
 
