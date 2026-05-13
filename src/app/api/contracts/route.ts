@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { sendSms, getSmsProviderName } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { requireUserId }          from "@/lib/require-user";
-import { canUserCreateContract }  from "@/lib/subscription";
+import { canCreateContract }      from "@/lib/subscription";
 import { resolveTemplate, buildContext } from "@/lib/contracts/resolve-template";
 import { rateLimit } from "@/lib/rate-limit";
 import { parsePositiveInt, parseNonNegativeInt, parseEnum, firstError } from "@/lib/validate";
@@ -239,12 +239,13 @@ export async function POST(request: Request) {
 
     // ── Subscription enforcement ───────────────────────────────────────────────
     // Checked after auth + rate-limit (both cheaper) and before body parsing.
-    // canUserCreateContract() fetches subscription + active count in at most 2
+    // canCreateContract() fetches subscription + monthly doc count in at most 2
     // queries; short-circuits after 1 when subscription is inactive.
-    const usageCheck = await canUserCreateContract(userId);
+    // Emits reason: "SUBSCRIPTION_INACTIVE" | "MONTHLY_LIMIT_REACHED"
+    const usageCheck = await canCreateContract(userId);
     if (!usageCheck.allowed) {
       return NextResponse.json(
-        { error: usageCheck.reason },   // "SUBSCRIPTION_INACTIVE" | "CONTRACT_LIMIT_REACHED"
+        { error: usageCheck.reason },
         { status: 403 },
       );
     }

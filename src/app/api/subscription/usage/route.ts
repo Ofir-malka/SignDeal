@@ -1,34 +1,54 @@
 /**
  * GET /api/subscription/usage
  *
- * Returns the authenticated user's current subscription state and contract
- * usage for the dashboard. Authenticated users only.
+ * Returns the authenticated user's current subscription state and monthly
+ * document usage for the dashboard. Authenticated users only.
  *
- * Response shape (all numbers are JSON-safe):
+ * Response shape (all numbers JSON-safe):
  * {
- *   plan:        "STARTER" | "PRO" | "ENTERPRISE"
- *   isTrialing:  boolean
- *   isActive:    boolean
- *   isExpired:   boolean
- *   activeCount: number
- *   limit:       number | null   // null = unlimited (ENTERPRISE)
- *   remaining:   number | null   // null = unlimited (ENTERPRISE)
- *   trialEndsAt: string | null   // ISO-8601 date string
- *   allowed:     boolean
- *   reason?:     "SUBSCRIPTION_INACTIVE" | "CONTRACT_LIMIT_REACHED"
+ *   // Plan identity
+ *   plan:             "STANDARD" | "GROWTH" | "PRO" | "AGENCY"
+ *   planLabel:        string          // Hebrew display label e.g. "סטנדרט"
+ *   isTrialing:       boolean
+ *   isActive:         boolean
+ *   isExpired:        boolean
+ *   trialEndsAt:      string | null   // ISO-8601
+ *
+ *   // Canonical monthly usage fields (Phase 2+)
+ *   monthlyDocCount:  number
+ *   monthlyDocLimit:  number | null   // null = AGENCY unlimited
+ *   monthlyRemaining: number | null   // null = unlimited; 0 when blocked
+ *
+ *   // Backward-compat aliases — same values as canonical fields above.
+ *   // Deprecated; will be removed in Phase 3 once all UI consumers are updated.
+ *   activeCount:      number          // ≡ monthlyDocCount
+ *   limit:            number | null   // ≡ monthlyDocLimit
+ *   remaining:        number | null   // ≡ monthlyRemaining
+ *
+ *   // Gate result
+ *   allowed:          boolean
+ *   reason?:          "SUBSCRIPTION_INACTIVE" | "MONTHLY_LIMIT_REACHED"
  * }
  */
-import { NextResponse }          from "next/server";
-import { requireUserId }         from "@/lib/require-user";
-import { canUserCreateContract } from "@/lib/subscription";
+import { NextResponse }       from "next/server";
+import { requireUserId }      from "@/lib/require-user";
+import { canCreateContract }  from "@/lib/subscription";
+import type { PlanType }      from "@/lib/plans";
 
-// JSON cannot represent Infinity or null limits — normalise both to null so
-// the client receives a consistent "unlimited" sentinel.
-// Phase 1: limit/remaining are now number | null (null = AGENCY unlimited).
-//          Infinity no longer appears; null passes through as-is.
-function finiteOrNull(n: number | null): number | null {
-  if (n === null) return null;
-  return isFinite(n) ? n : null;
+// Hebrew display labels for each plan.
+// Stale JWT tokens may carry deprecated values; map those gracefully.
+const PLAN_LABELS: Record<string, string> = {
+  STANDARD:   "סטנדרט",
+  GROWTH:     "צמיחה",
+  PRO:        "מקצועני",
+  AGENCY:     "משרד",
+  // deprecated — keep so old JWT tokens don't produce "undefined"
+  STARTER:    "סטארטר",
+  ENTERPRISE: "ארגוני",
+};
+
+function planLabel(plan: PlanType | string): string {
+  return PLAN_LABELS[plan] ?? plan;
 }
 
 export async function GET() {
@@ -36,18 +56,29 @@ export async function GET() {
   if (authResult instanceof NextResponse) return authResult;
   const { userId } = authResult;
 
-  const check = await canUserCreateContract(userId);
+  const check = await canCreateContract(userId);
 
   return NextResponse.json({
-    plan:        check.plan,
-    isTrialing:  check.isTrialing,
-    isActive:    check.isActive,
-    isExpired:   check.isExpired,
-    activeCount: check.activeCount,
-    limit:       finiteOrNull(check.limit),
-    remaining:   finiteOrNull(check.remaining),
-    trialEndsAt: check.trialEndsAt,
-    allowed:     check.allowed,
+    // Plan identity
+    plan:             check.plan,
+    planLabel:        planLabel(check.plan),
+    isTrialing:       check.isTrialing,
+    isActive:         check.isActive,
+    isExpired:        check.isExpired,
+    trialEndsAt:      check.trialEndsAt,
+
+    // Canonical monthly usage fields
+    monthlyDocCount:  check.monthlyDocCount,
+    monthlyDocLimit:  check.monthlyDocLimit,
+    monthlyRemaining: check.monthlyRemaining,
+
+    // Backward-compat aliases (same values — deprecated, remove in Phase 3)
+    activeCount:      check.activeCount,
+    limit:            check.limit,
+    remaining:        check.remaining,
+
+    // Gate result
+    allowed:          check.allowed,
     ...(check.reason ? { reason: check.reason } : {}),
   });
 }

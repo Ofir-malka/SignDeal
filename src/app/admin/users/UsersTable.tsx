@@ -12,14 +12,15 @@ export type AdminUserRow = {
   role:      "BROKER" | "ADMIN";
   createdAt: string; // ISO
   subscription: {
-    plan:        "STARTER" | "PRO" | "ENTERPRISE";
+    plan:        "STANDARD" | "GROWTH" | "PRO" | "AGENCY";
     status:      "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED";
     trialEndsAt: string | null; // ISO
   } | null;
 };
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const PLANS    = ["STARTER", "PRO", "ENTERPRISE"] as const;
+// Active plan values only — STARTER and ENTERPRISE are deprecated.
+const PLANS    = ["STANDARD", "GROWTH", "PRO", "AGENCY"] as const;
 const STATUSES = ["TRIALING", "ACTIVE", "PAST_DUE", "CANCELED", "EXPIRED"] as const;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -49,7 +50,7 @@ function UserRow({ user }: { user: AdminUserRow }) {
   const [isPending, startTransition] = useTransition();
 
   // Local select state — initialised from server data
-  const [plan,   setPlan]   = useState<string>(user.subscription?.plan   ?? "STARTER");
+  const [plan,   setPlan]   = useState<string>(user.subscription?.plan   ?? "STANDARD");
   const [status, setStatus] = useState<string>(user.subscription?.status ?? "EXPIRED");
 
   const [error, setError] = useState<string | null>(null);
@@ -122,7 +123,7 @@ function UserRow({ user }: { user: AdminUserRow }) {
             ))}
           </select>
           <button
-            disabled={disabled || plan === (user.subscription?.plan ?? "STARTER")}
+            disabled={disabled || plan === (user.subscription?.plan ?? "STANDARD")}
             onClick={() => callApi("plan", { plan })}
             className="text-xs bg-indigo-600 text-white px-2 py-1 rounded hover:bg-indigo-700 disabled:opacity-40 transition-colors"
           >

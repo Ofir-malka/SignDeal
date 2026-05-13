@@ -55,7 +55,7 @@ export default async function AdminUsersPage({
     createdAt: u.createdAt.toISOString(),
     subscription: u.subscription
       ? {
-          plan:        u.subscription.plan   as "STARTER" | "PRO" | "ENTERPRISE",
+          plan:        u.subscription.plan   as "STANDARD" | "GROWTH" | "PRO" | "AGENCY",
           status:      u.subscription.status as "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED",
           trialEndsAt: u.subscription.trialEndsAt?.toISOString() ?? null,
         }
