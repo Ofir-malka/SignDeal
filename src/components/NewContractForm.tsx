@@ -47,9 +47,10 @@ interface ApiProperty {
 
 // ── Form types ─────────────────────────────────────────────────────────────────
 
-type Lang           = "HE" | "EN" | "FR" | "RU";
-type DealType       = "SALE" | "RENTAL";
-type CommissionMode = "fixed" | "percent";
+type Lang                   = "HE" | "EN" | "FR" | "RU";
+type DealType               = "SALE" | "RENTAL";
+type CommissionMode         = "fixed" | "percent";
+type RentalCommissionPreset = "one_month" | "half_month" | "two_months" | "fixed";
 
 interface FormState {
   language:          Lang;
@@ -75,6 +76,7 @@ interface FormState {
   commissionMode:              CommissionMode;
   commissionNis:               string;
   commissionPct:               string;
+  rentalCommissionPreset:      RentalCommissionPreset;
 }
 
 type Stage =
@@ -105,6 +107,7 @@ const INITIAL: FormState = {
   commissionMode:            "percent",
   commissionNis:             "",
   commissionPct:             "",
+  rentalCommissionPreset:    "one_month",
 };
 
 const LANGS: { id: Lang; flag: string; label: string }[] = [
@@ -178,7 +181,14 @@ function calcCommissionAgorot(f: FormState): number {
   if (f.dealType === "SALE" && f.commissionMode === "percent") {
     const pct = parseFloat(f.commissionPct);
     if (isNaN(priceNis) || isNaN(pct)) return NaN;
-    return Math.round(priceNis * pct);
+    return Math.round(priceNis * pct);   // priceNis(₪) × pct(%) = commission in agorot
+  }
+  if (f.dealType === "RENTAL" && f.rentalCommissionPreset !== "fixed") {
+    if (isNaN(priceNis)) return NaN;
+    const multiplier =
+      f.rentalCommissionPreset === "half_month"  ? 0.5 :
+      f.rentalCommissionPreset === "two_months"  ? 2   : 1;   // one_month default
+    return Math.round(priceNis * multiplier * 100);
   }
   const commNis = parseNis(f.commissionNis);
   return isNaN(commNis) ? NaN : Math.round(commNis * 100);
@@ -940,6 +950,8 @@ export function NewContractForm() {
     if (form.dealType === "SALE" && form.commissionMode === "percent") {
       const pct = parseFloat(form.commissionPct);
       if (isNaN(pct) || pct < 0 || pct > 100) e.commissionPct = "אחוז עמלה חייב להיות בין 0 ל-100";
+    } else if (form.dealType === "RENTAL" && form.rentalCommissionPreset !== "fixed") {
+      // preset auto-calculates from monthly rent — no manual input to validate
     } else {
       const commNis = parseNis(form.commissionNis);
       if (isNaN(commNis) || commNis < 0) e.commissionNis = "עמלת תיווך חייבת להיות מספר חיובי או 0";
@@ -1097,26 +1109,7 @@ export function NewContractForm() {
           </div>
         </Section>
 
-        {/* ══ 2. Language ═══════════════════════════════════════════════════ */}
-        <Section title="שפת החוזה" subtitle="השפה בה יוצג החוזה ללקוח">
-          <div className="flex flex-wrap gap-2.5">
-            {LANGS.map((lang) => {
-              const active = form.language === lang.id;
-              return (
-                <button key={lang.id} type="button" onClick={() => set("language", lang.id)}
-                  className={[
-                    "flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-all",
-                    active ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
-                           : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200 hover:bg-indigo-50/30",
-                  ].join(" ")}>
-                  <span>{lang.flag}</span><span>{lang.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        </Section>
-
-        {/* ══ 3. Client details ═════════════════════════════════════════════ */}
+        {/* ══ 2. Client details ═════════════════════════════════════════════ */}
         <Section title="פרטי לקוח">
           <div className="space-y-4" ref={firstErrorRef}>
 
@@ -1188,36 +1181,74 @@ export function NewContractForm() {
             ("מחיר הנכס" vs "שכירות חודשית") is correct when the broker
             reaches that section.
             NOTE: schema/API support one DealType per contract (SALE | RENTAL).
-            "BOTH" is not supported at the DB/API layer — see limitation note
-            in the Financial section comment below. */}
+            "BOTH" is not supported at the DB/API layer yet — button is shown
+            but disabled with "בקרוב" badge. */}
         <Section title="סוג עסקה" subtitle="בחר סוג עסקה אחד לחוזה זה">
-          <div className="flex gap-3">
-            {(["SALE", "RENTAL"] as const).map((dt) => {
-              const label = dt === "SALE" ? "מכירה" : "שכירות";
-              const icon  = dt === "SALE"
-                ? (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" /><rect x="9" y="13" width="6" height="8" rx="0.5" />
-                  </svg>)
-                : (<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M8 21V10M16 21V10M3 9h18" />
-                  </svg>);
-              return (
-                <button key={dt} type="button"
-                  onClick={() => {
-                    setForm((prev) => ({ ...prev, dealType: dt, priceNis: "", commissionNis: "", commissionPct: "" }));
-                    setErrors((prev) => { const n = { ...prev }; delete n.priceNis; delete n.commissionNis; delete n.commissionPct; return n; });
-                    setStage((s) => s.name === "error" ? { name: "idle" } : s);
-                  }}
-                  className={[
-                    "flex items-center gap-2.5 px-5 py-3 rounded-xl border text-sm font-semibold transition-all",
-                    form.dealType === dt
-                      ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
-                      : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
-                  ].join(" ")}>
-                  {icon}{label}
-                </button>
-              );
-            })}
+          <div className="flex gap-3 flex-wrap">
+
+            {/* השכרה */}
+            <button type="button"
+              onClick={() => {
+                setForm((prev) => ({
+                  ...prev,
+                  dealType: "RENTAL",
+                  priceNis: "",
+                  commissionNis: "",
+                  commissionPct: "",
+                  rentalCommissionPreset: "one_month",
+                }));
+                setErrors((prev) => { const n = { ...prev }; delete n.priceNis; delete n.commissionNis; delete n.commissionPct; return n; });
+                setStage((s) => s.name === "error" ? { name: "idle" } : s);
+              }}
+              className={[
+                "flex items-center gap-2.5 px-5 py-3 rounded-xl border text-sm font-semibold transition-all",
+                form.dealType === "RENTAL"
+                  ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
+                  : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
+              ].join(" ")}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" /><path d="M8 21V10M16 21V10M3 9h18" />
+              </svg>
+              השכרה
+            </button>
+
+            {/* מכירה */}
+            <button type="button"
+              onClick={() => {
+                setForm((prev) => ({
+                  ...prev,
+                  dealType: "SALE",
+                  priceNis: "",
+                  commissionNis: "",
+                  commissionPct: "",
+                  rentalCommissionPreset: "one_month",
+                }));
+                setErrors((prev) => { const n = { ...prev }; delete n.priceNis; delete n.commissionNis; delete n.commissionPct; return n; });
+                setStage((s) => s.name === "error" ? { name: "idle" } : s);
+              }}
+              className={[
+                "flex items-center gap-2.5 px-5 py-3 rounded-xl border text-sm font-semibold transition-all",
+                form.dealType === "SALE"
+                  ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
+                  : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
+              ].join(" ")}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" /><rect x="9" y="13" width="6" height="8" rx="0.5" />
+              </svg>
+              מכירה
+            </button>
+
+            {/* גם וגם — not yet supported at DB level */}
+            <button type="button" disabled
+              className="flex items-center gap-2.5 px-5 py-3 rounded-xl border border-gray-100 bg-gray-50 text-sm font-semibold text-gray-300 cursor-not-allowed select-none">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" /><rect x="9" y="13" width="6" height="8" rx="0.5" />
+                <rect x="3" y="3" width="7" height="7" rx="1" fill="currentColor" stroke="none" opacity="0.4" />
+              </svg>
+              גם וגם
+              <span className="text-[10px] font-medium bg-gray-200 text-gray-400 px-1.5 py-0.5 rounded-full">בקרוב</span>
+            </button>
+
           </div>
         </Section>
 
@@ -1363,38 +1394,87 @@ export function NewContractForm() {
           <div className="space-y-5">
             <div>
               <FieldLabel>עמלת תיווך</FieldLabel>
+
+              {/* ── RENTAL: preset buttons ──────────────────────────────── */}
+              {form.dealType === "RENTAL" && (() => {
+                const presets: { id: RentalCommissionPreset; label: string; sub?: string }[] = [
+                  { id: "one_month",   label: "חודש שכירות",    sub: "×1"   },
+                  { id: "half_month",  label: "חצי חודש",       sub: "×0.5" },
+                  { id: "two_months",  label: "שני חודשים",     sub: "×2"   },
+                  { id: "fixed",       label: "סכום ידני (₪)"              },
+                ];
+                return (
+                  <>
+                    <div className="flex flex-wrap gap-2 mb-3">
+                      {presets.map((p) => (
+                        <button key={p.id} type="button"
+                          onClick={() => {
+                            set("rentalCommissionPreset", p.id);
+                            setErrors((prev) => { const n = { ...prev }; delete n.commissionNis; return n; });
+                          }}
+                          className={[
+                            "flex items-center gap-1.5 px-3 py-2 rounded-xl border text-xs font-semibold transition-all",
+                            form.rentalCommissionPreset === p.id
+                              ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
+                              : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
+                          ].join(" ")}>
+                          {p.label}
+                          {p.sub && (
+                            <span className={[
+                              "text-[10px] font-medium px-1 py-0.5 rounded",
+                              form.rentalCommissionPreset === p.id ? "bg-indigo-100 text-indigo-500" : "bg-gray-100 text-gray-400",
+                            ].join(" ")}>{p.sub}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    {form.rentalCommissionPreset === "fixed" && (
+                      <div>
+                        <TextInput id="commissionNis" value={form.commissionNis} onChange={(v) => set("commissionNis", v)}
+                          placeholder="5,000" error={errors.commissionNis} />
+                        <p className="text-xs text-gray-400 mt-1">הזן 0 לעמלת תיווך ללא עלות</p>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+
+              {/* ── SALE: percent / fixed toggle (unchanged) ───────────── */}
               {form.dealType === "SALE" && (
-                <div className="flex gap-2 mb-3">
-                  {(["percent", "fixed"] as const).map((mode) => (
-                    <button key={mode} type="button"
-                      onClick={() => {
-                        set("commissionMode", mode);
-                        setErrors((prev) => { const n = { ...prev }; delete n.commissionNis; delete n.commissionPct; return n; });
-                      }}
-                      className={[
-                        "px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all",
-                        form.commissionMode === mode
-                          ? "border-indigo-300 bg-indigo-50 text-indigo-700"
-                          : "border-gray-200 bg-white text-gray-500 hover:border-gray-300",
-                      ].join(" ")}>
-                      {mode === "percent" ? "אחוז (%)" : "סכום קבוע (₪)"}
-                    </button>
-                  ))}
-                </div>
+                <>
+                  <div className="flex gap-2 mb-3">
+                    {(["percent", "fixed"] as const).map((mode) => (
+                      <button key={mode} type="button"
+                        onClick={() => {
+                          set("commissionMode", mode);
+                          setErrors((prev) => { const n = { ...prev }; delete n.commissionNis; delete n.commissionPct; return n; });
+                        }}
+                        className={[
+                          "px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all",
+                          form.commissionMode === mode
+                            ? "border-indigo-300 bg-indigo-50 text-indigo-700"
+                            : "border-gray-200 bg-white text-gray-500 hover:border-gray-300",
+                        ].join(" ")}>
+                        {mode === "percent" ? "אחוז (%)" : "סכום קבוע (₪)"}
+                      </button>
+                    ))}
+                  </div>
+                  {form.commissionMode === "percent" ? (
+                    <div>
+                      <TextInput id="commissionPct" value={form.commissionPct} onChange={(v) => set("commissionPct", v)}
+                        placeholder="2" error={errors.commissionPct} />
+                      <p className="text-xs text-gray-400 mt-1">לדוגמה: 2 = 2% ממחיר הנכס</p>
+                    </div>
+                  ) : (
+                    <div>
+                      <TextInput id="commissionNis" value={form.commissionNis} onChange={(v) => set("commissionNis", v)}
+                        placeholder="11,000" error={errors.commissionNis} />
+                      <p className="text-xs text-gray-400 mt-1">הזן 0 לעמלת תיווך ללא עלות</p>
+                    </div>
+                  )}
+                </>
               )}
-              {form.dealType === "SALE" && form.commissionMode === "percent" ? (
-                <div>
-                  <TextInput id="commissionPct" value={form.commissionPct} onChange={(v) => set("commissionPct", v)}
-                    placeholder="2" error={errors.commissionPct} />
-                  <p className="text-xs text-gray-400 mt-1">לדוגמה: 2 = 2% ממחיר הנכס</p>
-                </div>
-              ) : (
-                <div>
-                  <TextInput id="commissionNis" value={form.commissionNis} onChange={(v) => set("commissionNis", v)}
-                    placeholder="11,000" error={errors.commissionNis} />
-                  <p className="text-xs text-gray-400 mt-1">הזן 0 לעמלת תיווך ללא עלות</p>
-                </div>
-              )}
+
               {commPreview && (
                 <div className="mt-3 flex items-center gap-2 px-3.5 py-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -1405,6 +1485,27 @@ export function NewContractForm() {
                 </div>
               )}
             </div>
+          </div>
+        </Section>
+
+        {/* ══ 7. Language ═══════════════════════════════════════════════════ */}
+        {/* Intentionally placed last — language is rarely changed; keeping it
+            here avoids distracting brokers from the primary deal fields. */}
+        <Section title="שפת החוזה" subtitle="השפה בה יוצג החוזה ללקוח">
+          <div className="flex flex-wrap gap-2.5">
+            {LANGS.map((lang) => {
+              const active = form.language === lang.id;
+              return (
+                <button key={lang.id} type="button" onClick={() => set("language", lang.id)}
+                  className={[
+                    "flex items-center gap-2 px-4 py-2 rounded-xl border text-sm font-medium transition-all",
+                    active ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
+                           : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200 hover:bg-indigo-50/30",
+                  ].join(" ")}>
+                  <span>{lang.flag}</span><span>{lang.label}</span>
+                </button>
+              );
+            })}
           </div>
         </Section>
 
