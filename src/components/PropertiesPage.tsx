@@ -301,7 +301,7 @@ function buildAddress(f: typeof MODAL_INITIAL): string {
 
 // Shared input className to avoid repetition
 const INPUT_CLS =
-  "w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 " +
+  "w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-base sm:text-sm text-gray-900 " +
   "placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 " +
   "focus:border-transparent transition-all";
 
@@ -334,6 +334,17 @@ function NewPropertyModal({
     const e: Record<string, string> = {};
     if (!form.street.trim()) e.street = "שם רחוב הוא שדה חובה";
     if (!form.city.trim())   e.city   = "עיר היא שדה חובה";
+
+    // askingPrice is required for all listing types
+    const priceRaw = form.askingPrice.replace(/[, ]/g, "").trim();
+    const priceNum = parseFloat(priceRaw);
+    if (!priceRaw || isNaN(priceNum) || priceNum <= 0) {
+      e.askingPrice =
+        form.listingType === "RENTAL" ? "חובה להזין שכירות חודשית" :
+        form.listingType === "SALE"   ? "חובה להזין מחיר מכירה"   :
+                                        "חובה להזין מחיר לנכס";
+    }
+
     return e;
   }
 
@@ -383,10 +394,10 @@ function NewPropertyModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
+      className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4 overflow-x-hidden"
       onClick={handleBackdrop}
     >
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" dir="rtl">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-[calc(100vw-32px)] sm:max-w-lg max-h-[90vh] overflow-y-auto overflow-x-hidden" dir="rtl">
 
         {/* Modal header */}
         <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100">
@@ -431,8 +442,8 @@ function NewPropertyModal({
                 )}
               </div>
 
-              {/* House number · Floor · Apartment — 3 columns */}
-              <div className="grid grid-cols-3 gap-3">
+              {/* House number · Floor · Apartment — stacked on mobile, 3 columns on sm+ */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">מספר בית</label>
                   <input
@@ -487,7 +498,7 @@ function NewPropertyModal({
           {/* ── Property classification ── */}
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">סיווג נכס</p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">סוג נכס</label>
                 <select
@@ -518,7 +529,7 @@ function NewPropertyModal({
           {/* ── Optional details ── */}
           <div>
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">פרטים נוספים (אופציונלי)</p>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">חדרים</label>
                 <input
@@ -542,34 +553,44 @@ function NewPropertyModal({
                   className={INPUT_CLS}
                 />
               </div>
-              {/* Price field — label + placeholder change by listingType */}
-              <div className="col-span-2">
+              {/* Price field — label + placeholder change by listingType; required */}
+              <div className="col-span-1 sm:col-span-2">
                 {form.listingType === "BOTH" ? (
                   <>
-                    <label className="block text-sm font-medium text-gray-700 mb-1.5">מחיר (₪)</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                      מחיר מכירה / שכירות (₪) <span className="text-red-400">*</span>
+                    </label>
                     <input
                       type="text"
                       placeholder="3,500,000"
                       value={form.askingPrice}
                       onChange={(e) => set({ askingPrice: e.target.value })}
-                      className={INPUT_CLS}
+                      className={[INPUT_CLS, fieldErrors.askingPrice ? "border-red-300 ring-1 ring-red-300" : ""].join(" ")}
                     />
-                    <p className="text-xs text-gray-400 mt-1.5">
-                      כרגע נשמר מחיר אחד בלבד — הזן את המחיר הרלוונטי (מכירה או שכירות)
-                    </p>
+                    {fieldErrors.askingPrice ? (
+                      <p className="text-xs text-red-600 mt-1">{fieldErrors.askingPrice}</p>
+                    ) : (
+                      <p className="text-xs text-gray-400 mt-1.5">
+                        כרגע נשמר מחיר אחד בלבד — הזן את המחיר הרלוונטי (מכירה או שכירות)
+                      </p>
+                    )}
                   </>
                 ) : (
                   <>
                     <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                      {form.listingType === "RENTAL" ? "שכירות חודשית (₪)" : "מחיר מבוקש (₪)"}
+                      {form.listingType === "RENTAL" ? "שכירות חודשית (₪)" : "מחיר מבוקש (₪)"}{" "}
+                      <span className="text-red-400">*</span>
                     </label>
                     <input
                       type="text"
                       placeholder={form.listingType === "RENTAL" ? "5,500" : "3,500,000"}
                       value={form.askingPrice}
                       onChange={(e) => set({ askingPrice: e.target.value })}
-                      className={INPUT_CLS}
+                      className={[INPUT_CLS, fieldErrors.askingPrice ? "border-red-300 ring-1 ring-red-300" : ""].join(" ")}
                     />
+                    {fieldErrors.askingPrice && (
+                      <p className="text-xs text-red-600 mt-1">{fieldErrors.askingPrice}</p>
+                    )}
                   </>
                 )}
               </div>
