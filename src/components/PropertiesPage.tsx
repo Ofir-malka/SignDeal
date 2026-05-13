@@ -9,6 +9,7 @@ import {
   PROPERTY_LISTING_TYPE_LABELS,
 } from "@/lib/api-properties";
 import { parsePropertyAddress } from "@/lib/format-address";
+import { formatNisInput } from "@/lib/format-nis";
 
 // ─── Type badge palette ───────────────────────────────────────────────────────
 
@@ -564,7 +565,7 @@ function NewPropertyModal({
                       type="text"
                       placeholder="3,500,000"
                       value={form.askingPrice}
-                      onChange={(e) => set({ askingPrice: e.target.value })}
+                      onChange={(e) => set({ askingPrice: formatNisInput(e.target.value) })}
                       className={[INPUT_CLS, fieldErrors.askingPrice ? "border-red-300 ring-1 ring-red-300" : ""].join(" ")}
                     />
                     {fieldErrors.askingPrice ? (
@@ -585,7 +586,7 @@ function NewPropertyModal({
                       type="text"
                       placeholder={form.listingType === "RENTAL" ? "5,500" : "3,500,000"}
                       value={form.askingPrice}
-                      onChange={(e) => set({ askingPrice: e.target.value })}
+                      onChange={(e) => set({ askingPrice: formatNisInput(e.target.value) })}
                       className={[INPUT_CLS, fieldErrors.askingPrice ? "border-red-300 ring-1 ring-red-300" : ""].join(" ")}
                     />
                     {fieldErrors.askingPrice && (

@@ -25,6 +25,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import Link from "next/link";
 import { parsePropertyAddress } from "@/lib/format-address";
+import { formatNisInput } from "@/lib/format-nis";
 
 // ── API response shapes ────────────────────────────────────────────────────────
 
@@ -243,24 +244,21 @@ function usePicker<T>(fetchUrl: string) {
   const triggerRef  = useRef<HTMLButtonElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
+  const [isMobile, setIsMobile] = useState(false);
 
-  /** True when the primary pointing device is coarse (finger). */
-  function isTouchPrimary(): boolean {
-    return typeof window !== "undefined" &&
-           window.matchMedia("(pointer: coarse)").matches;
-  }
+  // Detect touch-primary device once on mount (SSR-safe: starts false).
+  useEffect(() => {
+    setIsMobile(window.matchMedia("(pointer: coarse)").matches);
+  }, []);
 
-  /** Recompute fixed-position coordinates from the trigger's live bounding rect.
-   *  Called on open and again whenever the viewport changes (keyboard open/close). */
+  /** Recompute fixed-position coordinates — desktop only (no-op on mobile). */
   function recomputePos() {
-    if (!triggerRef.current) return;
+    if (isMobile || !triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
     setDropPos({
       top:      rect.bottom + 4,
-      // Align right edge of dropdown to right edge of trigger (RTL-safe).
       right:    window.innerWidth - rect.right,
-      minWidth: Math.max(rect.width, 280),
+      minWidth: Math.min(Math.max(rect.width, 220), window.innerWidth - 32),
     });
   }
 
@@ -313,7 +311,7 @@ function usePicker<T>(fetchUrl: string) {
 
   useEffect(() => {
     if (!open) return;
-    if (isTouchPrimary()) return;          // ← mobile: no scroll-to-close
+    if (isMobile) return;          // ← mobile: no scroll-to-close
 
     const openedAt = Date.now();
     function onScroll() {
@@ -322,7 +320,7 @@ function usePicker<T>(fetchUrl: string) {
     }
     window.addEventListener("scroll", onScroll, true);
     return () => window.removeEventListener("scroll", onScroll, true);
-  }, [open]);
+  }, [open, isMobile]);
 
   // ── Viewport-resize position tracking ────────────────────────────────────────
   // On mobile, the virtual keyboard opening/closing fires visualViewport resize
@@ -353,7 +351,7 @@ function usePicker<T>(fetchUrl: string) {
   // ── Actions ───────────────────────────────────────────────────────────────────
 
   function openPicker() {
-    if (triggerRef.current) {
+    if (!isMobile && triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
       setDropPos({
         top:      rect.bottom + 4,
@@ -369,7 +367,7 @@ function usePicker<T>(fetchUrl: string) {
 
   const items = fetched.status === "ready" ? fetched.items : [];
 
-  return { open, openPicker, close, query, setQuery, fetched, items, triggerRef, dropdownRef, dropPos };
+  return { open, openPicker, close, query, setQuery, fetched, items, triggerRef, dropdownRef, dropPos, isMobile };
 }
 
 // ── ClientPicker ───────────────────────────────────────────────────────────────
@@ -446,77 +444,138 @@ function ClientPicker({
         </button>
       )}
 
-      {/* Dropdown — fixed to viewport; escapes all overflow ancestors */}
-      {picker.open && picker.dropPos && (
-        <div
-          ref={picker.dropdownRef}
-          style={{
-            position:  "fixed",
-            top:       picker.dropPos.top,
-            right:     picker.dropPos.right,
-            minWidth:  picker.dropPos.minWidth,
-            maxWidth:  "calc(100vw - 32px)",
-            zIndex:    9999,
-          }}
-          className="bg-white rounded-2xl border border-gray-200 shadow-xl overflow-hidden"
-          dir="rtl"
-        >
-          {/* Search */}
-          <div className="p-3 border-b border-gray-100">
-            <div className="relative">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                className="absolute top-1/2 -translate-y-1/2 end-3 pointer-events-none">
-                <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-              </svg>
-              <input
-                autoFocus
-                type="text"
-                value={picker.query}
-                onChange={(e) => picker.setQuery(e.target.value)}
-                placeholder="חפש לפי שם או טלפון..."
-                className="w-full pe-8 ps-3 py-2 text-base sm:text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent placeholder-gray-400"
-              />
+      {/* Dropdown — mobile sheet OR desktop floating panel */}
+      {picker.open && (
+        picker.isMobile ? (
+          /* ── Mobile: full-viewport modal sheet ── */
+          <>
+            <div className="fixed inset-0 z-50 bg-black/40" onClick={picker.close} />
+            <div
+              className="fixed inset-x-3 z-50 bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+              style={{ top: "8%", maxHeight: "80vh" }}
+              dir="rtl"
+            >
+              <div className="flex items-center justify-between px-4 py-3.5 border-b border-gray-100">
+                <span className="text-sm font-bold text-gray-900">בחירת לקוח קיים</span>
+                <button type="button" onClick={picker.close}
+                  className="text-gray-400 hover:text-gray-600 transition-colors" aria-label="סגור">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                  </svg>
+                </button>
+              </div>
+              <div className="p-3 border-b border-gray-100">
+                <div className="relative">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                    stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    className="absolute top-1/2 -translate-y-1/2 end-3 pointer-events-none">
+                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                  </svg>
+                  <input
+                    type="text"
+                    value={picker.query}
+                    onChange={(e) => picker.setQuery(e.target.value)}
+                    placeholder="חפש לפי שם או טלפון..."
+                    className="w-full pe-8 ps-3 py-2 text-base rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent placeholder-gray-400"
+                  />
+                </div>
+              </div>
+              <div className="overflow-y-auto flex-1">
+                {picker.fetched.status === "loading" && (
+                  <p className="text-sm text-gray-400 text-center py-6">טוען לקוחות...</p>
+                )}
+                {picker.fetched.status === "error" && (
+                  <p className="text-sm text-red-500 text-center py-6">שגיאה בטעינת לקוחות</p>
+                )}
+                {picker.fetched.status === "ready" && filtered.length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-6">לא נמצאו לקוחות</p>
+                )}
+                {filtered.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => { onSelect(c); picker.close(); }}
+                    className="w-full flex items-start gap-3 px-4 py-3 text-right hover:bg-indigo-50/60 transition-colors border-b border-gray-50 last:border-0"
+                  >
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-sm font-bold text-gray-500 mt-0.5">
+                      {c.name.charAt(0)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">{c.name}</p>
+                      <p className="text-xs text-gray-400 mt-0.5 truncate">{c.phone}{c.email ? ` · ${c.email}` : ""}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-          {/* List */}
-          <div className="max-h-80 overflow-y-auto">
-            {picker.fetched.status === "loading" && (
-              <p className="text-sm text-gray-400 text-center py-6">טוען לקוחות...</p>
-            )}
-            {picker.fetched.status === "error" && (
-              <p className="text-sm text-red-500 text-center py-6">שגיאה בטעינת לקוחות</p>
-            )}
-            {picker.fetched.status === "ready" && filtered.length === 0 && (
-              <p className="text-sm text-gray-400 text-center py-6">לא נמצאו לקוחות</p>
-            )}
-            {filtered.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                onMouseDown={(e) => {
-                  // Prevent the search input from blurring (which dismisses the
-                  // virtual keyboard on mobile and causes a viewport scroll that
-                  // would close the picker before onClick fires).
-                  e.preventDefault();
-                  // Stop the document-level mousedown outside-click listener from
-                  // seeing this event and closing the picker prematurely.
-                  e.stopPropagation();
-                }}
-                onClick={() => { onSelect(c); picker.close(); }}
-                className="w-full flex items-start gap-3 px-4 py-3 text-right hover:bg-indigo-50/60 transition-colors border-b border-gray-50 last:border-0"
-              >
-                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-sm font-bold text-gray-500 mt-0.5">
-                  {c.name.charAt(0)}
+          </>
+        ) : (
+          /* ── Desktop: fixed-position floating dropdown ── */
+          picker.dropPos && (
+            <div
+              ref={picker.dropdownRef}
+              style={{
+                position:  "fixed",
+                top:       picker.dropPos.top,
+                right:     picker.dropPos.right,
+                minWidth:  picker.dropPos.minWidth,
+                maxWidth:  "calc(100vw - 32px)",
+                zIndex:    9999,
+              }}
+              className="bg-white rounded-2xl border border-gray-200 shadow-xl overflow-hidden"
+              dir="rtl"
+            >
+              <div className="p-3 border-b border-gray-100">
+                <div className="relative">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                    stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    className="absolute top-1/2 -translate-y-1/2 end-3 pointer-events-none">
+                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                  </svg>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={picker.query}
+                    onChange={(e) => picker.setQuery(e.target.value)}
+                    placeholder="חפש לפי שם או טלפון..."
+                    className="w-full pe-8 ps-3 py-2 text-base sm:text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent placeholder-gray-400"
+                  />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900">{c.name}</p>
-                  <p className="text-xs text-gray-400 mt-0.5 truncate">{c.phone}{c.email ? ` · ${c.email}` : ""}</p>
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
+              </div>
+              <div className="max-h-80 overflow-y-auto">
+                {picker.fetched.status === "loading" && (
+                  <p className="text-sm text-gray-400 text-center py-6">טוען לקוחות...</p>
+                )}
+                {picker.fetched.status === "error" && (
+                  <p className="text-sm text-red-500 text-center py-6">שגיאה בטעינת לקוחות</p>
+                )}
+                {picker.fetched.status === "ready" && filtered.length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-6">לא נמצאו לקוחות</p>
+                )}
+                {filtered.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onClick={() => { onSelect(c); picker.close(); }}
+                    className="w-full flex items-start gap-3 px-4 py-3 text-right hover:bg-indigo-50/60 transition-colors border-b border-gray-50 last:border-0"
+                  >
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-sm font-bold text-gray-500 mt-0.5">
+                      {c.name.charAt(0)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">{c.name}</p>
+                      <p className="text-xs text-gray-400 mt-0.5 truncate">{c.phone}{c.email ? ` · ${c.email}` : ""}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        )
       )}
     </div>
   );
@@ -601,83 +660,154 @@ function PropertyPicker({
         </button>
       )}
 
-      {/* Dropdown — fixed to viewport; escapes all overflow ancestors */}
-      {picker.open && picker.dropPos && (
-        <div
-          ref={picker.dropdownRef}
-          style={{
-            position:  "fixed",
-            top:       picker.dropPos.top,
-            right:     picker.dropPos.right,
-            minWidth:  picker.dropPos.minWidth,
-            maxWidth:  "calc(100vw - 32px)",
-            zIndex:    9999,
-          }}
-          className="bg-white rounded-2xl border border-gray-200 shadow-xl overflow-hidden"
-          dir="rtl"
-        >
-          {/* Search */}
-          <div className="p-3 border-b border-gray-100">
-            <div className="relative">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                className="absolute top-1/2 -translate-y-1/2 end-3 pointer-events-none">
-                <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-              </svg>
-              <input
-                autoFocus
-                type="text"
-                value={picker.query}
-                onChange={(e) => picker.setQuery(e.target.value)}
-                placeholder="חפש לפי כתובת או עיר..."
-                className="w-full pe-8 ps-3 py-2 text-base sm:text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent placeholder-gray-400"
-              />
-            </div>
-          </div>
-          {/* List */}
-          <div className="max-h-80 overflow-y-auto">
-            {picker.fetched.status === "loading" && (
-              <p className="text-sm text-gray-400 text-center py-6">טוען נכסים...</p>
-            )}
-            {picker.fetched.status === "error" && (
-              <p className="text-sm text-red-500 text-center py-6">שגיאה בטעינת נכסים</p>
-            )}
-            {picker.fetched.status === "ready" && filtered.length === 0 && (
-              <p className="text-sm text-gray-400 text-center py-6">לא נמצאו נכסים</p>
-            )}
-            {filtered.map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onMouseDown={(e) => {
-                  // Same fix as ClientPicker: prevent search input blur (no
-                  // keyboard dismiss → no viewport scroll → picker stays open)
-                  // and stop the document outside-click handler from firing.
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                onClick={() => { onSelect(p); picker.close(); }}
-                className="w-full flex items-start gap-3 px-4 py-3 text-right hover:bg-indigo-50/60 transition-colors border-b border-gray-50 last:border-0"
-              >
-                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center mt-0.5">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                    stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" />
-                    <rect x="9" y="13" width="6" height="8" rx="0.5" />
+      {/* Dropdown — mobile sheet OR desktop floating panel */}
+      {picker.open && (
+        picker.isMobile ? (
+          /* ── Mobile: full-viewport modal sheet ── */
+          <>
+            <div className="fixed inset-0 z-50 bg-black/40" onClick={picker.close} />
+            <div
+              className="fixed inset-x-3 z-50 bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+              style={{ top: "8%", maxHeight: "80vh" }}
+              dir="rtl"
+            >
+              <div className="flex items-center justify-between px-4 py-3.5 border-b border-gray-100">
+                <span className="text-sm font-bold text-gray-900">בחירת נכס קיים</span>
+                <button type="button" onClick={picker.close}
+                  className="text-gray-400 hover:text-gray-600 transition-colors" aria-label="סגור">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
                   </svg>
+                </button>
+              </div>
+              <div className="p-3 border-b border-gray-100">
+                <div className="relative">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                    stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    className="absolute top-1/2 -translate-y-1/2 end-3 pointer-events-none">
+                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                  </svg>
+                  <input
+                    type="text"
+                    value={picker.query}
+                    onChange={(e) => picker.setQuery(e.target.value)}
+                    placeholder="חפש לפי כתובת או עיר..."
+                    className="w-full pe-8 ps-3 py-2 text-base rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent placeholder-gray-400"
+                  />
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 truncate">{parsePropertyAddress(p.address).address}</p>
-                  <p className="text-xs text-gray-400 mt-0.5">
-                    {p.city}
-                    {p.listingType && ` · ${LISTING_LABEL[p.listingType] ?? p.listingType}`}
-                    {p.askingPrice ? ` · ₪${fmtNis(p.askingPrice)}` : ""}
-                  </p>
+              </div>
+              <div className="overflow-y-auto flex-1">
+                {picker.fetched.status === "loading" && (
+                  <p className="text-sm text-gray-400 text-center py-6">טוען נכסים...</p>
+                )}
+                {picker.fetched.status === "error" && (
+                  <p className="text-sm text-red-500 text-center py-6">שגיאה בטעינת נכסים</p>
+                )}
+                {picker.fetched.status === "ready" && filtered.length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-6">לא נמצאו נכסים</p>
+                )}
+                {filtered.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => { onSelect(p); picker.close(); }}
+                    className="w-full flex items-start gap-3 px-4 py-3 text-right hover:bg-indigo-50/60 transition-colors border-b border-gray-50 last:border-0"
+                  >
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center mt-0.5">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                        stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" />
+                        <rect x="9" y="13" width="6" height="8" rx="0.5" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{parsePropertyAddress(p.address).address}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {p.city}
+                        {p.listingType && ` · ${LISTING_LABEL[p.listingType] ?? p.listingType}`}
+                        {p.askingPrice ? ` · ₪${fmtNis(p.askingPrice)}` : ""}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : (
+          /* ── Desktop: fixed-position floating dropdown ── */
+          picker.dropPos && (
+            <div
+              ref={picker.dropdownRef}
+              style={{
+                position:  "fixed",
+                top:       picker.dropPos.top,
+                right:     picker.dropPos.right,
+                minWidth:  picker.dropPos.minWidth,
+                maxWidth:  "calc(100vw - 32px)",
+                zIndex:    9999,
+              }}
+              className="bg-white rounded-2xl border border-gray-200 shadow-xl overflow-hidden"
+              dir="rtl"
+            >
+              <div className="p-3 border-b border-gray-100">
+                <div className="relative">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                    stroke="#9ca3af" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    className="absolute top-1/2 -translate-y-1/2 end-3 pointer-events-none">
+                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
+                  </svg>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={picker.query}
+                    onChange={(e) => picker.setQuery(e.target.value)}
+                    placeholder="חפש לפי כתובת או עיר..."
+                    className="w-full pe-8 ps-3 py-2 text-base sm:text-sm rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent placeholder-gray-400"
+                  />
                 </div>
-              </button>
-            ))}
-          </div>
-        </div>
+              </div>
+              <div className="max-h-80 overflow-y-auto">
+                {picker.fetched.status === "loading" && (
+                  <p className="text-sm text-gray-400 text-center py-6">טוען נכסים...</p>
+                )}
+                {picker.fetched.status === "error" && (
+                  <p className="text-sm text-red-500 text-center py-6">שגיאה בטעינת נכסים</p>
+                )}
+                {picker.fetched.status === "ready" && filtered.length === 0 && (
+                  <p className="text-sm text-gray-400 text-center py-6">לא נמצאו נכסים</p>
+                )}
+                {filtered.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onClick={() => { onSelect(p); picker.close(); }}
+                    className="w-full flex items-start gap-3 px-4 py-3 text-right hover:bg-indigo-50/60 transition-colors border-b border-gray-50 last:border-0"
+                  >
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center mt-0.5">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                        stroke="#6b7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" />
+                        <rect x="9" y="13" width="6" height="8" rx="0.5" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-gray-900 truncate">{parsePropertyAddress(p.address).address}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {p.city}
+                        {p.listingType && ` · ${LISTING_LABEL[p.listingType] ?? p.listingType}`}
+                        {p.askingPrice ? ` · ₪${fmtNis(p.askingPrice)}` : ""}
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )
+        )
       )}
     </div>
   );
@@ -1058,9 +1188,8 @@ export function NewContractForm() {
           ...(Number.isInteger(floorNum) && form.propertyFloor.trim() !== ""
             ? { floor: floorNum }
             : {}),
-          ...(form.dealType === "SALE" && priceAgorot > 0
-            ? { askingPrice: priceAgorot }
-            : {}),
+          // Save price for all deal types: sale price for SALE, monthly rent for RENTAL/BOTH
+          ...(priceAgorot > 0 ? { askingPrice: priceAgorot } : {}),
         };
         const propRes = await fetch("/api/properties", {
           method:  "POST",
@@ -1460,7 +1589,7 @@ export function NewContractForm() {
                 <TextInput
                   id="priceNis"
                   value={form.priceNis}
-                  onChange={(v) => set("priceNis", v)}
+                  onChange={(v) => set("priceNis", formatNisInput(v))}
                   placeholder={form.dealType === "SALE" ? "1,500,000" : "5,000"}
                   error={errors.priceNis}
                 />
@@ -1473,7 +1602,7 @@ export function NewContractForm() {
                   <TextInput
                     id="salePriceNis"
                     value={form.salePriceNis}
-                    onChange={(v) => set("salePriceNis", v)}
+                    onChange={(v) => set("salePriceNis", formatNisInput(v))}
                     placeholder="1,500,000"
                     error={errors.salePriceNis}
                   />
@@ -1535,7 +1664,7 @@ export function NewContractForm() {
                   </div>
                   {form.rentalCommissionPreset === "fixed" && (
                     <div>
-                      <TextInput id="commissionNis" value={form.commissionNis} onChange={(v) => set("commissionNis", v)}
+                      <TextInput id="commissionNis" value={form.commissionNis} onChange={(v) => set("commissionNis", formatNisInput(v))}
                         placeholder="5,000" error={errors.commissionNis} />
                       <p className="text-xs text-gray-400 mt-1">הזן 0 לעמלת תיווך ללא עלות</p>
                     </div>
@@ -1576,7 +1705,7 @@ export function NewContractForm() {
                   </div>
                 ) : (
                   <div>
-                    <TextInput id="commissionNis" value={form.commissionNis} onChange={(v) => set("commissionNis", v)}
+                    <TextInput id="commissionNis" value={form.commissionNis} onChange={(v) => set("commissionNis", formatNisInput(v))}
                       placeholder="11,000" error={errors.commissionNis} />
                     <p className="text-xs text-gray-400 mt-1">הזן 0 לעמלת תיווך ללא עלות</p>
                   </div>
@@ -1618,7 +1747,7 @@ export function NewContractForm() {
                   </div>
                 ) : (
                   <div>
-                    <TextInput id="commissionSaleNis" value={form.commissionSaleNis} onChange={(v) => set("commissionSaleNis", v)}
+                    <TextInput id="commissionSaleNis" value={form.commissionSaleNis} onChange={(v) => set("commissionSaleNis", formatNisInput(v))}
                       placeholder="30,000" error={errors.commissionSaleNis} />
                     <p className="text-xs text-gray-400 mt-1">הזן 0 לעמלת מכירה ללא עלות</p>
                   </div>
