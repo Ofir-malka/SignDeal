@@ -95,11 +95,14 @@ export async function POST(request: Request) {
         },
       });
 
-      // 2. Create the subscription — PRO trial for all new registrations
+      // 2. Create the subscription — STANDARD trial for all new registrations.
+      // billingInterval defaults to MONTHLY in the schema; no need to write it
+      // explicitly here. It will be overwritten by the billing provider webhook
+      // when the user subscribes (Phase 4).
       const subscription = await tx.subscription.create({
         data: {
           userId:      newUser.id,
-          plan:        "PRO",
+          plan:        "STANDARD",
           status:      "TRIALING",
           trialEndsAt,
         },
@@ -111,7 +114,7 @@ export async function POST(request: Request) {
           subscriptionId: subscription.id,
           event:          "trial_started",
           fromPlan:       null,
-          toPlan:         "PRO",
+          toPlan:         "STANDARD",
           fromStatus:     null,
           toStatus:       "TRIALING",
           source:         "registration",
