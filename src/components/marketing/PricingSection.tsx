@@ -101,7 +101,13 @@ const SELF_SERVE: SelfServePlan[] = [
 
 // ─── Trust strip ──────────────────────────────────────────────────────────────
 
-const TRUST_ITEMS = [
+interface TrustItem {
+  label: string;
+  href?: string;
+  icon:  React.ReactNode;
+}
+
+const TRUST_ITEMS: TrustItem[] = [
   {
     label: "14 יום ניסיון חינם",
     icon: (
@@ -125,6 +131,7 @@ const TRUST_ITEMS = [
   },
   {
     label: "ביטול בכל עת",
+    href:  "/legal/terms#cancellation",
     icon: (
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
@@ -414,10 +421,16 @@ function TrustStrip() {
         className="flex flex-wrap items-center justify-center gap-x-8 gap-y-3 mt-10
                    py-5 px-6 rounded-2xl bg-white/[0.03] border border-white/8"
       >
-        {TRUST_ITEMS.map(({ label, icon }) => (
+        {TRUST_ITEMS.map(({ label, icon, href }) => (
           <span key={label} className="flex items-center gap-2 text-sm text-indigo-300/65">
             <span className="text-violet-400">{icon}</span>
-            {label}
+            {href ? (
+              <a href={href} className="hover:text-white transition-colors underline-offset-2 hover:underline">
+                {label}
+              </a>
+            ) : (
+              label
+            )}
           </span>
         ))}
       </div>

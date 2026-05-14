@@ -38,19 +38,25 @@ export default function LegalLayout({ children }: { children: React.ReactNode })
 
       {/* ── Footer ──────────────────────────────────────────────────────────── */}
       <footer className="bg-white border-t border-gray-200 mt-auto">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-xs text-gray-400">© {new Date().getFullYear()} SignDeal. כל הזכויות שמורות.</p>
-          <nav className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1">
-            <Link href="/legal/terms"   className="text-xs text-gray-400 hover:text-gray-700 transition-colors">תנאי שימוש</Link>
-            <Link href="/legal/privacy" className="text-xs text-gray-400 hover:text-gray-700 transition-colors">מדיניות פרטיות</Link>
-            <Link href="/legal/cookies" className="text-xs text-gray-400 hover:text-gray-700 transition-colors">מדיניות עוגיות</Link>
-            <a
-              href="mailto:support@signdeal.co.il"
-              className="text-xs text-gray-400 hover:text-gray-700 transition-colors"
-            >
-              support@signdeal.co.il
-            </a>
-          </nav>
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 flex flex-col gap-3">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <p className="text-xs text-gray-400">© {new Date().getFullYear()} SignDeal. כל הזכויות שמורות.</p>
+            <nav className="flex flex-wrap items-center justify-center gap-x-5 gap-y-1">
+              <Link href="/legal/terms"   className="text-xs text-gray-400 hover:text-gray-700 transition-colors">תנאי שימוש</Link>
+              <Link href="/legal/privacy" className="text-xs text-gray-400 hover:text-gray-700 transition-colors">מדיניות פרטיות</Link>
+              <Link href="/legal/cookies" className="text-xs text-gray-400 hover:text-gray-700 transition-colors">מדיניות עוגיות</Link>
+            </nav>
+          </div>
+          {/* Contact & mailing address — required by MAX/MA */}
+          <address className="not-italic flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+            <span className="text-xs text-gray-400">פינסקר 46, תל אביב, ישראל</span>
+            <span className="text-gray-300 text-xs" aria-hidden="true">·</span>
+            <a href="tel:+97254XXXXXXX"            className="text-xs text-gray-400 hover:text-gray-700 transition-colors">+972-53-4417575</a>
+            <span className="text-gray-300 text-xs" aria-hidden="true">·</span>
+            <a href="mailto:support@signdeal.co.il" className="text-xs text-gray-400 hover:text-gray-700 transition-colors">support@signdeal.co.il</a>
+            <span className="text-gray-300 text-xs" aria-hidden="true">·</span>
+            <a href="mailto:privacy@signdeal.co.il" className="text-xs text-gray-400 hover:text-gray-700 transition-colors">privacy@signdeal.co.il</a>
+          </address>
         </div>
       </footer>
     </div>

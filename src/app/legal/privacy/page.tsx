@@ -10,7 +10,7 @@ export const metadata: Metadata = {
   },
 };
 
-const UPDATED = "1 בינואר 2025";
+const UPDATED = "14 במאי 2026";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -90,8 +90,13 @@ export default function PrivacyPage() {
             {" "}<a href="https://www.infobip.com/legal/privacy-policy" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">מדיניות פרטיות Infobip</a>
           </li>
           <li>
-            <strong className="text-gray-800">ספק תשלומים</strong> — לעיבוד תשלומי עמלה.
-            פרטי כרטיס אשראי אינם עוברים דרך שרתינו ואינם נשמרים אצלנו.
+            <strong className="text-gray-800">HYP (יעד שירותי סליקה בע"מ)</strong> — ספק סליקה
+            לתשלומי מנוי SaaS. מעבד פרטי כרטיס אשראי לצורך חיוב חוזר (הרשאה מתמשכת — HK).
+            פרטי כרטיס אינם עוברים דרך שרתינו ואינם נשמרים אצלנו בצורה גלויה.
+          </li>
+          <li>
+            <strong className="text-gray-800">ספק תשלומים (עמלות תיווך)</strong> — לעיבוד תשלומי עמלה
+            ישירים מלקוחות הסוכן. פרטי כרטיס אינם עוברים דרך שרתינו ואינם נשמרים אצלנו.
           </li>
           <li>
             <strong className="text-gray-800">ספק אחסון ענן (PostgreSQL)</strong> — כל נתוני

@@ -10,13 +10,21 @@ export const metadata: Metadata = {
   },
 };
 
-const UPDATED = "1 בינואר 2025";
+const UPDATED = "14 במאי 2026";
 
 // ── Reusable prose components ─────────────────────────────────────────────────
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  id,
+  title,
+  children,
+}: {
+  id?:      string;
+  title:    string;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="mb-10">
+    <section id={id} className="mb-10 scroll-mt-20">
       <h2 className="text-lg font-semibold text-gray-900 mb-3 pb-2 border-b border-gray-100">{title}</h2>
       <div className="space-y-3 text-sm text-gray-600 leading-relaxed">{children}</div>
     </section>
@@ -43,6 +51,18 @@ export default function TermsPage() {
         <p>
           שימושך בשירות מהווה הסכמה מלאה לתנאים אלה. אם אינך מסכים לתנאים, אנא הפסק את
           השימוש בשירות מיד.
+        </p>
+        <p>
+          <strong className="text-gray-800">פרטי החברה:</strong>{" "}
+          SignDeal, פינסקר 46, תל אביב, ישראל.
+          לפניות:{" "}
+          <a href="mailto:support@signdeal.co.il" className="text-indigo-600 hover:text-indigo-700">
+            support@signdeal.co.il
+          </a>{" "}
+          |{" "}
+          <a href="tel:+97254XXXXXXX" className="text-indigo-600 hover:text-indigo-700">
+            +972-54-XXXXXXX
+          </a>
         </p>
       </Section>
 
@@ -91,18 +111,14 @@ export default function TermsPage() {
         </p>
       </Section>
 
-      <Section title="5. תשלומים ועמלות">
+      <Section title="5. תשלומי עמלת תיווך">
         <p>
           SignDeal מאפשרת שליחת בקשת תשלום עמלת תיווך ללקוחות דרך ספק תשלומים חיצוני. SignDeal
           אינה גורם הפיננסי בעסקה ואינה אחראית לכספים המועברים בין הלקוח לסוכן.
         </p>
         <p>
-          עמלות השימוש בשירות, אם וכאשר יגבו, יפורסמו מראש בדף התמחור. כל שינוי בתמחור
-          יובא לידיעתך לפחות 30 יום מראש.
-        </p>
-        <p>
-          SignDeal אינה אחסנת פרטי כרטיס אשראי. פרטי תשלום מעובדים ישירות על ידי ספק
-          התשלומים החיצוני, בכפוף לתנאי השימוש ומדיניות הפרטיות שלו.
+          SignDeal אינה אחסנת פרטי כרטיס אשראי של לקוחות הסוכן. פרטי תשלום מעובדים ישירות על
+          ידי ספק התשלומים החיצוני, בכפוף לתנאי השימוש ומדיניות הפרטיות שלו.
         </p>
       </Section>
 
@@ -156,18 +172,118 @@ export default function TermsPage() {
         </p>
       </Section>
 
-      <Section title="10. יצירת קשר">
+      {/* ── §10 — Subscription, billing & cancellation ──────────────────────── */}
+      <Section id="cancellation" title="10. מנויים, חיוב וביטול">
+
+        <p className="font-medium text-gray-700">10.1 סוגי מנויים ותמחור</p>
         <p>
-          לכל שאלה או פנייה הנוגעת לתנאים אלה, ניתן לפנות אלינו בכתובת הדוא"ל:
+          SignDeal מציעה מנויים בתשלום חודשי או שנתי בהתאם לתוכנית שנבחרה (סטנדרט / מתקדמת / פרו).
+          מחירי המנויים מפורטים בדף התמחור ואינם כוללים מע"מ.
+          מנוי שנתי מחויב במלואו מראש.
+          לתקופת ניסיון חינם של 14 יום — אין צורך בכרטיס אשראי.
+        </p>
+
+        <p className="font-medium text-gray-700 pt-1">10.2 חיוב חוזר (הרשאה מתמשכת)</p>
+        <p>
+          בעת רכישת מנוי בתשלום תאשר/י הרשאת חיוב חוזרת המנוהלת דרך מערכת HYP
+          (יעד שירותי סליקה בע"מ). החיוב יתבצע אוטומטית בתחילת כל תקופת חיוב
+          (חודשית או שנתית) עד לביטול המנוי.
+          הפרטים המוצגים בדף התשלום של HYP כוללים את סכום החיוב, תדירותו, ותאריך החידוש הראשון.
+        </p>
+
+        <p className="font-medium text-gray-700 pt-1">10.3 ביטול מנוי</p>
+        <p>
+          ניתן לבטל את המנוי בכל עת על ידי פנייה לתמיכה:
+        </p>
+        <ul className="list-disc list-inside space-y-1 mr-3">
+          <li>
+            דוא"ל:{" "}
+            <a href="mailto:support@signdeal.co.il" className="text-indigo-600 hover:text-indigo-700">
+              support@signdeal.co.il
+            </a>
+          </li>
+          <li>
+            טלפון:{" "}
+            <a href="tel:+97254XXXXXXX" className="text-indigo-600 hover:text-indigo-700">
+              +972-54-XXXXXXX
+            </a>
+          </li>
+        </ul>
+        <p>
+          הביטול ייכנס לתוקף בתום תקופת החיוב הנוכחית (החודש או השנה ששולמה).
+          עד לסיום התקופה תוכל/י להמשיך להשתמש בשירות במלואו.
+          לאחר תום התקופה ייסגר החשבון לפעולות חדשות, אך נתוניך יישמרו בהתאם למדיניות הפרטיות.
+        </p>
+
+        <p className="font-medium text-gray-700 pt-1">10.4 מדיניות החזרים</p>
+        <p><strong className="text-gray-800">מנוי חודשי:</strong> לא יינתן החזר כספי עבור חודש חיוב שכבר החל.</p>
+        <p>
+          <strong className="text-gray-800">מנוי שנתי:</strong> בקשת ביטול שתוגש תוך 14 ימים
+          ממועד החיוב השנתי תזכה בהחזר יחסי בניכוי ימי השימוש שחלפו.
+          לאחר 14 יום ממועד החיוב — לא יינתן החזר.
         </p>
         <p>
-          <a
-            href="mailto:support@signdeal.co.il"
-            className="text-indigo-600 hover:text-indigo-700 font-medium"
-          >
-            support@signdeal.co.il
-          </a>
+          לבקשת החזר יש לפנות לתמיכה עם פרטי העסקה (מזהה עסקה ותאריך חיוב).
+          ההחזר יועבר לכרטיס שממנו בוצע החיוב תוך 14 ימי עסקים.
         </p>
+
+        <p className="font-medium text-gray-700 pt-1">10.5 כישלון בתשלום</p>
+        <p>
+          במקרה של כישלון בחיוב (סירוב בנקאי, כרטיס פג תוקף וכדומה) תישלח הודעה לדוא"ל הרשום.
+          ניתנת תקופת חסד של <strong className="text-gray-800">יום עסקים אחד (1)</strong> לעדכון
+          אמצעי תשלום. לאחר תקופת החסד, הגישה לשירות עשויה להיות מוגבלת עד לסילוק החוב.
+        </p>
+
+      </Section>
+
+      {/* ── §11 — No gambling / illegal content declaration ──────────────────── */}
+      <Section id="prohibited-content" title="11. הצהרה בדבר תוכן אסור ואי-קידום פעילות בלתי חוקית">
+        <p>
+          SignDeal היא פלטפורמה המיועדת אך ורק לשימוש מקצועי של מתווכי נדל"ן מורשים בישראל.
+          השירות <strong className="text-gray-800">אינו משמש, אינו מקדם, ואינו קשור</strong> בשום
+          צורה לפעילויות הבאות:
+        </p>
+        <ul className="list-disc list-inside space-y-1.5 mr-3">
+          <li>הימורים, הגרלות, או כל פעילות הימורים מכל סוג</li>
+          <li>תוכן למבוגרים, פורנוגרפיה, או תוכן מיני מפורש</li>
+          <li>פעילות בלתי חוקית מכל סוג, לרבות הונאה, הלבנת הון, או מימון טרור</li>
+          <li>שירותים פיננסיים שאינם מורשים על פי דין</li>
+          <li>כל תוכן המפר את חוקי מדינת ישראל או הדין הבינלאומי</li>
+        </ul>
+        <p>
+          כל שימוש בשירות לצרכים האסורים לעיל יגרור חסימה מיידית של החשבון ללא החזר,
+          ועשוי לכלול דיווח לרשויות האכיפה המוסמכות.
+        </p>
+      </Section>
+
+      <Section title="12. יצירת קשר">
+        <p>
+          לכל שאלה או פנייה הנוגעת לתנאים אלה, ניתן לפנות אלינו:
+        </p>
+        <address className="not-italic space-y-1">
+          <p>
+            <strong className="text-gray-800">דוא"ל:</strong>{" "}
+            <a
+              href="mailto:support@signdeal.co.il"
+              className="text-indigo-600 hover:text-indigo-700 font-medium"
+            >
+              support@signdeal.co.il
+            </a>
+          </p>
+          <p>
+            <strong className="text-gray-800">טלפון:</strong>{" "}
+            <a
+              href="tel:+97254XXXXXXX"
+              className="text-indigo-600 hover:text-indigo-700 font-medium"
+            >
+              +972-54-XXXXXXX
+            </a>
+          </p>
+          <p>
+            <strong className="text-gray-800">כתובת:</strong>{" "}
+            פינסקר 46, תל אביב, ישראל
+          </p>
+        </address>
         <p className="text-gray-400 text-xs mt-4">
           דין ומדיניות: ישראל. כל סכסוך יידון בבתי המשפט המוסמכים במחוז תל אביב.
         </p>

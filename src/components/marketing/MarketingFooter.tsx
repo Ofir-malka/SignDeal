@@ -156,13 +156,33 @@ export function MarketingFooter() {
 
       {/* ── Bottom bar ────────────────────────────────────────────────── */}
       <div className="border-t border-white/10">
-        <div className="max-w-6xl mx-auto px-6 py-5 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <p className="text-xs text-indigo-300/60 text-center sm:text-right">
-            © {new Date().getFullYear()} SignDeal. כל הזכויות שמורות.
-          </p>
-          <p className="text-xs text-indigo-400/60">
-            נבנה בישראל 🇮🇱
-          </p>
+        <div className="max-w-6xl mx-auto px-6 py-5 flex flex-col gap-3">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+            <p className="text-xs text-indigo-300/60 text-center sm:text-right">
+              © {new Date().getFullYear()} SignDeal. כל הזכויות שמורות.
+            </p>
+            <p className="text-xs text-indigo-400/60">
+              נבנה בישראל 🇮🇱
+            </p>
+          </div>
+          {/* Contact & mailing address — required by MAX/MA */}
+          <address className="not-italic flex flex-wrap items-center justify-center gap-x-4 gap-y-1">
+            <span className="text-xs text-indigo-400/55">פינסקר 46, תל אביב, ישראל</span>
+            <span className="text-indigo-600/40 text-xs" aria-hidden="true">·</span>
+            <a
+              href="tel:+97254XXXXXXX"
+              className="text-xs text-indigo-400/55 hover:text-indigo-200 transition-colors"
+            >
+              +972-54-XXXXXXX
+            </a>
+            <span className="text-indigo-600/40 text-xs" aria-hidden="true">·</span>
+            <a
+              href="mailto:support@signdeal.co.il"
+              className="text-xs text-indigo-400/55 hover:text-indigo-200 transition-colors"
+            >
+              support@signdeal.co.il
+            </a>
+          </address>
         </div>
       </div>
     </footer>
