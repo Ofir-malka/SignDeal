@@ -336,9 +336,10 @@ enum MessageType {
   PAYMENT_REQUEST_LINK     // שליחת קישור תשלום ללקוח
   SIGNING_REMINDER         // תזכורת לחתימה ללקוח
   PAYMENT_REMINDER         // תזכורת לתשלום ללקוח
-  BROKER_CONTRACT_SIGNED   // התראה למתווך: לקוח חתם
-  BROKER_PAYMENT_RECEIVED  // התראה למתווך: תשלום התקבל
-  USER_WELCOME             // אימייל ברוכים הבאים לאחר הרשמה
+  BROKER_CONTRACT_SIGNED      // התראה למתווך: לקוח חתם
+  BROKER_PAYMENT_RECEIVED     // התראה למתווך: תשלום התקבל
+  USER_WELCOME                // אימייל ברוכים הבאים לאחר הרשמה
+  CLIENT_CONTRACT_SIGNED_PDF  // אימייל ללקוח: החוזה החתום + PDF מצורף
 }
 
 // ── MessageTemplate ────────────────────────────────────────────────────────────

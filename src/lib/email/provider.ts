@@ -31,6 +31,18 @@ export interface EmailTemplate {
   html:    string;
 }
 
+/** A single file attachment in Resend's format: base64-encoded content. */
+export interface EmailAttachment {
+  /** File name shown to the recipient, e.g. "contract-ABCD1234.pdf". */
+  filename: string;
+  /**
+   * File content encoded as a base64 string.
+   * Convert a Buffer with: `buffer.toString("base64")`.
+   * Resend's limit is 40 MB per email; typical contract PDFs are < 500 KB.
+   */
+  content: string;
+}
+
 export interface SendEmailOptions {
   /** Recipient email address. */
   to:       string;
@@ -39,6 +51,12 @@ export interface SendEmailOptions {
   html:     string;
   /** Overrides the global EMAIL_REPLY_TO for this specific send. */
   replyTo?: string;
+  /**
+   * Optional file attachments.
+   * Each entry must have a filename and base64-encoded content.
+   * Omit or pass an empty array to send without attachments.
+   */
+  attachments?: EmailAttachment[];
 }
 
 export type EmailResult =
@@ -62,13 +80,15 @@ class ResendProvider implements EmailProvider {
 
   async send(options: SendEmailOptions): Promise<EmailResult> {
     const config  = getEmailConfig();
-    const { to, subject, text, html, replyTo } = options;
+    const { to, subject, text, html, replyTo, attachments } = options;
 
-    const resolvedReplyTo = replyTo ?? config.replyTo;
+    const resolvedReplyTo  = replyTo ?? config.replyTo;
+    const hasAttachments   = Array.isArray(attachments) && attachments.length > 0;
 
     console.log(
       `[ResendProvider] to="${to}" subject="${subject}" ` +
-      `live=${config.isLive} replyTo="${resolvedReplyTo ?? "none"}"`,
+      `live=${config.isLive} replyTo="${resolvedReplyTo ?? "none"}" ` +
+      `attachments=${hasAttachments ? attachments!.length : 0}`,
     );
 
     // ── Stub mode ─────────────────────────────────────────────────────────────
@@ -76,7 +96,8 @@ class ResendProvider implements EmailProvider {
       console.log(
         `[ResendProvider] STUB — RESEND_API_KEY not set, skipping send.\n` +
         `  subject: ${subject}\n` +
-        `  preview: ${text.slice(0, 120).replace(/\n/g, "↵")}`,
+        `  preview: ${text.slice(0, 120).replace(/\n/g, "↵")}` +
+        (hasAttachments ? `\n  attachments: ${attachments!.map(a => a.filename).join(", ")}` : ""),
       );
       return { ok: true };
     }
@@ -90,7 +111,8 @@ class ResendProvider implements EmailProvider {
         text,
         html,
       };
-      if (resolvedReplyTo) body.reply_to = resolvedReplyTo;
+      if (resolvedReplyTo)  body.reply_to    = resolvedReplyTo;
+      if (hasAttachments)   body.attachments = attachments;
 
       const res = await fetch("https://api.resend.com/emails", {
         method:  "POST",

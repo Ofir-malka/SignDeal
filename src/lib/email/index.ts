@@ -20,7 +20,7 @@
 
 // Provider
 export { sendEmail, emailProvider }  from "./provider";
-export type { EmailProvider, EmailTemplate, SendEmailOptions, EmailResult } from "./provider";
+export type { EmailProvider, EmailTemplate, SendEmailOptions, EmailResult, EmailAttachment } from "./provider";
 
 // Env
 export { getEmailConfig, warnIfEmailUnconfigured } from "./env";
