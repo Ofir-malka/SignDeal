@@ -333,10 +333,31 @@ function NewPropertyModal({
 
   function validate(): Record<string, string> {
     const e: Record<string, string> = {};
-    if (!form.street.trim()) e.street = "שם רחוב הוא שדה חובה";
-    if (!form.city.trim())   e.city   = "עיר היא שדה חובה";
 
-    // askingPrice is required for all listing types
+    // Address
+    if (!form.street.trim())      e.street      = "שם רחוב הוא שדה חובה";
+    if (!form.houseNumber.trim()) e.houseNumber = "מספר בית הוא שדה חובה";
+    if (!form.city.trim())        e.city        = "עיר היא שדה חובה";
+
+    // Floor — required, must be a parseable number (0 = ground floor is valid)
+    const floorStr = form.floor.trim();
+    if (!floorStr || isNaN(Number(floorStr))) {
+      e.floor = "קומה היא שדה חובה";
+    }
+
+    // Rooms — required, must be > 0
+    const roomsNum = parseFloat(form.rooms);
+    if (!form.rooms.trim() || isNaN(roomsNum) || roomsNum <= 0) {
+      e.rooms = "מספר חדרים הוא שדה חובה (ערך חיובי)";
+    }
+
+    // Size — required, must be > 0
+    const sizeNum = parseFloat(form.sizeSqm);
+    if (!form.sizeSqm.trim() || isNaN(sizeNum) || sizeNum <= 0) {
+      e.sizeSqm = "גודל הנכס הוא שדה חובה (ערך חיובי)";
+    }
+
+    // Price — required, must be > 0
     const priceRaw = form.askingPrice.replace(/[, ]/g, "").trim();
     const priceNum = parseFloat(priceRaw);
     if (!priceRaw || isNaN(priceNum) || priceNum <= 0) {
@@ -446,27 +467,39 @@ function NewPropertyModal({
               {/* House number · Floor · Apartment — stacked on mobile, 3 columns on sm+ */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">מספר בית</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    מספר בית <span className="text-red-400">*</span>
+                  </label>
                   <input
                     type="text"
                     placeholder="42"
                     value={form.houseNumber}
                     onChange={(e) => set({ houseNumber: e.target.value })}
-                    className={INPUT_CLS}
+                    className={[INPUT_CLS, fieldErrors.houseNumber ? "border-red-300 ring-1 ring-red-300" : ""].join(" ")}
                   />
+                  {fieldErrors.houseNumber && (
+                    <p className="text-xs text-red-600 mt-1">{fieldErrors.houseNumber}</p>
+                  )}
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">קומה</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    קומה <span className="text-red-400">*</span>
+                  </label>
                   <input
                     type="text"
                     placeholder="4"
                     value={form.floor}
                     onChange={(e) => set({ floor: e.target.value })}
-                    className={INPUT_CLS}
+                    className={[INPUT_CLS, fieldErrors.floor ? "border-red-300 ring-1 ring-red-300" : ""].join(" ")}
                   />
+                  {fieldErrors.floor && (
+                    <p className="text-xs text-red-600 mt-1">{fieldErrors.floor}</p>
+                  )}
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1.5">דירה</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    דירה <span className="text-xs font-normal text-gray-400">(אופציונלי)</span>
+                  </label>
                   <input
                     type="text"
                     placeholder="8"
@@ -527,12 +560,14 @@ function NewPropertyModal({
             </div>
           </div>
 
-          {/* ── Optional details ── */}
+          {/* ── Property details ── */}
           <div>
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">פרטים נוספים (אופציונלי)</p>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">פרטים נוספים</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">חדרים</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  חדרים <span className="text-red-400">*</span>
+                </label>
                 <input
                   type="number"
                   placeholder="3.5"
@@ -540,19 +575,27 @@ function NewPropertyModal({
                   min="0"
                   value={form.rooms}
                   onChange={(e) => set({ rooms: e.target.value })}
-                  className={INPUT_CLS}
+                  className={[INPUT_CLS, fieldErrors.rooms ? "border-red-300 ring-1 ring-red-300" : ""].join(" ")}
                 />
+                {fieldErrors.rooms && (
+                  <p className="text-xs text-red-600 mt-1">{fieldErrors.rooms}</p>
+                )}
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">גודל (מ״ר)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  גודל (מ״ר) <span className="text-red-400">*</span>
+                </label>
                 <input
                   type="number"
                   placeholder="85"
                   min="0"
                   value={form.sizeSqm}
                   onChange={(e) => set({ sizeSqm: e.target.value })}
-                  className={INPUT_CLS}
+                  className={[INPUT_CLS, fieldErrors.sizeSqm ? "border-red-300 ring-1 ring-red-300" : ""].join(" ")}
                 />
+                {fieldErrors.sizeSqm && (
+                  <p className="text-xs text-red-600 mt-1">{fieldErrors.sizeSqm}</p>
+                )}
               </div>
               {/* Price field — label + placeholder change by listingType; required */}
               <div className="col-span-1 sm:col-span-2">
