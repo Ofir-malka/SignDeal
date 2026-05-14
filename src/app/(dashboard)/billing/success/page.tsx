@@ -1,36 +1,29 @@
 /**
  * /billing/success
  *
- * Post-payment landing page. Handles three distinct flows:
+ * Post-payment landing page. Handles five distinct flows:
  *
- *   A. Stub flow   — query has stub=true (local dev only)
- *   B. HYP success — query has txId + responseMac (redirected from HYP successUrl)
- *   C. HYP error   — query has txId but missing/failed MAC (redirected from HYP errorUrl)
- *   D. Unknown     — no recognisable params (direct navigation / stale link)
+ *   A. Stub        — query has stub=true (local dev only, no DB writes)
+ *   B. Activated   — MAC verified + BillingCheckout found + subscription activated
+ *   C. MAC failed  — responseMac missing or does not match
+ *   D. Checkout error — checkout missing / expired / already resolved
+ *   E. Unknown     — no recognisable params (direct navigation / stale link)
  *
- * ────────────────────────────────────────────────────────────────────────────
- * ⚠️  Phase 2 — VERIFICATION ONLY. Nothing is written to the DB here.
- *
- *  Phase 3 TODO (implement after HYP integration is confirmed working):
- *    [ ] DB migration: add billingCustomerId, cardTokenEnc, cardExpEnc,
- *        cardMask, pendingPlanId columns to Subscription table.
- *    [ ] Store uniqueID in a pending checkout table at checkout time,
- *        then mark it used here to prevent replay attacks.
- *    [ ] On MAC verification success:
- *        - Set Subscription.status = ACTIVE
- *        - Set Subscription.plan   = plan from userData1 (via uniqueID lookup)
- *        - Set Subscription.billingInterval = interval from userData2
- *        - Set Subscription.billingProvider = "hyp"
- *        - Set Subscription.billingProviderId = txId
- *        - Encrypt and store cardToken + cardExp for recurring charges
- *        - Append SubscriptionEvent (type: "upgraded" or "trial_converted")
- *    [ ] Send confirmation email to user.
- *    [ ] Invalidate user JWT so new plan is reflected immediately.
- * ────────────────────────────────────────────────────────────────────────────
+ * Phase 3 Step 2: full activation flow.
+ * On valid HYP callback:
+ *   1. Parse + verify responseMac (using HYP_PASSP) — BEFORE any DB read.
+ *   2. Find BillingCheckout by uniqueID (= our Order param).
+ *   3. Guard: not found / expired / already SUCCEEDED / already FAILED.
+ *   4. prisma.$transaction():
+ *        - BillingCheckout  → SUCCEEDED, txId, HKId, authNumber, cardMask, resolvedAt
+ *        - Subscription     → ACTIVE, plan, billingInterval, billingProvider,
+ *                             billingSubscriptionId, currentPeriodStart, currentPeriodEnd
+ *        - SubscriptionEvent → payment_succeeded / hyp_callback
  */
 
-import type { Metadata }       from "next";
-import Link                    from "next/link";
+import type { Metadata } from "next";
+import Link              from "next/link";
+import { prisma }        from "@/lib/prisma";
 import { verifyHypResponseMac } from "@/lib/billing/providers/hyp";
 import type { HypCallbackParams } from "@/lib/billing/providers/hyp";
 
@@ -84,7 +77,6 @@ function StubSuccess({ plan, interval }: { plan: string; interval: string }) {
 
   return (
     <>
-      {/* Stub badge */}
       <div className="mx-6 mt-6 rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-2.5 flex items-center gap-2.5">
         <span className="text-lg" aria-hidden="true">🧪</span>
         <p className="text-xs font-semibold text-amber-800">
@@ -92,15 +84,12 @@ function StubSuccess({ plan, interval }: { plan: string; interval: string }) {
         </p>
       </div>
 
-      {/* Green header */}
       <div className="bg-emerald-500 mx-6 mt-4 rounded-xl px-5 py-4 text-white">
         <div className="flex items-center gap-3 justify-end">
           <div>
             <p className="text-base font-bold">תשלום הבדיקה אושר</p>
             {planLabel && (
-              <p className="text-sm text-emerald-100 mt-0.5">
-                מסלול {planLabel}
-              </p>
+              <p className="text-sm text-emerald-100 mt-0.5">מסלול {planLabel}</p>
             )}
           </div>
           <span className="text-3xl" aria-hidden="true">✅</span>
@@ -129,25 +118,37 @@ function StubSuccess({ plan, interval }: { plan: string; interval: string }) {
   );
 }
 
-// ── Flow B: HYP verified success ─────────────────────────────────────────────
+// ── Flow B: Activation success ────────────────────────────────────────────────
 
-function HypVerifiedSuccess({
+function HypActivationSuccess({
   txId,
+  plan,
+  interval,
   authNumber,
   cardMask,
+  periodEnd,
 }: {
   txId:        string;
+  plan:        string;
+  interval:    string;
   authNumber?: string;
   cardMask?:   string;
+  periodEnd:   Date;
 }) {
+  const planLabel     = PLAN_LABELS[plan]     ?? plan;
+  const intervalLabel = INTERVAL_LABELS[interval] ?? interval;
+  const periodEndStr  = periodEnd.toLocaleDateString("he-IL", {
+    day: "numeric", month: "long", year: "numeric",
+  });
+
   return (
     <>
       <div className="bg-emerald-500 px-6 py-5 text-white">
         <div className="flex items-center gap-3 justify-end">
           <div>
-            <h1 className="text-xl font-bold">התשלום אושר!</h1>
+            <h1 className="text-xl font-bold">המנוי הופעל!</h1>
             <p className="text-sm text-emerald-100 mt-0.5">
-              האימות הצליח — הפרטים תקינים.
+              התשלום אושר והמנוי שלך פעיל.
             </p>
           </div>
           <span className="text-4xl" aria-hidden="true">✅</span>
@@ -155,22 +156,14 @@ function HypVerifiedSuccess({
       </div>
 
       <div className="px-6 py-6 flex flex-col gap-5">
-        {/* Transaction details — safe fields only */}
-        <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-4 flex flex-col gap-2">
-          <SummaryRow label="מזהה עסקה (txId)" value={txId} />
-          {authNumber && <SummaryRow label="מספר אישור"    value={authNumber} />}
-          {cardMask   && <SummaryRow label="כרטיס"         value={cardMask} />}
-        </div>
-
-        {/* Phase 2 notice — subscription not yet activated */}
-        <div className="rounded-xl bg-blue-50 border border-blue-200 px-4 py-3">
-          <p className="text-xs font-semibold text-blue-800 mb-0.5">
-            שלב 2 — אימות בלבד
-          </p>
-          <p className="text-xs text-blue-700 leading-relaxed">
-            התשלום אומת בהצלחה אך המנוי טרם הופעל.
-            הפעלת המנוי תתווסף בשלב 3 לאחר השלמת אינטגרציית HYP.
-          </p>
+        {/* Plan summary */}
+        <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-4 flex flex-col gap-2">
+          <SummaryRow label="מסלול"    value={planLabel} />
+          <SummaryRow label="חיוב"     value={intervalLabel} />
+          <SummaryRow label="חידוש הבא" value={periodEndStr} />
+          {cardMask   && <SummaryRow label="כרטיס"      value={cardMask} />}
+          {authNumber && <SummaryRow label="מספר אישור" value={authNumber} />}
+          <SummaryRow label="מזהה עסקה" value={txId} />
         </div>
 
         <Link
@@ -192,7 +185,42 @@ function HypVerifiedSuccess({
   );
 }
 
-// ── Flow C: HYP MAC verification failed ──────────────────────────────────────
+// ── Flow B (idempotent): Already activated ────────────────────────────────────
+
+function AlreadyActivated({ txId }: { txId: string }) {
+  return (
+    <>
+      <div className="bg-emerald-500 px-6 py-5 text-white">
+        <div className="flex items-center gap-3 justify-end">
+          <div>
+            <h1 className="text-xl font-bold">המנוי כבר פעיל</h1>
+            <p className="text-sm text-emerald-100 mt-0.5">
+              התשלום כבר עובד ואושר קודם לכן.
+            </p>
+          </div>
+          <span className="text-4xl" aria-hidden="true">✅</span>
+        </div>
+      </div>
+      <div className="px-6 py-6 flex flex-col gap-5">
+        <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3">
+          <SummaryRow label="מזהה עסקה" value={txId} />
+        </div>
+        <p className="text-sm text-center text-gray-500 leading-relaxed">
+          הדף כבר עובד — נראה שנטענת פעמיים. המנוי שלך פעיל.
+        </p>
+        <Link
+          href="/dashboard"
+          className="w-full text-center text-sm font-bold py-3 rounded-xl
+                     bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+        >
+          עבור ללוח הבקרה →
+        </Link>
+      </div>
+    </>
+  );
+}
+
+// ── Flow C: MAC verification failed ──────────────────────────────────────────
 
 function HypVerificationFailed({ txId }: { txId?: string }) {
   return (
@@ -249,7 +277,79 @@ function HypVerificationFailed({ txId }: { txId?: string }) {
   );
 }
 
-// ── Flow D: Unknown / direct navigation ──────────────────────────────────────
+// ── Flow D: Checkout lookup errors ────────────────────────────────────────────
+
+type CheckoutErrorReason = "not_found" | "expired" | "failed" | "activation_error";
+
+function CheckoutError({
+  reason,
+  txId,
+}: {
+  reason: CheckoutErrorReason;
+  txId?:  string;
+}) {
+  const messages: Record<CheckoutErrorReason, { title: string; body: string }> = {
+    not_found: {
+      title: "סשן התשלום לא נמצא",
+      body:  "לא נמצא סשן תשלום תואם. ייתכן שהסשן פג תוקף לפני שהגעת לדף זה.",
+    },
+    expired: {
+      title: "סשן התשלום פג תוקף",
+      body:  "הסשן תקף ל-30 דקות בלבד. אנא התחל את תהליך התשלום מחדש.",
+    },
+    failed: {
+      title: "עסקה זו כבר נכשלה",
+      body:  "סשן זה כבר סומן כנכשל. אנא נסה להירשם מחדש.",
+    },
+    activation_error: {
+      title: "שגיאה בהפעלת המנוי",
+      body:  "התשלום אושר אך הייתה בעיה בהפעלת המנוי. צוות התמיכה יפנה אליך בהקדם.",
+    },
+  };
+
+  const { title, body } = messages[reason];
+
+  return (
+    <>
+      <div className="bg-amber-500 px-6 py-5 text-white">
+        <div className="flex items-center gap-3 justify-end">
+          <div>
+            <h1 className="text-xl font-bold">{title}</h1>
+          </div>
+          <span className="text-4xl" aria-hidden="true">⚠️</span>
+        </div>
+      </div>
+      <div className="px-6 py-6 flex flex-col gap-5">
+        <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
+          <p className="text-sm text-amber-800 leading-relaxed">{body}</p>
+          {txId && (
+            <p className="text-xs text-amber-600 mt-1.5 font-mono break-all">
+              txId: {txId}
+            </p>
+          )}
+        </div>
+        <div className="flex flex-col gap-2">
+          <Link
+            href="/pricing"
+            className="w-full text-center text-sm font-bold py-3 rounded-xl
+                       bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+          >
+            נסה שנית ←
+          </Link>
+          <a
+            href="mailto:support@signdeal.co.il"
+            className="w-full text-center text-sm py-2.5 rounded-xl
+                       border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+          >
+            פנה לתמיכה
+          </a>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ── Flow E: Unknown / direct navigation ──────────────────────────────────────
 
 function UnknownFlow() {
   return (
@@ -283,7 +383,7 @@ export default async function BillingSuccessPage({
     stub?:       string;
     plan?:       string;
     interval?:   string;
-    // HYP callback
+    // HYP callback params
     uniqueID?:   string;
     txId?:       string;
     cgUid?:      string;
@@ -292,6 +392,7 @@ export default async function BillingSuccessPage({
     cardMask?:   string;
     personalId?: string;
     authNumber?: string;
+    HKId?:       string;
     responseMac?: string;
   }>;
 }) {
@@ -306,7 +407,7 @@ export default async function BillingSuccessPage({
     );
   }
 
-  // ── Flow B/C: HYP callback ──────────────────────────────────────────────────
+  // ── Flow B/C/D: HYP callback ────────────────────────────────────────────────
   if (p.txId && p.uniqueID && p.responseMac) {
     const cbParams: HypCallbackParams = {
       uniqueID:    p.uniqueID,
@@ -317,34 +418,31 @@ export default async function BillingSuccessPage({
       cardMask:    p.cardMask,
       personalId:  p.personalId,
       authNumber:  p.authNumber,
+      HKId:        p.HKId,
       responseMac: p.responseMac,
     };
 
-    const password = process.env.HYP_PASSWORD?.trim() ?? "";
+    const passp = process.env.HYP_PASSP?.trim() ?? "";
 
-    // Log the verification attempt — never log cardToken/cardExp/password.
     console.log(
-      `[billing/success] verifying HYP MAC` +
+      `[billing/success] HYP callback received` +
       ` txId=${p.txId}` +
       ` uniqueID=${p.uniqueID}` +
+      ` hasHKId=${Boolean(p.HKId)}` +
       ` hasCardMask=${Boolean(p.cardMask)}` +
       ` hasAuthNumber=${Boolean(p.authNumber)}`,
     );
 
-    const verified = password
-      ? verifyHypResponseMac(cbParams, password)
-      : false;   // if password missing, treat as failed — never trust unsigned callback
-
-    if (!password) {
-      console.error(
-        "[billing/success] HYP_PASSWORD is not set — cannot verify responseMac." +
-        " Treating callback as unverified.",
-      );
+    // ── Step 1: verify MAC BEFORE any DB read ──────────────────────────────
+    if (!passp) {
+      console.error("[billing/success] HYP_PASSP is not set — cannot verify responseMac.");
     }
 
-    console.log(`[billing/success] MAC verification: ${verified ? "PASS" : "FAIL"}`);
+    const macValid = passp ? verifyHypResponseMac(cbParams, passp) : false;
 
-    if (!verified) {
+    console.log(`[billing/success] MAC verification: ${macValid ? "PASS" : "FAIL"}`);
+
+    if (!macValid) {
       return (
         <PageShell>
           <HypVerificationFailed txId={p.txId} />
@@ -352,22 +450,156 @@ export default async function BillingSuccessPage({
       );
     }
 
-    // ── Phase 3 TODO — subscription activation goes here ──────────────────
-    // Verified: txId, authNumber, cardMask are safe to display.
-    // cardToken + cardExp must NOT be displayed — save for recurring later.
+    // ── Step 2: look up BillingCheckout ────────────────────────────────────
+    const checkout = await prisma.billingCheckout.findUnique({
+      where: { order: p.uniqueID },
+    });
 
+    console.log(
+      `[billing/success] BillingCheckout lookup` +
+      ` order=${p.uniqueID}` +
+      ` found=${Boolean(checkout)}` +
+      (checkout ? ` status=${checkout.status} expired=${checkout.expiresAt < new Date()}` : ""),
+    );
+
+    // Not found
+    if (!checkout) {
+      return (
+        <PageShell>
+          <CheckoutError reason="not_found" txId={p.txId} />
+        </PageShell>
+      );
+    }
+
+    // Expired
+    if (checkout.expiresAt < new Date()) {
+      return (
+        <PageShell>
+          <CheckoutError reason="expired" txId={p.txId} />
+        </PageShell>
+      );
+    }
+
+    // Already SUCCEEDED — idempotency: just show the already-activated screen
+    if (checkout.status === "SUCCEEDED") {
+      console.log(`[billing/success] checkout already SUCCEEDED — showing idempotent response`);
+      return (
+        <PageShell>
+          <AlreadyActivated txId={p.txId} />
+        </PageShell>
+      );
+    }
+
+    // Already FAILED (previous MAC failure or manual mark)
+    if (checkout.status === "FAILED") {
+      return (
+        <PageShell>
+          <CheckoutError reason="failed" txId={p.txId} />
+        </PageShell>
+      );
+    }
+
+    // ── Step 3: compute next billing period ────────────────────────────────
+    const now              = new Date();
+    const currentPeriodEnd = new Date(now);
+    if (checkout.interval === "YEARLY") {
+      currentPeriodEnd.setFullYear(currentPeriodEnd.getFullYear() + 1);
+    } else {
+      currentPeriodEnd.setMonth(currentPeriodEnd.getMonth() + 1);
+    }
+
+    // ── Step 4: activate — all writes in a single transaction ──────────────
+    try {
+      await prisma.$transaction(async (tx) => {
+        // 4a. Mark checkout SUCCEEDED
+        await tx.billingCheckout.update({
+          where: { order: p.uniqueID },
+          data: {
+            status:     "SUCCEEDED",
+            txId:       p.txId,
+            hkId:       p.HKId   ?? null,
+            authNumber: p.authNumber ?? null,
+            cardMask:   p.cardMask   ?? null,
+            resolvedAt: now,
+          },
+        });
+
+        // 4b. Activate subscription
+        await tx.subscription.update({
+          where: { userId: checkout.userId },
+          data: {
+            status:               "ACTIVE",
+            plan:                 checkout.plan,
+            billingInterval:      checkout.interval,
+            billingProvider:      "hyp",
+            billingSubscriptionId: p.HKId ?? null,
+            currentPeriodStart:   now,
+            currentPeriodEnd,
+          },
+        });
+
+        // 4c. Append audit event — fetch subscriptionId inside the transaction
+        const sub = await tx.subscription.findUniqueOrThrow({
+          where:  { userId: checkout.userId },
+          select: { id: true },
+        });
+
+        await tx.subscriptionEvent.create({
+          data: {
+            subscriptionId: sub.id,
+            event:          "payment_succeeded",
+            toPlan:         checkout.plan,
+            toStatus:       "ACTIVE",
+            source:         "hyp_callback",
+            actorId:        null,
+            metadata:       JSON.stringify({
+              txId:       p.txId,
+              hkId:       p.HKId,
+              authNumber: p.authNumber,
+              order:      p.uniqueID,
+            }),
+          },
+        });
+      });
+
+      console.log(
+        `[billing/success] activation SUCCESS` +
+        ` userId=${checkout.userId}` +
+        ` plan=${checkout.plan}` +
+        ` interval=${checkout.interval}` +
+        ` txId=${p.txId}` +
+        ` hkId=${p.HKId ?? "(none)"}` +
+        ` periodEnd=${currentPeriodEnd.toISOString()}`,
+      );
+    } catch (err) {
+      console.error(
+        "[billing/success] activation FAILED — transaction error:",
+        err instanceof Error ? err.message : err,
+        `userId=${checkout.userId} txId=${p.txId} order=${p.uniqueID}`,
+      );
+      return (
+        <PageShell>
+          <CheckoutError reason="activation_error" txId={p.txId} />
+        </PageShell>
+      );
+    }
+
+    // ── Step 5: render success ─────────────────────────────────────────────
     return (
       <PageShell>
-        <HypVerifiedSuccess
+        <HypActivationSuccess
           txId={p.txId}
+          plan={checkout.plan}
+          interval={checkout.interval}
           authNumber={p.authNumber}
           cardMask={p.cardMask}
+          periodEnd={currentPeriodEnd}
         />
       </PageShell>
     );
   }
 
-  // ── Flow D: Unknown ─────────────────────────────────────────────────────────
+  // ── Flow E: Unknown / direct navigation ────────────────────────────────────
   return (
     <PageShell>
       <UnknownFlow />

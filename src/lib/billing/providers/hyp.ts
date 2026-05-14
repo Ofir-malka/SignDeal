@@ -63,6 +63,7 @@ export interface HypCallbackParams {
   cardMask?:   string;   // e.g. "411111******1111" — safe to display
   personalId?: string;
   authNumber?: string;
+  HKId?:       string;   // HYP recurring agreement ID (returned when HK=True)
   responseMac: string;   // SHA-256 hex to verify
 }
 
