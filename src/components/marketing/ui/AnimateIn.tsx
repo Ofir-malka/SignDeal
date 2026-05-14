@@ -6,7 +6,7 @@ type Direction = "bottom" | "left" | "right";
 
 interface Props {
   children: ReactNode;
-  /** Stagger delay in ms — applied only when element becomes visible */
+  /** Stagger delay in ms — desktop only, ignored on mobile */
   delay?: number;
   className?: string;
   /** Direction the element slides in from (default: bottom) */
@@ -14,26 +14,32 @@ interface Props {
 }
 
 /**
- * Fade + slide-in wrapper driven by IntersectionObserver.
- * Zero external dependencies — pure CSS transitions + a single ref.
+ * Fade + slide-in wrapper driven by IntersectionObserver — DESKTOP ONLY.
  *
- * SSR / no-JS behaviour:
- *   Before mount, no animation classes are applied at all — content
- *   renders at its natural opacity/position and remains visible.
- *   Animation classes are only added after the component hydrates,
- *   which means disabling JS never hides content.
+ * ── Mobile behaviour (< 768px width or coarse pointer) ───────────────────
+ * All animation is skipped entirely. Content renders at full opacity on the
+ * first paint and never transitions through a hidden state.
  *
- * JS behaviour:
- *   1. Mount  → hidden classes applied (opacity-0 + translate)
- *   2. Element enters viewport → visible classes applied + CSS transition plays
- *   Fires once per element; never re-hides on scroll-back.
+ * Why skip on mobile:
+ *  1. IntersectionObserver callbacks are throttled by iOS Safari during
+ *     momentum scroll. Sections gated by opacity-0 stay blank for many
+ *     frames while the user watches empty white space scroll past.
+ *  2. translateX initial states can escape iOS Safari's overflow clipping
+ *     on compositing-layer subtrees, incorrectly expanding the page width
+ *     and triggering horizontal layout clipping on the hero.
+ *  3. Mobile users benefit more from immediate content than scroll
+ *     animations — content is the priority.
  *
- * No layout shift:
- *   CSS transforms and opacity changes do not affect layout flow (no CLS).
+ * ── Desktop behaviour ─────────────────────────────────────────────────────
+ *  • If the element is already in the viewport on mount (above the fold):
+ *    go straight to visible — no opacity-0 flash. getBoundingClientRect()
+ *    is reliable on desktop at this point in the lifecycle.
+ *  • If below the fold: apply hidden classes, then IO drives the reveal.
+ *  • prefers-reduced-motion collapses all animation on desktop too.
  *
- * Usage:
- *   <AnimateIn delay={150} from="bottom">…</AnimateIn>
- *   <AnimateIn delay={300} from="left">…</AnimateIn>
+ * ── SSR / no-JS ──────────────────────────────────────────────────────────
+ *  Content renders at full opacity before any JS runs. Animation classes are
+ *  added only after the component hydrates — disabling JS never hides content.
  */
 
 // Full class strings so Tailwind's static scanner keeps them in the bundle.
@@ -45,46 +51,55 @@ const HIDDEN: Record<Direction, string> = {
 
 const VISIBLE = "opacity-100 translate-y-0 translate-x-0";
 
+type Phase = "ssr" | "skip" | "hidden" | "visible";
+
 export function AnimateIn({ children, delay = 0, className = "", from = "bottom" }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
-  // `mounted` gates ALL animation classes.
-  // false → SSR / pre-hydration: no classes applied, content naturally visible.
-  // true  → JS has run: hidden classes applied until IntersectionObserver fires.
-  const [mounted, setMounted] = useState(false);
-  const [visible, setVisible] = useState(false);
-  // When the user prefers reduced motion, skip the transition entirely.
-  const [reducedMotion, setReducedMotion] = useState(false);
+  /**
+   * phase state machine:
+   *  "ssr"     — server render / pre-hydration. No animation classes.
+   *              Content is naturally visible (allows SSR streaming / no-JS).
+   *  "skip"    — mobile or reduced-motion. Jump straight to no-animation render.
+   *              Content is immediately visible, no transitions, no IO.
+   *  "hidden"  — desktop below-fold. Hidden classes applied while waiting for IO.
+   *  "visible" — desktop in/above viewport. Visible classes applied, transition plays.
+   */
+  const [phase, setPhase] = useState<Phase>("ssr");
 
   useEffect(() => {
+    // ── Detect skip conditions ─────────────────────────────────────────────
+    const isMobileWidth   = window.innerWidth < 768;
+    const isCoarsePointer = window.matchMedia("(pointer: coarse)").matches;
+    const prefersNoMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (isMobileWidth || isCoarsePointer || prefersNoMotion) {
+      // Skip: render content immediately with no hidden state or IO.
+      setPhase("skip");
+      return;
+    }
+
+    // ── Desktop animated path ──────────────────────────────────────────────
     const el = ref.current;
     if (!el) return;
 
-    // Detect reduced-motion preference before switching to animated mode.
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setReducedMotion(mq.matches);
-
-    // If the element is already visible in the viewport (above the fold),
-    // set both mounted + visible in the same synchronous block. React 18
-    // batches the two setState calls into a single render, so the element
-    // jumps directly from SSR state → animated-visible state WITHOUT ever
-    // passing through the hidden/translated state. This prevents the
-    // translateX/Y flash that causes iOS Safari to compute a wider-than-
-    // viewport paint region and trigger a layout recalculation.
-    const rect = el.getBoundingClientRect();
-    const alreadyInView = rect.top < window.innerHeight && rect.bottom > 0;
-
-    setMounted(true);
-    if (alreadyInView) {
-      setVisible(true);
-      return; // IO not needed — element is already visible
+    // Check if the element is already in the viewport (above the fold).
+    // getBoundingClientRect() is reliable on desktop during useEffect.
+    // Going straight to "visible" means one render (ssr → visible) with no
+    // intermediate hidden state, so no opacity-0 flash on above-fold content.
+    const { top, bottom } = el.getBoundingClientRect();
+    if (top < window.innerHeight && bottom > 0) {
+      setPhase("visible");
+      return; // IO not needed — element is already in view
     }
 
-    // Below-the-fold elements: use IntersectionObserver to animate on scroll.
+    // Below the fold: apply hidden state first, IO drives the reveal.
+    setPhase("hidden");
+
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
-          setVisible(true);
+          setPhase("visible");
           observer.disconnect(); // animate once only
         }
       },
@@ -95,10 +110,9 @@ export function AnimateIn({ children, delay = 0, className = "", from = "bottom"
     return () => observer.disconnect();
   }, []);
 
-  // ── SSR / no-JS path ────────────────────────────────────────────────────
-  // No animation classes → content renders at full opacity in its natural
-  // position. ref is attached so the effect can find the element on mount.
-  if (!mounted) {
+  // ── SSR / mobile / reduced-motion path ──────────────────────────────────
+  // Content renders at its natural opacity and position — no wrapper classes.
+  if (phase === "ssr" || phase === "skip") {
     return (
       <div ref={ref} className={className || undefined}>
         {children}
@@ -106,26 +120,16 @@ export function AnimateIn({ children, delay = 0, className = "", from = "bottom"
     );
   }
 
-  // ── JS / animated path ──────────────────────────────────────────────────
-  // When reduced motion is preferred, skip the fade/slide entirely —
-  // render content at full opacity with no transition class.
-  if (reducedMotion) {
-    return (
-      <div ref={ref} className={className || undefined}>
-        {children}
-      </div>
-    );
-  }
-
+  // ── Desktop animated path ────────────────────────────────────────────────
   return (
     <div
       ref={ref}
       className={[
         "transition-all duration-700 ease-out",
-        visible ? VISIBLE : HIDDEN[from],
+        phase === "visible" ? VISIBLE : HIDDEN[from],
         className,
       ].filter(Boolean).join(" ")}
-      style={{ transitionDelay: visible ? `${delay}ms` : "0ms" }}
+      style={{ transitionDelay: phase === "visible" ? `${delay}ms` : "0ms" }}
     >
       {children}
     </div>

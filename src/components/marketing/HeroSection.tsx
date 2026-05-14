@@ -233,11 +233,15 @@ export function HeroSection() {
             </div>
           </AnimateIn>
 
-          {/* Stats strip — pill container with dividers */}
+          {/* Stats strip — pill container with dividers.
+               Mobile: `flex w-full` → equal-width columns (3 × ~33%) so the
+               strip never exceeds the viewport width. At `text-xs px-2` each
+               item comfortably fits in the 114 px it gets on a 390 px screen.
+               Desktop: `sm:inline-flex sm:w-auto` restores the natural pill. */}
           <AnimateIn delay={400}>
             <div
               dir="rtl"
-              className="inline-flex items-stretch rounded-2xl
+              className="flex w-full sm:inline-flex sm:w-auto items-stretch rounded-2xl
                          bg-white/[0.04] border border-white/[0.09]
                          overflow-hidden"
             >
@@ -245,19 +249,24 @@ export function HeroSection() {
                 <span
                   key={label}
                   className={[
-                    "flex items-center gap-1.5 px-4 py-2.5",
+                    // flex-1 on mobile gives each item 1/3 of the strip width.
+                    // sm:flex-none restores the natural content-width on desktop.
+                    "flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-2 sm:px-4 py-2.5",
                     "transition-colors duration-200 hover:bg-white/[0.05]",
                     i > 0 ? "border-r border-white/[0.09]" : "",
                   ].join(" ")}
                 >
-                  {/* Icon wrapper carries the micro-animation */}
+                  {/* Icon wrapper carries the desktop micro-animation.
+                       will-change-transform removed — reduces unnecessary
+                       compositing layers on mobile.                       */}
                   <span
-                    className={`text-violet-400 flex-shrink-0 inline-flex will-change-transform ${iconAnim}`}
+                    className={`text-violet-400 flex-shrink-0 inline-flex ${iconAnim}`}
                     aria-hidden="true"
                   >
                     {icon}
                   </span>
-                  <span className="text-sm font-medium text-indigo-200/80 whitespace-nowrap">{label}</span>
+                  {/* text-xs on mobile (fits in ~114px column), sm:text-sm on desktop */}
+                  <span className="text-xs sm:text-sm font-medium text-indigo-200/80 whitespace-nowrap">{label}</span>
                 </span>
               ))}
             </div>
@@ -272,7 +281,10 @@ export function HeroSection() {
         </div>
 
         {/* ── Mock UI column — relative anchor for floating chips ── */}
-        <div className="relative flex-1 w-full max-w-sm lg:max-w-md">
+        {/* overflow-hidden on mobile clips the DashboardMock's -inset-8 glow so
+             it cannot escape the column boundary. lg:overflow-visible lets the
+             floating chips (hidden on mobile, shown on desktop) bleed outside. */}
+        <div className="relative flex-1 w-full max-w-sm lg:max-w-md overflow-hidden lg:overflow-visible">
 
           {/* Floating live-status chips — desktop only, aria-hidden.
                Each chip drifts at a different duration + phase so they
@@ -289,10 +301,11 @@ export function HeroSection() {
                 key={label}
                 aria-hidden="true"
                 className={[
+                  // hidden on mobile — only shown on lg+. No will-change-transform
+                  // to avoid creating unnecessary compositing layers.
                   "hidden lg:flex items-center gap-2 absolute z-20",
                   "bg-indigo-900/90 border border-white/[0.12] backdrop-blur-md",
                   "rounded-xl px-3 py-2 shadow-lg shadow-black/40",
-                  "will-change-transform",
                   "text-xs font-semibold",
                   color,
                   cls,
