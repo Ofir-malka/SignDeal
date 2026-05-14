@@ -16,9 +16,11 @@ import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import Apple from "next-auth/providers/apple";
 import bcrypt from "bcryptjs";
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authConfig } from "@/lib/auth.config";
 import { TRIAL_DAYS } from "@/lib/plans";
+import { sendEmail, welcomeEmail } from "@/lib/email";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
@@ -172,6 +174,67 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           metadata:       JSON.stringify({ trialDays: TRIAL_DAYS }),
         },
       });
+
+      // ── Welcome email (non-blocking, after response) ──────────────────────
+      // Runs after the OAuth redirect is already underway — any failure here
+      // must never surface to the user or roll back the registration.
+      // We use after() so the Vercel function stays alive until the send resolves.
+      //
+      // Apple may return an empty name on first sign-in; fall back to the email
+      // local part so the greeting is still personalised.
+      if (user.email) {
+        after(async () => {
+          try {
+            // Re-fetch fullName from DB — the Auth.js `user` object carries
+            // `name` (Auth.js schema field) not our custom `fullName` column.
+            const dbUser = await prisma.user.findUnique({
+              where:  { id: user.id! },
+              select: { fullName: true, email: true },
+            });
+
+            const recipientEmail = dbUser?.email ?? user.email!;
+            // Prefer DB fullName → Auth.js name → email local part
+            const fullName =
+              dbUser?.fullName?.trim() ||
+              (user.name?.trim() ?? "") ||
+              recipientEmail.split("@")[0];
+
+            const template = welcomeEmail({ fullName });
+
+            // PENDING audit record first — survives a mid-flight crash
+            const message = await prisma.message.create({
+              data: {
+                type:           "USER_WELCOME",
+                channel:        "EMAIL",
+                provider:       "resend",
+                subject:        template.subject,
+                body:           template.text,
+                userId:         user.id!,
+                recipientEmail,
+                status:         "PENDING",
+                attempts:       0,
+              },
+            });
+
+            const result = await sendEmail({ to: recipientEmail, ...template });
+
+            await prisma.message.update({
+              where: { id: message.id },
+              data: result.ok
+                ? { status: "SENT",   providerMessageId: result.messageId ?? null, attempts: 1, lastAttemptAt: new Date() }
+                : { status: "FAILED", failureReason: result.reason,                attempts: 1, lastAttemptAt: new Date() },
+            });
+
+            if (result.ok) {
+              console.log(`[auth/createUser] welcome email sent to ${recipientEmail} — id=${result.messageId ?? "n/a"}`);
+            } else {
+              console.error(`[auth/createUser] welcome email failed for ${recipientEmail}: ${result.reason}`);
+            }
+          } catch (err) {
+            console.error("[auth/createUser] welcome email error:", err instanceof Error ? err.message : err);
+          }
+        });
+      }
     },
   },
 

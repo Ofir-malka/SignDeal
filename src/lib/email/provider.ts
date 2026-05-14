@@ -11,12 +11,10 @@
  * • Stub mode — when RESEND_API_KEY is absent, sends are logged and return ok:true.
  *   No external call is made; development and CI never need real credentials.
  *
- * ── Relationship to legacy code ───────────────────────────────────────────────
- * src/lib/messaging/email-provider.ts   — low-level, used by notify.ts and the
- *   registration flow. Unchanged and still in production use.
- * src/lib/email/provider.ts (THIS FILE) — richer layer used by the new templates
- *   system and the admin test endpoint. Callers going forward should import from
- *   "@/lib/email" (the barrel export).
+ * ── This is the single email provider ───────────────────────────────────────
+ * All sends — transactional templates, notify.ts, admin test — import from
+ * "@/lib/email" (the barrel export). The legacy src/lib/messaging/email-provider.ts
+ * has been removed; this file is the sole implementation.
  */
 
 import { getEmailConfig } from "./env";
@@ -47,14 +45,19 @@ export interface SendEmailOptions {
   /** Recipient email address. */
   to:       string;
   subject:  string;
+  /** Plain-text fallback — always required; shown when HTML cannot be rendered. */
   text:     string;
-  html:     string;
+  /**
+   * HTML version. When omitted, only the plain-text version is sent.
+   * Resend displays the richer of the two available parts.
+   */
+  html?:    string;
   /** Overrides the global EMAIL_REPLY_TO for this specific send. */
   replyTo?: string;
   /**
-   * Optional file attachments.
-   * Each entry must have a filename and base64-encoded content.
+   * Optional file attachments (base64-encoded content).
    * Omit or pass an empty array to send without attachments.
+   * Resend limit: 40 MB per email; typical contract PDFs are < 500 KB.
    */
   attachments?: EmailAttachment[];
 }
@@ -109,8 +112,8 @@ class ResendProvider implements EmailProvider {
         to:      [to],
         subject,
         text,
-        html,
       };
+      if (html)             body.html        = html;
       if (resolvedReplyTo)  body.reply_to    = resolvedReplyTo;
       if (hasAttachments)   body.attachments = attachments;
 

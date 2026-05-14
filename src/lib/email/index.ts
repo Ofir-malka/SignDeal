@@ -22,9 +22,9 @@
 export { sendEmail, emailProvider }  from "./provider";
 export type { EmailProvider, EmailTemplate, SendEmailOptions, EmailResult, EmailAttachment } from "./provider";
 
-// Env
-export { getEmailConfig, warnIfEmailUnconfigured } from "./env";
-export type { EmailConfig }                         from "./env";
+// Env + constants
+export { getEmailConfig, warnIfEmailUnconfigured, SUPPORT_EMAIL, NOREPLY_EMAIL, DEFAULT_FROM } from "./env";
+export type { EmailConfig } from "./env";
 
 // Templates
 export * from "./templates/index";

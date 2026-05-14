@@ -1,15 +1,21 @@
 /**
  * POST /api/admin/email/test
  *
- * Sends a test email to the logged-in admin's email address.
+ * Sends a test email to the logged-in admin (or a specified recipient).
  * Admin role is re-checked against the DB on every call (requireAdmin).
  *
- * Query param  ?template=<name>  selects which template to send.
- * Defaults to "welcome" when omitted.
+ * Query params:
+ *   ?template=<name>   selects which template to send (default: "welcome")
+ *   ?to=<email>        override recipient (default: admin's own email)
+ *   ?subject=<text>    override template subject
  *
  * Supported template names:
  *   welcome | contract-signing | contract-signed |
  *   payment-request | payment-received | trial-ending
+ *
+ * Response JSON:
+ *   { ok, template, to, subject, from, replyTo, live, messageId?,
+ *     reason?, stubNote?, durationMs, timestamp }
  *
  * This endpoint exists purely for development/staging QA.
  * It never touches production data.
@@ -100,14 +106,16 @@ export async function POST(request: Request) {
   if (adminResult instanceof NextResponse) return adminResult;
   const { adminId } = adminResult;
 
-  // ── Read template param ──────────────────────────────────────────────────
+  // ── Read query params ────────────────────────────────────────────────────
   const { searchParams } = new URL(request.url);
   const rawTemplate = (searchParams.get("template") ?? "welcome").toLowerCase();
   const templateName: TemplateName = TEMPLATES.includes(rawTemplate as TemplateName)
     ? (rawTemplate as TemplateName)
     : "welcome";
+  const toOverride      = searchParams.get("to")?.trim()      || null;
+  const subjectOverride = searchParams.get("subject")?.trim() || null;
 
-  // ── Fetch admin email from DB (not in JWT) ────────────────────────────────
+  // ── Fetch admin from DB (email not in JWT) ────────────────────────────────
   const admin = await prisma.user.findUnique({
     where:  { id: adminId },
     select: { email: true, fullName: true },
@@ -117,26 +125,49 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Admin email not found" }, { status: 404 });
   }
 
-  // ── Build + send ──────────────────────────────────────────────────────────
+  // ── Validate ?to override ────────────────────────────────────────────────
+  const recipient = toOverride ?? admin.email;
+  const EMAIL_RE  = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!EMAIL_RE.test(recipient)) {
+    return NextResponse.json(
+      { error: `Invalid recipient email: "${recipient}"` },
+      { status: 400 },
+    );
+  }
+
+  // ── Build template + apply overrides ─────────────────────────────────────
   const config   = getEmailConfig();
   const template = buildTemplate(templateName, admin.fullName);
+  const subject  = subjectOverride ?? template.subject;
 
   console.log(
-    `[admin/email/test] sending template="${templateName}" to="${admin.email}" live=${config.isLive}`,
+    `[admin/email/test] template="${templateName}" to="${recipient}"` +
+    (toOverride      ? ` (override)` : "") +
+    (subjectOverride ? ` subject-override="${subject}"` : "") +
+    ` live=${config.isLive}`,
   );
 
-  const result = await sendEmail({ to: admin.email, ...template });
+  // ── Send + time ───────────────────────────────────────────────────────────
+  const startedAt = Date.now();
+  const result    = await sendEmail({ to: recipient, ...template, subject });
+  const durationMs = Date.now() - startedAt;
 
   return NextResponse.json({
-    ok:         result.ok,
-    template:   templateName,
-    to:         admin.email,
-    subject:    template.subject,
-    live:       config.isLive,
-    messageId:  result.ok ? result.messageId : undefined,
-    reason:     result.ok ? undefined : result.reason,
-    stubNote:   !config.isLive
+    ok:          result.ok,
+    template:    templateName,
+    to:          recipient,
+    toOverride:  toOverride ?? undefined,
+    subject,
+    subjectOverride: subjectOverride ?? undefined,
+    from:        config.from,
+    replyTo:     config.replyTo,
+    live:        config.isLive,
+    messageId:   result.ok ? (result.messageId ?? null) : undefined,
+    reason:      result.ok ? undefined : result.reason,
+    stubNote:    !config.isLive
       ? "RESEND_API_KEY is not set — email was logged only (stub mode)."
       : undefined,
+    durationMs,
+    timestamp:   new Date().toISOString(),
   });
 }

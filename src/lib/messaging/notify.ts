@@ -15,7 +15,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { sendSms, getSmsProviderName } from "@/lib/messaging/sms-provider";
-import { sendEmail } from "@/lib/messaging/email-provider";
+import { sendEmail } from "@/lib/email";   // consolidated provider — HTML + reply-to supported
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
