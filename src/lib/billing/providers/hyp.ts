@@ -1,41 +1,36 @@
 /**
- * HypBillingProvider — HYP (CreditGuard engine) hosted payment page.
+ * HypBillingProvider — HYP Pay Protocol hosted payment page.
  *
- * Two-step flow:
- *   1. Server-to-server POST to HYP Relay → receive mpiHostedPageUrl
- *   2. Return that URL → caller redirects the browser there
- *   3. Customer pays on HYP's hosted page
- *   4. HYP redirects to successUrl / errorUrl / cancelUrl (GET with query params)
+ * Flow:
+ *   1. Build a signed redirect URL to https://pay.hyp.co.il/p/
+ *   2. Return that URL → caller (checkout route) redirects the browser there
+ *   3. Customer pays on HYP's hosted page (card entry, 3DS, etc.)
+ *   4. HYP redirects to SuccessUrl / ErrorUrl / CancelUrl with query params
  *
- * This file handles step 1–2 only.
- * Step 4 callback verification: verifyHypResponseMac() is exported here
- * for use by the future /billing/success handler — no DB writes yet.
+ * This file handles steps 1–2 only.
+ * Step 4 callback verification is handled by /billing/success (see verifyHypResponseMac below).
  *
  * Activate with:  BILLING_PROVIDER=hyp
- * Default is:     BILLING_PROVIDER=stub  (safe for dev/staging)
+ * Default is:     BILLING_PROVIDER=stub  (safe for dev / staging)
  *
  * Required env vars:
- *   HYP_USER              API username  (from HYP merchant portal)
- *   HYP_PASSWORD          API password  (from HYP merchant portal)
- *   HYP_TERMINAL_NUMBER   10-char terminal ID, e.g. "AB12345678"
+ *   HYP_MASOF     Terminal identifier (Masof) — 10-digit string from HYP merchant portal.
+ *   HYP_PASSP     Terminal password (PassP) — from HYP merchant portal.
  *
  * Optional env vars:
- *   HYP_MID               Merchant ID — omit <mid> tag entirely if unset.
- *                         Some terminals work without it; include only if
- *                         HYP support confirms it is needed for your account.
- *   HYP_BASE_URL          Defaults to UAT sandbox (cguat2.creditguard.co.il)
- *                         Set to your assigned production domain for live.
+ *   HYP_API_KEY   SHA-1 KEY — reserved for Soft Protocol (server-to-server recurring charge).
+ *                 Not used for initial checkout. Set it now for future use.
+ *
+ * NOTE: the old env vars (HYP_USER, HYP_PASSWORD, HYP_TERMINAL_NUMBER, HYP_MID, HYP_BASE_URL)
+ * were used by the previous CreditGuard Relay XML implementation and are no longer read.
  */
 
 import crypto from "crypto";
 import type { BillingProvider, CheckoutParams, CheckoutResult } from "../index";
 
-// ── Endpoint constants ────────────────────────────────────────────────────────
+// ── Endpoint ──────────────────────────────────────────────────────────────────
 
-/** HYP UAT (sandbox) relay endpoint. The production URL is merchant-specific
- *  and is assigned by HYP during onboarding (pattern: xxx.creditguard.co.il). */
-const UAT_BASE_URL = "https://cguat2.creditguard.co.il";
-const RELAY_PATH   = "/xpo/Relay";
+const HYP_PAY_URL = "https://pay.hyp.co.il/p/";
 
 // ── Plan amounts in agorot (100 agorot = ₪1) ─────────────────────────────────
 // Kept in sync with src/lib/plans.ts PLAN_PRICES.
@@ -47,118 +42,20 @@ const PLAN_AMOUNTS: Record<"STANDARD" | "GROWTH" | "PRO", { monthly: number; yea
   PRO:      { monthly: 11_000, yearly: 118_800 }, // ₪110/mo · ₪1,188/yr
 };
 
-// ── XML helpers ───────────────────────────────────────────────────────────────
+// ── Plan labels (shown on HYP payment page via Info param) ───────────────────
 
-/** Escape the five XML-reserved characters so URL/string values are safe. */
-function escapeXml(s: string): string {
-  return s
-    .replace(/&/g,  "&amp;")
-    .replace(/</g,  "&lt;")
-    .replace(/>/g,  "&gt;")
-    .replace(/"/g,  "&quot;")
-    .replace(/'/g,  "&apos;");
-}
-
-interface DoDealXmlParams {
-  terminalNumber: string;
-  mid?:           string;   // optional — tag omitted entirely when absent
-  total:          number;   // in agorot
-  uniqueid:       string;   // ≤64 chars, unique within 24 h
-  successUrl:     string;
-  errorUrl:       string;
-  cancelUrl:      string;
-  plan:           string;   // stored in userData1 for recovery on return
-  interval:       string;   // stored in userData2
-  userId:         string;   // first 64 chars stored in userData3
-}
-
-/**
- * Build the doDeal XML payload for a one-time hosted-page payment.
- *
- * cardNo=CGMPI  tells HYP this is a payment-page transaction (card unknown yet).
- * validation=TxnSetup  creates the hosted page session.
- * mpiValidation=AutoComm  one-phase: immediate authorise + capture.
- * creditType=RegularCredit  single charge, no instalments.
- */
-function buildDoDealXml(p: DoDealXmlParams): string {
-  return `<ashrait>
-  <request>
-    <version>2000</version>
-    <language>HEB</language>
-    <command>doDeal</command>
-    <doDeal>
-      <terminalNumber>${escapeXml(p.terminalNumber)}</terminalNumber>
-      ${p.mid ? `<mid>${escapeXml(p.mid)}</mid>` : "<!-- mid omitted: HYP_MID not set -->"}
-      <cardNo>CGMPI</cardNo>
-      <total>${p.total}</total>
-      <transactionType>Debit</transactionType>
-      <creditType>RegularCredit</creditType>
-      <currency>ILS</currency>
-      <transactionCode>Internet</transactionCode>
-      <validation>TxnSetup</validation>
-      <mpiValidation>AutoComm</mpiValidation>
-      <uniqueid>${escapeXml(p.uniqueid)}</uniqueid>
-      <successUrl>${escapeXml(p.successUrl)}</successUrl>
-      <errorUrl>${escapeXml(p.errorUrl)}</errorUrl>
-      <cancelUrl>${escapeXml(p.cancelUrl)}</cancelUrl>
-      <userData1>${escapeXml(p.plan)}</userData1>
-      <userData2>${escapeXml(p.interval)}</userData2>
-      <userData3>${escapeXml(p.userId.slice(0, 64))}</userData3>
-    </doDeal>
-  </request>
-</ashrait>`;
-}
-
-// ── XML response parsing ──────────────────────────────────────────────────────
-// HYP returns a predictable, shallow XML envelope.
-// A full XML parser is not needed — simple tag extraction is safe and avoids
-// adding a dependency.
-
-function extractXmlTag(xml: string, tag: string): string {
-  const match = xml.match(new RegExp(`<${tag}>([^<]*)<\/${tag}>`));
-  return match ? match[1].trim() : "";
-}
-
-interface RelayResponse {
-  result:           string;   // "000" = success; anything else = error
-  message:          string;   // system result message
-  userMessage:      string;   // localised user-facing message (often more descriptive)
-  tranId:           string;   // HYP transaction identifier
-  cgUid:            string;   // CreditGuard internal unique ID
-  mpiHostedPageUrl: string;   // one-time payment page URL (valid 10 min)
-}
-
-function parseRelayResponse(xml: string): RelayResponse {
-  return {
-    result:           extractXmlTag(xml, "result"),
-    message:          extractXmlTag(xml, "message"),
-    userMessage:      extractXmlTag(xml, "userMessage"),
-    tranId:           extractXmlTag(xml, "tranId"),
-    cgUid:            extractXmlTag(xml, "cgUid"),
-    mpiHostedPageUrl: extractXmlTag(xml, "mpiHostedPageUrl"),
-  };
-}
-
-/**
- * Strip the mpiHostedPageUrl value from a raw XML response string before
- * logging. The URL contains a single-use session token — never log it.
- */
-function sanitizeResponseForLog(xml: string): string {
-  return xml
-    .replace(/<mpiHostedPageUrl>[^<]*<\/mpiHostedPageUrl>/g,
-      "<mpiHostedPageUrl>[redacted]</mpiHostedPageUrl>")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 600);   // cap at 600 chars; enough for any error response
-}
+const PLAN_LABELS: Record<"STANDARD" | "GROWTH" | "PRO", string> = {
+  STANDARD: "מסלול סטנדרט",
+  GROWTH:   "מסלול מתקדמת",
+  PRO:      "מסלול פרו",
+};
 
 // ── Callback MAC verification ─────────────────────────────────────────────────
-// Exported here so the future /api/billing/success (or /api/billing/webhook)
-// handler can import and use it without duplicating the algorithm.
+// Exported here so /billing/success can import without duplicating the algorithm.
 
-/** Query-string params HYP appends to successUrl / errorUrl on redirect. */
+/** Query-string params HYP appends to SuccessUrl / ErrorUrl on redirect. */
 export interface HypCallbackParams {
-  uniqueID:    string;   // our original uniqueid
+  uniqueID:    string;   // our original Order value
   txId:        string;   // HYP transaction ID
   cgUid?:      string;
   cardToken?:  string;   // tokenised card reference — save for recurring
@@ -172,8 +69,8 @@ export interface HypCallbackParams {
 /**
  * Verify the responseMac HYP sends on the success/error redirect.
  *
- * Algorithm (from HYP security docs — no HMAC key, plain SHA-256):
- *   SHA-256( password + txId + errorCode + cardToken + cardExp + personalId + uniqueId )
+ * Algorithm (from HYP security docs — plain SHA-256, no HMAC key):
+ *   SHA-256( PassP + txId + errorCode + cardToken + cardExp + personalId + uniqueId )
  *
  * Returns true if authentic, false if the MAC does not match (tampered / replay).
  *
@@ -213,28 +110,23 @@ export class HypBillingProvider implements BillingProvider {
   async createCheckoutSession(params: CheckoutParams): Promise<CheckoutResult> {
 
     // ── Read config ──────────────────────────────────────────────────────────
-    const user           = process.env.HYP_USER?.trim();
-    const password       = process.env.HYP_PASSWORD?.trim();
-    const terminalNumber = process.env.HYP_TERMINAL_NUMBER?.trim();
-    const mid            = process.env.HYP_MID?.trim() || undefined;  // optional
-    const baseUrl        = (process.env.HYP_BASE_URL?.trim() ?? UAT_BASE_URL).replace(/\/$/, "");
+    const masof = process.env.HYP_MASOF?.trim();
+    const passp = process.env.HYP_PASSP?.trim();
 
     // Log which vars are set — never log their values.
     console.log(
       `[billing/hyp] config check:` +
-      ` HYP_USER=${Boolean(user)}` +
-      ` HYP_PASSWORD=${Boolean(password)}` +
-      ` HYP_TERMINAL_NUMBER=${Boolean(terminalNumber)}` +
-      ` HYP_MID=${Boolean(mid)} (optional)` +
-      ` HYP_BASE_URL=${baseUrl}`,
+      ` HYP_MASOF=${Boolean(masof)}` +
+      ` HYP_PASSP=${Boolean(passp)}` +
+      ` HYP_API_KEY=${Boolean(process.env.HYP_API_KEY)} (reserved/future)`,
     );
 
-    if (!user || !password || !terminalNumber) {
+    if (!masof || !passp) {
       return {
         ok:     false,
         reason:
-          "HYP not configured: HYP_USER, HYP_PASSWORD, and " +
-          "HYP_TERMINAL_NUMBER are required. HYP_MID is optional.",
+          "HYP not configured: HYP_MASOF and HYP_PASSP are required. " +
+          "Set them from the HYP merchant portal.",
       };
     }
 
@@ -243,100 +135,58 @@ export class HypBillingProvider implements BillingProvider {
     if (!amounts) {
       return { ok: false, reason: `Unknown plan: ${params.plan}` };
     }
-    const total = params.interval === "YEARLY" ? amounts.yearly : amounts.monthly;
+    const amount = params.interval === "YEARLY" ? amounts.yearly : amounts.monthly;
 
-    // ── Generate unique transaction ID ───────────────────────────────────────
-    // Prefix "sd-" makes it easy to find in HYP merchant console.
-    // "sd-" (3) + UUID (36) = 39 chars — well within the 64-char limit.
-    const uniqueid = `sd-${crypto.randomUUID()}`;
+    // ── Generate unique order ID ─────────────────────────────────────────────
+    // "sd-" (3) + UUID (36) = 39 chars.
+    const order = `sd-${crypto.randomUUID()}`;
 
-    // ── Build XML payload ────────────────────────────────────────────────────
-    const xml = buildDoDealXml({
-      terminalNumber,
-      mid,
-      total,
-      uniqueid,
-      successUrl: params.successUrl,
-      errorUrl:   params.cancelUrl,  // HYP's errorUrl = failure / error path
-      cancelUrl:  params.cancelUrl,
-      plan:       params.plan,
-      interval:   params.interval,
-      userId:     params.userId,
+    // ── Build Info string ────────────────────────────────────────────────────
+    const intervalLabel = params.interval === "YEARLY" ? "שנתי" : "חודשי";
+    const info = `${PLAN_LABELS[params.plan]} — ${intervalLabel}`;
+
+    // ── Derive ClientName from email ─────────────────────────────────────────
+    // HYP shows this on the payment page. Use the local part of the email.
+    const clientName = params.userEmail.split("@")[0] ?? params.userEmail;
+
+    // ── Build Pay Protocol URL ───────────────────────────────────────────────
+    // All params that may contain non-ASCII or special chars must be
+    // percent-encoded. URLSearchParams handles this automatically.
+    const qp = new URLSearchParams({
+      action:    "pay",
+      Masof:     masof,
+      PassP:     passp,
+      Amount:    String(amount),
+      Coin:      "1",           // 1 = ILS
+      Info:      info,
+      Order:     order,
+      UserId:    "000000000",   // Israeli ID — 9 zeros when not required
+      ClientName: clientName,
+      email:     params.userEmail,
+      UTF8:      "True",
+      UTF8out:   "True",
+      MoreData:  "True",
+      sendemail: "True",
+      SuccessUrl: params.successUrl,
+      ErrorUrl:   params.errorUrl,
+      CancelUrl:  params.cancelUrl,
+      // HK module — monthly recurring agreement
+      HK:            "True",
+      Tash:          "999",  // 999 = unlimited instalments (recurring until cancelled)
+      freq:          "1",    // 1 = monthly
+      OnlyOnApprove: "True", // redirect to SuccessUrl only on approval; errors go to ErrorUrl
     });
 
-    // ── POST to HYP Relay ────────────────────────────────────────────────────
-    const relayUrl = `${baseUrl}${RELAY_PATH}`;
+    const checkoutUrl = `${HYP_PAY_URL}?${qp.toString()}`;
 
-    // Log enough to trace in dev — credentials and full XML never logged.
+    // Log enough to trace in dev — PassP and full URL never logged.
     console.log(
-      `[billing/hyp] POST ${relayUrl}` +
+      `[billing/hyp] Pay Protocol URL built` +
       ` userId=${params.userId.slice(0, 8)}…` +
       ` plan=${params.plan} interval=${params.interval}` +
-      ` total=${total}agorot uniqueid=${uniqueid}`,
+      ` amount=${amount}agorot order=${order}`,
     );
 
-    let rawResponse: string;
-    try {
-      const formBody = new URLSearchParams({ user, password, int_in: xml });
-
-      const res = await fetch(relayUrl, {
-        method:  "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body:    formBody.toString(),
-      });
-
-      if (!res.ok) {
-        return {
-          ok:     false,
-          reason: `HYP Relay HTTP ${res.status}: ${res.statusText}`,
-        };
-      }
-
-      rawResponse = await res.text();
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return { ok: false, reason: `Network error calling HYP Relay: ${msg}` };
-    }
-
-    // ── Parse XML response ───────────────────────────────────────────────────
-    const parsed = parseRelayResponse(rawResponse);
-
-    if (parsed.result !== "000") {
-      // On error: log sanitized body (mpiHostedPageUrl redacted) + both message fields.
-      // This is the primary debugging surface for 405 / terminal config errors.
-      console.error(
-        `[billing/hyp] relay ERROR` +
-        ` result=${parsed.result}` +
-        ` message="${parsed.message}"` +
-        ` userMessage="${parsed.userMessage}"` +
-        ` tranId=${parsed.tranId || "(none)"}` +
-        `\n[billing/hyp] sanitized response: ${sanitizeResponseForLog(rawResponse)}`,
-      );
-      return {
-        ok:     false,
-        reason:
-          `HYP error ${parsed.result}: ${parsed.userMessage || parsed.message || "no message"}`,
-      };
-    }
-
-    // On success: log minimal info — never log the hosted URL (one-time token).
-    console.log(
-      `[billing/hyp] relay OK` +
-      ` result=${parsed.result}` +
-      ` tranId=${parsed.tranId}` +
-      ` hasUrl=${Boolean(parsed.mpiHostedPageUrl)}`,
-    );
-
-    if (!parsed.mpiHostedPageUrl) {
-      return {
-        ok:     false,
-        reason:
-          "HYP returned result=000 but mpiHostedPageUrl was absent. " +
-          "Check terminal configuration with HYP support.",
-      };
-    }
-
-    // mpiHostedPageUrl is valid for 10 minutes and is single-use.
-    return { ok: true, checkoutUrl: parsed.mpiHostedPageUrl };
+    return { ok: true, checkoutUrl };
   }
 }

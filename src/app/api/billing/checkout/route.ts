@@ -72,6 +72,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   // ── Build redirect URLs ───────────────────────────────────────────────────
   const base       = (process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
   const successUrl = `${base}/billing/success`;
+  const errorUrl   = `${base}/billing/error`;
   const cancelUrl  = `${base}/pricing`;
 
   // ── Create checkout session via active billing provider ───────────────────
@@ -90,6 +91,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     plan:      validPlan,
     interval:  validInterval,
     successUrl,
+    errorUrl,
     cancelUrl,
   });
 

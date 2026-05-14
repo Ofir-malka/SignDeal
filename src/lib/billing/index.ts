@@ -27,6 +27,8 @@ export interface CheckoutParams {
   interval:  BillingInterval;
   /** Full URL HYP/stub should redirect to on success. */
   successUrl: string;
+  /** Full URL HYP/stub should redirect to on payment error / failure. */
+  errorUrl:   string;
   /** Full URL HYP/stub should redirect to on cancel. */
   cancelUrl:  string;
 }
