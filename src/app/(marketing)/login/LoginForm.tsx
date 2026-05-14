@@ -60,6 +60,26 @@ export function LoginForm({ googleEnabled, appleEnabled }: Props) {
     <main dir="rtl" className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
       <div className="w-full max-w-md">
 
+        {/* Back to home */}
+        <div className="mb-5 text-center">
+          <Link
+            href="/"
+            className="inline-flex items-center gap-1.5 text-sm text-gray-400
+                       hover:text-indigo-600 transition-colors group"
+          >
+            <svg
+              width="14" height="14" viewBox="0 0 24 24"
+              fill="none" stroke="currentColor" strokeWidth="2.5"
+              strokeLinecap="round" strokeLinejoin="round"
+              aria-hidden="true"
+              className="group-hover:-translate-x-0.5 transition-transform duration-150"
+            >
+              <polyline points="15 18 9 12 15 6" />
+            </svg>
+            חזרה לדף הבית
+          </Link>
+        </div>
+
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-4">
