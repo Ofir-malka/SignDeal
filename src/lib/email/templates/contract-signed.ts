@@ -9,12 +9,19 @@ export interface ContractSignedEmailData {
   contractId:      string;
   signedAt?:       string; // e.g. "21 במאי 2026, 14:32"
   dashboardUrl?:   string;
+  /**
+   * When true, appends a note confirming that a PDF copy was emailed to the
+   * client automatically. Pass false/omit when PDF delivery was skipped
+   * (e.g. client had no email, or PDF generation failed).
+   */
+  pdfDeliveredToClient?: boolean;
 }
 
 export function contractSignedEmail(data: ContractSignedEmailData): EmailTemplate {
   const {
     brokerName, clientName, propertyAddress, contractId,
     signedAt, dashboardUrl = "https://www.signdeal.co.il/contracts",
+    pdfDeliveredToClient = false,
   } = data;
 
   const subject = `✅ ${clientName} חתם על החוזה — ${propertyAddress}`;
@@ -30,6 +37,7 @@ export function contractSignedEmail(data: ContractSignedEmailData): EmailTemplat
     "",
     "כנס ללוח הבקרה לצפייה בחוזה החתום:",
     dashboardUrl,
+    ...(pdfDeliveredToClient ? ["", "📎 עותק PDF נשלח ללקוח במייל אוטומטית."] : []),
     "",
     "בברכה,",
     "צוות SignDeal",
@@ -55,6 +63,11 @@ export function contractSignedEmail(data: ContractSignedEmailData): EmailTemplat
       <p style="margin:4px 0;font-size:13px;color:#6b7280;">מספר חוזה: ${escHtml(contractId)}</p>
     </div>
     ${ctaButton(dashboardUrl, "צפייה בחוזה החתום")}
+    ${pdfDeliveredToClient
+      ? `<p style="margin:16px 0 0;font-size:13px;color:#6b7280;">
+           📎 עותק PDF נשלח ללקוח במייל אוטומטית.
+         </p>`
+      : ""}
   `);
 
   return { subject, text, html };

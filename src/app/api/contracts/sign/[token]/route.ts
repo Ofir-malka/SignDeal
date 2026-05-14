@@ -5,8 +5,9 @@ import { auth }  from "@/lib/auth";
 import { sendSms, getSmsProviderName } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { rateLimit, getRealIp } from "@/lib/rate-limit";
-import { sendEmail, contractSignedEmail } from "@/lib/email";
+import { sendEmail, contractSignedEmail, contractSignedClientEmail } from "@/lib/email";
 import { parsePropertyAddress } from "@/lib/format-address";
+import { generateContractPdf } from "@/lib/pdf/generate-contract-pdf";
 
 // ── UUID format guard — reject obviously invalid tokens before hitting the DB ─
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -176,9 +177,10 @@ async function sendBrokerSignedSms(
 // Skipped silently when broker has no email address.
 
 async function sendBrokerSignedEmail(
-  contract: { id: string; userId: string; clientId: string; propertyAddress: string },
-  clientName: string,
-  signedAt:   Date,
+  contract:         { id: string; userId: string; clientId: string; propertyAddress: string },
+  clientName:       string,
+  signedAt:         Date,
+  pdfSentToClient:  boolean,
 ): Promise<void> {
   try {
     const broker = await prisma.user.findUnique({
@@ -199,12 +201,13 @@ async function sendBrokerSignedEmail(
     });
 
     const template = contractSignedEmail({
-      brokerName:      broker.fullName,
+      brokerName:          broker.fullName,
       clientName,
-      propertyAddress: contract.propertyAddress,
-      contractId:      contract.id,
-      signedAt:        signedAtFormatted,
+      propertyAddress:     contract.propertyAddress,
+      contractId:          contract.id,
+      signedAt:            signedAtFormatted,
       dashboardUrl,
+      pdfDeliveredToClient: pdfSentToClient,
     });
 
     // Create PENDING record before the network call.
@@ -249,6 +252,107 @@ async function sendBrokerSignedEmail(
   } catch (err) {
     // Must never propagate — the contract is already signed.
     console.error("[sendBrokerSignedEmail] unexpected error:", err);
+  }
+}
+
+// ── Client PDF email — fire-and-forget ───────────────────────────────────────
+// Sends the client a confirmation email with the signed contract attached as PDF.
+// Skipped silently when the client has no email address.
+// Skipped silently when pdfBuffer is null (generation failed upstream).
+
+async function sendClientSignedEmail(
+  contract:   { id: string; userId: string; clientId: string; propertyAddress: string },
+  client:     { name: string; email: string },
+  signedAt:   Date,
+  pdfBuffer:  Buffer | null,
+): Promise<void> {
+  try {
+    // Guard: client email required.
+    if (!client.email.trim()) {
+      console.log(`[sendClientSignedEmail] skipped — client has no email (contract ${contract.id})`);
+      return;
+    }
+
+    // Fetch broker name — shown in the email so the client recognises who they
+    // signed with. Separate query from sendBrokerSignedEmail to keep functions
+    // self-contained (consistent with the existing SMS/email helper pattern).
+    const broker = await prisma.user.findUnique({
+      where:  { id: contract.userId },
+      select: { fullName: true },
+    });
+
+    const signedAtFormatted = signedAt.toLocaleDateString("he-IL", {
+      day: "numeric", month: "long", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
+
+    const hasPdf   = pdfBuffer !== null;
+    const template = contractSignedClientEmail({
+      clientName:      client.name,
+      brokerName:      broker?.fullName ?? "",
+      propertyAddress: contract.propertyAddress,
+      contractId:      contract.id,
+      signedAt:        signedAtFormatted,
+      hasPdfAttachment: hasPdf,
+    });
+
+    // Build attachment list when PDF is available.
+    // Resend expects base64-encoded content. Filename encodes the last 8 chars of
+    // the contract ID (uppercase) — same convention as the broker-facing PDF route.
+    const attachments = hasPdf
+      ? [
+          {
+            filename: `contract-${contract.id.slice(-8).toUpperCase()}.pdf`,
+            content:  (pdfBuffer as Buffer).toString("base64"),
+          },
+        ]
+      : undefined;
+
+    // Create PENDING audit row before the network call.
+    const message = await prisma.message.create({
+      data: {
+        type:           "CLIENT_CONTRACT_SIGNED_PDF",
+        channel:        "EMAIL",
+        provider:       "resend",
+        subject:        template.subject,
+        body:           template.text,
+        contractId:     contract.id,
+        clientId:       contract.clientId,
+        userId:         contract.userId,
+        recipientEmail: client.email,
+        status:         "PENDING",
+        attempts:       0,
+      },
+    });
+
+    const result = await sendEmail({ to: client.email, ...template, attachments });
+
+    await prisma.message.update({
+      where: { id: message.id },
+      data: result.ok
+        ? {
+            status:            "SENT",
+            providerMessageId: result.messageId ?? null,
+            attempts:          1,
+            lastAttemptAt:     new Date(),
+          }
+        : {
+            status:        "FAILED",
+            failureReason: result.reason,
+            attempts:      1,
+            lastAttemptAt: new Date(),
+          },
+    });
+
+    if (!result.ok) {
+      console.error(
+        `[sendClientSignedEmail] email failed for contract ${contract.id}:`, result.reason,
+      );
+    }
+  } catch (err) {
+    // Must never propagate — the contract is already signed and the broker
+    // notifications have already been dispatched.
+    console.error("[sendClientSignedEmail] unexpected error:", err);
   }
 }
 
@@ -410,17 +514,46 @@ export async function PATCH(
         propertyAddress: parsePropertyAddress(contract.propertyAddress).address,
       };
 
-      // Both broker notifications run AFTER the signing response is flushed so
-      // the client sees their confirmation screen instantly.  after() keeps the
-      // Vercel function alive until the callback resolves.
+      // All post-signing notifications run AFTER the signing response is flushed
+      // so the client sees their confirmation screen instantly.
+      // after() keeps the Vercel function alive until the callback resolves.
       // TODO(queue): Replace with a durable job queue (BullMQ / Inngest) once
       //   message volume or retry requirements outgrow fire-and-forget.
       after(async () => {
-        await sendBrokerSignedSms(signingContext, updated.client.name);
+        // ── Step 1: Generate PDF once — shared by broker + client emails ──────
+        // Wrapped in its own try/catch so a render failure is non-fatal.
+        // All notifications still fire; the client email skips the attachment.
+        let pdfBuffer: Buffer | null = null;
+        try {
+          pdfBuffer = await generateContractPdf(signingContext.id, signingContext.userId);
+        } catch (pdfErr) {
+          console.error(
+            `[sign after] PDF generation failed for contract ${signingContext.id} —`,
+            pdfErr instanceof Error ? pdfErr.message : pdfErr,
+          );
+        }
+
+        const signedAt    = updated.signedAt ?? new Date();
+        const clientName  = updated.client.name;
+        const clientEmail = updated.client.email;
+
+        // ── Step 2: Broker SMS ────────────────────────────────────────────────
+        await sendBrokerSignedSms(signingContext, clientName);
+
+        // ── Step 3: Broker email (includes PDF-sent note when delivery succeeded)
         await sendBrokerSignedEmail(
           signingContext,
-          updated.client.name,
-          updated.signedAt ?? new Date(),
+          clientName,
+          signedAt,
+          pdfBuffer !== null && clientEmail.trim() !== "",
+        );
+
+        // ── Step 4: Client email with PDF attached ────────────────────────────
+        await sendClientSignedEmail(
+          signingContext,
+          { name: clientName, email: clientEmail },
+          signedAt,
+          pdfBuffer,
         );
       });
     }
