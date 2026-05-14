@@ -18,6 +18,7 @@ import Apple from "next-auth/providers/apple";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { authConfig } from "@/lib/auth.config";
+import { TRIAL_DAYS } from "@/lib/plans";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
@@ -118,6 +119,59 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             : null;
       }
       return session;
+    },
+  },
+
+  // ── Events ───────────────────────────────────────────────────────────────────
+  //
+  // `createUser` fires exactly once per new user — only when the Prisma adapter
+  // calls its own createUser() during a first-time OAuth sign-in.
+  // It does NOT fire for Credentials sign-ins (the adapter is never asked to
+  // create a user there; POST /api/users creates the user and subscription
+  // atomically before the first sign-in ever happens).
+  //
+  // This hook therefore covers: Google (now) and Apple (when enabled later).
+  //
+  // Guard: we check for an existing Subscription before inserting so that
+  // this hook is idempotent — safe to re-run even if something retries.
+  events: {
+    async createUser({ user }) {
+      if (!user.id) return; // should never happen, but guard for type safety
+
+      // Idempotency guard — bail out if a subscription already exists.
+      // Prevents duplicate rows if Auth.js ever retries or if this hook
+      // is somehow invoked for a user created outside the OAuth flow.
+      const existing = await prisma.subscription.findUnique({
+        where:  { userId: user.id },
+        select: { id: true },
+      });
+      if (existing) return;
+
+      const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+
+      const subscription = await prisma.subscription.create({
+        data: {
+          userId:      user.id,
+          plan:        "STANDARD",
+          status:      "TRIALING",
+          trialEndsAt,
+        },
+        select: { id: true },
+      });
+
+      await prisma.subscriptionEvent.create({
+        data: {
+          subscriptionId: subscription.id,
+          event:          "trial_started",
+          fromPlan:       null,
+          toPlan:         "STANDARD",
+          fromStatus:     null,
+          toStatus:       "TRIALING",
+          source:         "oauth_registration",
+          actorId:        null,
+          metadata:       JSON.stringify({ trialDays: TRIAL_DAYS }),
+        },
+      });
     },
   },
 
