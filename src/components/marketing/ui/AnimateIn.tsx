@@ -64,9 +64,23 @@ export function AnimateIn({ children, delay = 0, className = "", from = "bottom"
     const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
     setReducedMotion(mq.matches);
 
-    // Switch to animated mode — element will be hidden until IO fires.
-    setMounted(true);
+    // If the element is already visible in the viewport (above the fold),
+    // set both mounted + visible in the same synchronous block. React 18
+    // batches the two setState calls into a single render, so the element
+    // jumps directly from SSR state → animated-visible state WITHOUT ever
+    // passing through the hidden/translated state. This prevents the
+    // translateX/Y flash that causes iOS Safari to compute a wider-than-
+    // viewport paint region and trigger a layout recalculation.
+    const rect = el.getBoundingClientRect();
+    const alreadyInView = rect.top < window.innerHeight && rect.bottom > 0;
 
+    setMounted(true);
+    if (alreadyInView) {
+      setVisible(true);
+      return; // IO not needed — element is already visible
+    }
+
+    // Below-the-fold elements: use IntersectionObserver to animate on scroll.
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {

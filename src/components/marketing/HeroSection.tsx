@@ -94,6 +94,7 @@ export function HeroSection() {
     <section
       className="relative min-h-screen flex flex-col justify-center overflow-hidden
                  bg-gradient-to-br from-indigo-950 via-indigo-900 to-indigo-800 pt-16"
+      style={{ contain: "paint" }}
     >
       {/* ── Background layers ─────────────────────────────────────────────── */}
 
@@ -110,19 +111,23 @@ export function HeroSection() {
         }}
       />
 
-      {/* Central violet radial glow — slow opacity breathe */}
+      {/* Central violet radial glow — slow opacity breathe.
+           overflow-hidden on the wrapper ensures the 700 px inner glow is
+           double-clipped here before reaching the section boundary.        */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 flex items-center justify-center pointer-events-none select-none"
+        className="absolute inset-0 flex items-center justify-center pointer-events-none select-none overflow-hidden"
       >
         <div className="w-[700px] h-[700px] bg-violet-600/15 rounded-full blur-3xl
                         animate-[hero-glow-breathe_9s_ease-in-out_infinite]" />
       </div>
 
-      {/* Top-right accent glow — offset phase so it doesn't sync with centre */}
+      {/* Top-right accent glow — offset phase so it doesn't sync with centre.
+           right-0 (was -right-24) keeps the element within the section's right
+           boundary so it can't escape overflow clipping on iOS Safari.         */}
       <div
         aria-hidden="true"
-        className="absolute -top-24 -right-24 w-[480px] h-[480px]
+        className="absolute -top-24 right-0 w-[480px] h-[480px]
                    bg-violet-500/[0.07] rounded-full blur-3xl pointer-events-none select-none"
         style={{ animation: "hero-glow-breathe 12s 3.5s ease-in-out infinite" }}
       />
@@ -300,8 +305,11 @@ export function HeroSection() {
             );
           })}
 
-          {/* Mock — float animation wraps only the frame, not the chips */}
-          <AnimateIn delay={250} from="left">
+          {/* Mock — float animation wraps only the frame, not the chips.
+               from="bottom" (was "left") — eliminates the translateX(-32px)
+               initial transform that caused iOS Safari to compute extra
+               horizontal paint region during the hydration frame.           */}
+          <AnimateIn delay={250} from="bottom">
             <DashboardMock />
           </AnimateIn>
         </div>
