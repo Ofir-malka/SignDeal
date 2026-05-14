@@ -8,14 +8,43 @@
 body {
   background: var(--background);
   color: var(--foreground);
+  /* Prevent horizontal scroll from any overflowing child */
+  overflow-x: hidden;
 }
 
 * {
   box-sizing: border-box;
 }
+
+/* ── Global mobile stabilization ───────────────────────────────────────────
+   1. -webkit-text-size-adjust: prevents iOS from auto-resizing text in
+      landscape or after zoom events (causes layout-scale jumps).
+   2. overflow-x: hidden on html+body: eliminates horizontal scroll from any
+      overflow source (e.g. fixed panels, animated elements that briefly
+      escape the viewport).
+   3. touch-action: manipulation: removes the 300 ms tap delay on interactive
+      elements WITHOUT disabling pinch-zoom. Users can still zoom freely.
+─────────────────────────────────────────────────────────────────────────── */
+
 /* Smooth anchor scrolling — overridden to auto by the reduced-motion block below */
 html {
   scroll-behavior: smooth;
+  /* Prevent iOS landscape text-size auto-boost */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* No horizontal page scroll */
+  overflow-x: hidden;
+}
+
+/* Remove 300 ms tap delay on all interactive elements (keeps pinch-zoom intact) */
+button,
+input,
+select,
+textarea,
+a,
+label,
+[role="button"] {
+  touch-action: manipulation;
 }
 
 /* Pricing period toggle — price value fade-in on mount */
@@ -30,14 +59,16 @@ html {
   50%       { transform: translateY(-10px); }
 }
 
+/* scale(0.95) removed — scale on first render can trigger iOS layout-scale jump.
+   Pure translateY + opacity is GPU-composited and safe on all mobile browsers. */
 @keyframes modalIn {
   from {
     opacity: 0;
-    transform: scale(0.95) translateY(10px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
-    transform: scale(1) translateY(0);
+    transform: translateY(0);
   }
 }
 

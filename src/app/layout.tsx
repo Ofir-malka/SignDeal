@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Rubik } from "next/font/google";
 import "./globals.css";
 import { SessionProviderWrapper } from "@/components/SessionProviderWrapper";
@@ -10,6 +10,15 @@ const rubik = Rubik({
 });
 
 const APP_URL = process.env.APP_BASE_URL ?? "https://www.signdeal.co.il";
+
+// Viewport is set here (not as a <meta> tag) — this is the App Router pattern.
+// Without this, iOS Safari does NOT get width=device-width and will scale-fit
+// the full desktop layout into the viewport, causing a layout-scale jump.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL(APP_URL),
