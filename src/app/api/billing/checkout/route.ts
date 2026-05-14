@@ -100,5 +100,29 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: result.reason }, { status: 500 });
   }
 
+  // ── Create PENDING checkout record ────────────────────────────────────────
+  // Only HYP (and future real providers) return an order — stub omits it.
+  // The record enables replay protection, idempotency, and carries plan+interval
+  // into the success callback so the activation step knows what to activate.
+  if (result.order) {
+    try {
+      await prisma.billingCheckout.create({
+        data: {
+          userId,
+          order:     result.order,
+          plan:      validPlan,
+          interval:  validInterval,
+          status:    "PENDING",
+          expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes
+        },
+      });
+    } catch (err) {
+      // Log but do NOT block the redirect — user experience > audit record.
+      // A missing checkout row means the success page falls back to a safe
+      // "session not found" error rather than silently activating.
+      console.error("[api/billing/checkout] failed to create BillingCheckout:", err);
+    }
+  }
+
   return NextResponse.json({ checkoutUrl: result.checkoutUrl });
 }

@@ -187,6 +187,6 @@ export class HypBillingProvider implements BillingProvider {
       ` amount=${amount}agorot order=${order}`,
     );
 
-    return { ok: true, checkoutUrl };
+    return { ok: true, checkoutUrl, order };
   }
 }

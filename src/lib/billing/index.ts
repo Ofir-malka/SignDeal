@@ -34,7 +34,7 @@ export interface CheckoutParams {
 }
 
 export type CheckoutResult =
-  | { ok: true;  checkoutUrl: string }
+  | { ok: true;  checkoutUrl: string; order?: string }
   | { ok: false; reason: string };
 
 // ── Provider interface ────────────────────────────────────────────────────────

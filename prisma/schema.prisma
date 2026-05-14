@@ -66,12 +66,13 @@ model User {
   createdAt  DateTime    @default(now())
 
   // ── Relations ─────────────────────────────────────────────────────────────
-  contracts     Contract[]
-  activities    Activity[]
-  properties    Property[]
-  messages      Message[]
-  clients       Client[]
-  subscription  Subscription?   // 1-to-1; created at registration
+  contracts        Contract[]
+  activities       Activity[]
+  properties       Property[]
+  messages         Message[]
+  clients          Client[]
+  subscription     Subscription?     // 1-to-1; created at registration
+  billingCheckouts BillingCheckout[] // one row per checkout attempt
 
   // ── Auth.js adapter relations ─────────────────────────────────────────────
   accounts   Account[]
@@ -482,4 +483,49 @@ model SubscriptionEvent {
 
   @@index([subscriptionId])   // look up all events for a subscription
   @@index([createdAt])        // chronological queries
+}
+
+// ── BillingCheckout ────────────────────────────────────────────────────────────
+//
+// One row per checkout attempt. Created when the user is redirected to HYP,
+// resolved (SUCCEEDED / FAILED) when HYP calls back to /billing/success.
+//
+// Serves three purposes:
+//   1. Replay protection — callback uniqueID must match a real issued Order.
+//   2. Context carrier  — stores plan + interval so the success page knows what to activate.
+//   3. Idempotency      — SUCCEEDED guard prevents double-activation on page reload.
+
+enum BillingCheckoutStatus {
+  PENDING    // checkout initiated; user sent to HYP — awaiting callback
+  SUCCEEDED  // HYP returned success, MAC verified, subscription activated
+  FAILED     // HYP returned failure, or MAC verification failed
+  EXPIRED    // no callback received within 30 minutes of creation
+}
+
+model BillingCheckout {
+  id       String                @id @default(cuid())
+  userId   String
+  user     User                  @relation(fields: [userId], references: [id])
+  order    String                @unique  // "sd-<uuid>" — the Order param sent to HYP
+  plan     PlanType
+  interval BillingInterval
+  status   BillingCheckoutStatus @default(PENDING)
+
+  // ── Populated on callback (Phase 3 Step 2+) ────────────────────────────────
+  txId       String?  // HYP transaction ID
+  hkId       String?  // HYP recurring agreement ID (from HK module)
+  cardToken  String?  // encrypted — for recurring charges (Phase 4)
+  cardExp    String?  // encrypted MMYY — for recurring charges (Phase 4)
+  cardMask   String?  // safe to store plain, e.g. "4111****1111"
+  authNumber String?
+  errorCode  String?
+
+  // ── Timestamps ─────────────────────────────────────────────────────────────
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime              // createdAt + 30 min; HYP hosted-page sessions expire
+  resolvedAt DateTime?             // set when status moves to SUCCEEDED / FAILED
+
+  @@index([userId])
+  @@index([status])
+  @@index([expiresAt])
 }
