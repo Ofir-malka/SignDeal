@@ -32,6 +32,7 @@ import {
   paymentRequestEmail,
   paymentReceivedEmail,
   trialEndingEmail,
+  passwordResetEmail,
 } from "@/lib/email";
 
 const TEMPLATES = [
@@ -41,10 +42,11 @@ const TEMPLATES = [
   "payment-request",
   "payment-received",
   "trial-ending",
+  "password-reset",
 ] as const;
 type TemplateName = (typeof TEMPLATES)[number];
 
-function buildTemplate(name: TemplateName, adminName: string) {
+function buildTemplate(name: TemplateName, adminName: string, recipientEmail: string) {
   const today = new Date().toLocaleDateString("he-IL", {
     day: "numeric", month: "long", year: "numeric",
   });
@@ -97,6 +99,13 @@ function buildTemplate(name: TemplateName, adminName: string) {
         trialEndsAt: today,
         daysLeft:    2,
       });
+
+    case "password-reset":
+      return passwordResetEmail({
+        fullName:         adminName,
+        resetLink:        `https://www.signdeal.co.il/reset-password?token=test-token-preview-only`,
+        expiresInMinutes: 60,
+      });
   }
 }
 
@@ -137,7 +146,7 @@ export async function POST(request: Request) {
 
   // ── Build template + apply overrides ─────────────────────────────────────
   const config   = getEmailConfig();
-  const template = buildTemplate(templateName, admin.fullName);
+  const template = buildTemplate(templateName, admin.fullName, recipient);
   const subject  = subjectOverride ?? template.subject;
 
   console.log(

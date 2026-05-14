@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 
 interface Props {
   googleEnabled: boolean;
@@ -15,7 +15,9 @@ const INPUT =
   "placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500";
 
 export function LoginForm({ googleEnabled, appleEnabled }: Props) {
-  const router = useRouter();
+  const router       = useRouter();
+  const searchParams = useSearchParams();
+  const resetSuccess = searchParams.get("reset") === "success";
 
   const [email,        setEmail]        = useState("");
   const [password,     setPassword]     = useState("");
@@ -97,6 +99,24 @@ export function LoginForm({ googleEnabled, appleEnabled }: Props) {
         {/* Card */}
         <div className="bg-white border border-gray-200 rounded-2xl shadow-sm p-6 space-y-4">
 
+          {/* Password-reset success banner */}
+          {resetSuccess && (
+            <div className="rounded-lg bg-green-50 border border-green-200 px-4 py-3 flex items-start gap-3">
+              <svg
+                width="18" height="18" viewBox="0 0 24 24"
+                fill="none" stroke="#16a34a" strokeWidth="2.5"
+                strokeLinecap="round" strokeLinejoin="round"
+                className="mt-0.5 shrink-0"
+                aria-hidden="true"
+              >
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <p className="text-sm text-green-800 leading-relaxed">
+                הסיסמה שונתה בהצלחה. אנא התחבר/י עם הסיסמה החדשה.
+              </p>
+            </div>
+          )}
+
           {/* OAuth buttons — shown only when both provider env vars are set */}
           {showOAuth && (
             <div className="space-y-2.5">
@@ -169,7 +189,16 @@ export function LoginForm({ googleEnabled, appleEnabled }: Props) {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1.5">סיסמה</label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-sm font-medium text-gray-700">סיסמה</label>
+                <Link
+                  href="/forgot-password"
+                  className="text-xs text-indigo-600 hover:text-indigo-700 transition-colors"
+                  tabIndex={-1}
+                >
+                  שכחת את הסיסמה?
+                </Link>
+              </div>
               <input
                 type="password"
                 value={password}
@@ -177,6 +206,7 @@ export function LoginForm({ googleEnabled, appleEnabled }: Props) {
                 className={INPUT}
                 placeholder="••••••••"
                 required
+                autoComplete="current-password"
               />
             </div>
 

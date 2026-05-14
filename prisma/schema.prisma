@@ -340,6 +340,7 @@ enum MessageType {
   BROKER_CONTRACT_SIGNED      // התראה למתווך: לקוח חתם
   BROKER_PAYMENT_RECEIVED     // התראה למתווך: תשלום התקבל
   USER_WELCOME                // אימייל ברוכים הבאים לאחר הרשמה
+  USER_PASSWORD_RESET         // אימייל איפוס סיסמה
   CLIENT_CONTRACT_SIGNED_PDF  // אימייל ללקוח: החוזה החתום + PDF מצורף
 }
 
@@ -483,6 +484,27 @@ model SubscriptionEvent {
 
   @@index([subscriptionId])   // look up all events for a subscription
   @@index([createdAt])        // chronological queries
+}
+
+// ── PasswordResetToken ────────────────────────────────────────────────────────
+//
+// One row per in-flight password-reset request.
+// Security properties:
+//   • `token` stores SHA-256(rawToken) — the raw token is only ever in the URL.
+//   • `expires` is set to now() + 1 hour; checked before accepting the reset.
+//   • At most one active token per email — old tokens are deleted before insert.
+//   • Token is hard-deleted atomically with the password update ($transaction).
+//
+// Not a FK on userId so the flow works even for edge-case account states.
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String                        // user email; not a FK — no cascade risk
+  token     String   @unique              // SHA-256(rawToken) hex — never stored raw
+  expires   DateTime                      // now() + 1 hour at creation time
+  createdAt DateTime @default(now())
+
+  @@index([email])
 }
 
 // ── BillingCheckout ────────────────────────────────────────────────────────────
