@@ -378,15 +378,15 @@ function AppFrame({ children }: { children: React.ReactNode }) {
     /* Outer wrapper: relative anchor for glow + floating chips */
     <div className="relative">
 
-      {/* Background depth glow */}
+      {/* Background depth glow — hidden on mobile: saves blur-3xl compositing layer */}
       <div
         aria-hidden="true"
-        className="absolute -inset-8 rounded-[2.5rem] bg-violet-600/[0.09] blur-3xl pointer-events-none"
+        className="hidden sm:block absolute -inset-8 rounded-[2.5rem] bg-violet-600/[0.09] blur-3xl pointer-events-none"
       />
-      {/* Secondary inner glow */}
+      {/* Secondary inner glow — hidden on mobile */}
       <div
         aria-hidden="true"
-        className="absolute -inset-2 rounded-3xl bg-indigo-500/[0.06] blur-xl pointer-events-none"
+        className="hidden sm:block absolute -inset-2 rounded-3xl bg-indigo-500/[0.06] blur-xl pointer-events-none"
       />
 
       {/* Frame shell */}
@@ -394,7 +394,7 @@ function AppFrame({ children }: { children: React.ReactNode }) {
         className="relative rounded-2xl overflow-hidden
                    border border-white/[0.13]
                    shadow-[0_28px_60px_-8px_rgba(0,0,0,0.65),0_0_0_1px_rgba(255,255,255,0.04)]
-                   bg-indigo-950/90 backdrop-blur-xl"
+                   bg-indigo-950/90 sm:backdrop-blur-xl"
       >
         {/* ── Fake browser chrome bar ── */}
         <div className="flex items-center gap-3 px-4 py-3 bg-white/[0.04] border-b border-white/[0.08]">

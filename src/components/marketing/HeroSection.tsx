@@ -28,7 +28,7 @@ const HERO_STATS = [
   {
     label: "3 דקות לחוזה",
     /* subtle tick: rotates 8° then snaps back every 3.5 s */
-    iconAnim: "animate-[hero-clock-tick_3.5s_ease-in-out_infinite]",
+    iconAnim: "max-sm:animate-none animate-[hero-clock-tick_3.5s_ease-in-out_infinite]",
     icon: (
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" strokeWidth="2.5"
@@ -40,7 +40,7 @@ const HERO_STATS = [
   {
     label: "חתימה ב-SMS",
     /* gentle 2.5 s float nudge */
-    iconAnim: "animate-[hero-sms-bounce_2.5s_ease-in-out_infinite]",
+    iconAnim: "max-sm:animate-none animate-[hero-sms-bounce_2.5s_ease-in-out_infinite]",
     icon: (
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" strokeWidth="2.5"
@@ -52,7 +52,7 @@ const HERO_STATS = [
   {
     label: "תשלום מאובטח",
     /* subtle lift + tilt every 4 s */
-    iconAnim: "animate-[hero-card-tilt_4s_ease-in-out_infinite]",
+    iconAnim: "max-sm:animate-none animate-[hero-card-tilt_4s_ease-in-out_infinite]",
     icon: (
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" strokeWidth="2.5"
@@ -98,10 +98,12 @@ export function HeroSection() {
     >
       {/* ── Background layers ─────────────────────────────────────────────── */}
 
-      {/* Grid texture — very subtle, fades at edges with mask */}
+      {/* Grid texture — very subtle, fades at edges with mask.
+           max-sm:hidden: the mask-image + background-image creates a compositing
+           layer on mobile even at 0.025 opacity — not worth the GPU cost.     */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 pointer-events-none select-none opacity-[0.025]"
+        className="max-sm:hidden absolute inset-0 pointer-events-none select-none opacity-[0.025]"
         style={{
           backgroundImage:
             "linear-gradient(to right, white 1px, transparent 1px), linear-gradient(to bottom, white 1px, transparent 1px)",
@@ -118,16 +120,21 @@ export function HeroSection() {
         aria-hidden="true"
         className="absolute inset-0 flex items-center justify-center pointer-events-none select-none overflow-hidden"
       >
+        {/* max-sm:animate-none: stop the infinite animation on mobile —
+             it forces continuous GPU compositing/repaint every ~1s.    */}
         <div className="w-[700px] h-[700px] bg-violet-600/15 rounded-full blur-3xl
-                        animate-[hero-glow-breathe_9s_ease-in-out_infinite]" />
+                        max-sm:animate-none animate-[hero-glow-breathe_9s_ease-in-out_infinite]" />
       </div>
 
       {/* Top-right accent glow — offset phase so it doesn't sync with centre.
            right-0 (was -right-24) keeps the element within the section's right
-           boundary so it can't escape overflow clipping on iOS Safari.         */}
+           boundary so it can't escape overflow clipping on iOS Safari.
+           max-sm:hidden: the inline-style animation can't be overridden with
+           a responsive Tailwind class, so hide the whole element on mobile —
+           saves one blur-3xl compositing layer and one infinite animation.    */}
       <div
         aria-hidden="true"
-        className="absolute -top-24 right-0 w-[480px] h-[480px]
+        className="max-sm:hidden absolute -top-24 right-0 w-[480px] h-[480px]
                    bg-violet-500/[0.07] rounded-full blur-3xl pointer-events-none select-none"
         style={{ animation: "hero-glow-breathe 12s 3.5s ease-in-out infinite" }}
       />
@@ -376,7 +383,8 @@ function DashboardMock() {
   return (
     <div
       aria-hidden="true"
-      className="relative animate-[float_4s_ease-in-out_infinite] will-change-transform"
+      className="relative max-sm:animate-none animate-[float_4s_ease-in-out_infinite]
+                 max-sm:will-change-auto will-change-transform"
     >
       {/* Depth glows — outside overflow-hidden frame so they bleed correctly */}
       <div className="absolute -inset-8 rounded-[2.5rem] bg-violet-600/[0.11] blur-3xl pointer-events-none" />

@@ -235,7 +235,7 @@ export function NavBar() {
         aria-hidden={!open}
       >
         <div
-          className="bg-indigo-950/95 backdrop-blur-md px-6 py-4 flex flex-col gap-0.5"
+          className="bg-indigo-950 sm:bg-indigo-950/95 sm:backdrop-blur-md px-6 py-4 flex flex-col gap-0.5"
           dir="rtl"
         >
           {/* Nav links — staggered fade-up on open */}

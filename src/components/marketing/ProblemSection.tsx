@@ -128,12 +128,14 @@ export function ProblemSection() {
                 className={[
                   "shrink-0 mt-0.5 p-2.5 rounded-xl bg-white/5 border border-white/10",
                   "group-hover:scale-[1.05] group-hover:bg-white/[0.09] group-hover:border-white/20",
-                  "transition-all duration-200 ease-out will-change-transform",
+                  // will-change-transform removed: hover animations don't exist on touch,
+                  // and pre-promoting every pain card to a GPU layer causes scroll jank.
+                  "transition-all duration-200 ease-out",
                   accent,
                 ].join(" ")}
               >
                 {/* Icon span — personality animation fires on group-hover */}
-                <span className={`inline-flex will-change-transform ${iconHoverAnim}`}>
+                <span className={`inline-flex ${iconHoverAnim}`}>
                   {icon}
                 </span>
               </div>

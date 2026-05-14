@@ -31,32 +31,39 @@ export function FinalCTA() {
       className="relative py-28 sm:py-36 overflow-hidden
                  bg-gradient-to-br from-indigo-950 via-indigo-900 to-indigo-800"
     >
-      {/* ── Glow layer 1: wide ambient bloom ──────────────────────────── */}
+      {/* ── Glow layer 1: wide ambient bloom ─────────────────────────────
+           hidden on mobile: w-[900px] blur-[120px] is the single most
+           expensive rendering element on the page — a 900 px element with
+           120 px blur forces a huge GPU texture sample on every scroll
+           frame. The gradient background provides sufficient depth on mobile. */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 flex items-center justify-center pointer-events-none"
+        className="hidden sm:flex absolute inset-0 items-center justify-center pointer-events-none"
       >
         <div className="w-[900px] h-[900px] bg-violet-600/15 rounded-full blur-[120px]" />
       </div>
 
-      {/* ── Glow layer 2: tight inner bloom for punch ──────────────────── */}
+      {/* ── Glow layer 2: tight inner bloom ─────────────────────────────
+           hidden on mobile: saves another blur-3xl compositing layer.    */}
       <div
         aria-hidden="true"
-        className="absolute inset-0 flex items-center justify-center pointer-events-none"
+        className="hidden sm:flex absolute inset-0 items-center justify-center pointer-events-none"
       >
         <div className="w-[400px] h-[400px] bg-violet-500/20 rounded-full blur-3xl" />
       </div>
 
-      {/* ── Ambient accent: top-right corner ─────────────────────────── */}
+      {/* ── Ambient accent: top-right corner ─────────────────────────────
+           hidden on mobile: negative offsets escape the section + blur-3xl. */}
       <div
         aria-hidden="true"
-        className="absolute -top-20 -right-20 w-72 h-72 bg-indigo-400/8 rounded-full blur-3xl pointer-events-none"
+        className="hidden sm:block absolute -top-20 -right-20 w-72 h-72 bg-indigo-400/8 rounded-full blur-3xl pointer-events-none"
       />
 
-      {/* ── Ambient accent: bottom-left corner ───────────────────────── */}
+      {/* ── Ambient accent: bottom-left corner ───────────────────────────
+           hidden on mobile: same reasoning as top-right corner glow.      */}
       <div
         aria-hidden="true"
-        className="absolute -bottom-20 -left-20 w-72 h-72 bg-violet-400/8 rounded-full blur-3xl pointer-events-none"
+        className="hidden sm:block absolute -bottom-20 -left-20 w-72 h-72 bg-violet-400/8 rounded-full blur-3xl pointer-events-none"
       />
 
       {/* ── Top separator ─────────────────────────────────────────────── */}
