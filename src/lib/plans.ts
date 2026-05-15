@@ -39,6 +39,7 @@ export type PlanType =
 export type BillingInterval = "MONTHLY" | "YEARLY";
 
 export type SubscriptionStatus =
+  | "INCOMPLETE"  // Phase 2A: account created, card not yet provided — blocks all actions
   | "TRIALING"
   | "ACTIVE"
   | "PAST_DUE"
@@ -118,9 +119,10 @@ export function getEffectivePlan(sub: SubscriptionForPlan): EffectivePlanResult 
     sub.trialEndsAt < now;
 
   const isExpired =
-    sub.status === "EXPIRED"   ||
-    sub.status === "CANCELED"  ||   // canceled: block actions, allow read
-    sub.status === "PAST_DUE"  ||   // grace period: block creation, allow read
+    sub.status === "INCOMPLETE" ||  // Phase 2A: no card yet — block all paid actions
+    sub.status === "EXPIRED"    ||
+    sub.status === "CANCELED"   ||  // canceled: block actions, allow read
+    sub.status === "PAST_DUE"   ||  // grace period: block creation, allow read
     trialExpired;
 
   const isTrialing = sub.status === "TRIALING" && !trialExpired;

@@ -37,11 +37,18 @@ enum PlanType {
 }
 
 enum SubscriptionStatus {
-  TRIALING   // Within 14-day free Pro trial
-  ACTIVE     // Paid and current
-  PAST_DUE   // Payment failed; grace period before downgrade
-  CANCELED   // Canceled by user; access until currentPeriodEnd
-  EXPIRED    // Trial or subscription ended with no active payment method
+  // ── Phase 2A: card-first trial flow ────────────────────────────────────────
+  // Set at account creation. User must complete HYP checkout before any
+  // dashboard access. Transitions to TRIALING once a card token is stored.
+  // INCOMPLETE users are blocked identically to EXPIRED — no actions allowed.
+  INCOMPLETE
+
+  // ── Legacy / active statuses ────────────────────────────────────────────────
+  TRIALING   // Card on file; 14-day trial active. No charges yet.
+  ACTIVE     // Paid and current; recurring billing running.
+  PAST_DUE   // Recurring charge failed; grace period before EXPIRED.
+  CANCELED   // Canceled by user; access until currentPeriodEnd.
+  EXPIRED    // Trial or subscription ended with no active payment method.
 }
 
 // ── User (broker) ──────────────────────────────────────────────────────────────
@@ -410,9 +417,15 @@ model Message {
 // ── Subscription ───────────────────────────────────────────────────────────────
 //
 // One row per User — always exists once a user registers.
-// Phase 1: schema + seeding only.
-// Phase 2: plan limits enforced at API layer.
-// Phase 3: billing provider fills billingCustomerId / billingSubscriptionId via webhook.
+//
+// Phase 1  — schema + plan limit enforcement at API layer.
+// Phase 2A — INCOMPLETE status + card-token fields added (this migration).
+//            Checkout flow still activates TRIALING immediately; recurring
+//            charge fields are placeholders for Phase 2B.
+// Phase 2B — /billing/success bifurcation: INCOMPLETE → TRIALING with card;
+//            TRIALING/ACTIVE → ACTIVE for paid upgrades.
+// Phase 3  — Recurring billing engine reads cardToken + nextBillingAt to
+//            charge via HYP HK module. billingFailures drives retry/suspend logic.
 
 model Subscription {
   id     String @id @default(cuid())
@@ -421,24 +434,60 @@ model Subscription {
 
   // ── Plan & status ──────────────────────────────────────────────────────────
   plan   PlanType           @default(STANDARD)
-  status SubscriptionStatus @default(TRIALING)
+  status SubscriptionStatus @default(INCOMPLETE)
+  //   ^^^^ Changed from TRIALING to INCOMPLETE in Phase 2A.
+  //   New accounts start INCOMPLETE until a card token is stored.
+  //   Existing TRIALING rows keep their status (no backfill needed).
 
   // ── Trial ──────────────────────────────────────────────────────────────────
-  // Set to now()+14 days at registration. Null for admin-assigned STARTER rows.
+  // Null when INCOMPLETE — trial clock starts only after card approval.
+  // Set to activatedAt + TRIAL_DAYS during the INCOMPLETE → TRIALING transition.
   trialEndsAt DateTime?
 
   // ── Billing interval ───────────────────────────────────────────────────────
-  // MONTHLY: charged per month. YEARLY: charged annually.
-  // Filled by billing provider webhook when payment is live.
-  // Default MONTHLY is correct for all existing TRIALING rows (no committed interval yet).
+  // Selected by the user during onboarding checkout (or /settings/billing).
+  // Default MONTHLY is correct for all existing TRIALING rows.
   billingInterval BillingInterval @default(MONTHLY)
 
-  // ── Billing provider (filled when payment integration goes live) ───────────
+  // ── Billing provider ───────────────────────────────────────────────────────
   billingProvider       String?  // "hyp" | future provider slug
-  billingCustomerId     String?  // provider's customer object ID
-  billingSubscriptionId String?  // provider's subscription object ID
+  billingCustomerId     String?  // provider's customer object ID (future)
+  billingSubscriptionId String?  // provider's subscription/agreement object ID
 
-  // ── Current billing period (filled by provider webhook) ───────────────────
+  // ── Card-on-file (Phase 2A placeholder — written in Phase 2B) ─────────────
+  //
+  // These fields are populated during the INCOMPLETE → TRIALING transition
+  // when HYP returns callback params (HK module: cardToken = HKId).
+  //
+  // ▶ Phase 3 CONNECT POINT: the recurring billing engine reads `cardToken`
+  //   and calls HYP's charge endpoint to collect the subscription fee.
+  //   `billingFailures` drives the retry / suspend / cancel logic.
+  //   `nextBillingAt` is the cron job's cursor — charge all rows where
+  //   nextBillingAt <= now() and status IN (TRIALING, ACTIVE).
+  //
+  cardToken    String?    // HYP HKId recurring agreement ID — used for Phase 3 charges.
+                          // Treat as sensitive: do not log, do not expose to client.
+  cardBrand    String?    // e.g. "VISA", "MASTERCARD" — populated if provider returns it.
+  cardLast4    String?    // Last 4 digits extracted from HYP cardMask (e.g. "1111").
+  cardExpMonth Int?       // Card expiry month 1-12.
+  cardExpYear  Int?       // Card expiry year (4-digit, e.g. 2028).
+
+  // ── Card lifecycle timestamps ───────────────────────────────────────────────
+  tokenCreatedAt DateTime?  // When the card token was first stored (INCOMPLETE → TRIALING).
+
+  // ── Recurring billing state (Phase 3 — populated by billing engine) ────────
+  // ▶ Phase 3 CONNECT POINT: billing cron populates these after every charge.
+  firstPaymentAt  DateTime?  // Timestamp of the first successful recurring charge.
+                             // Null during trial. Set when TRIALING → ACTIVE.
+  nextBillingAt   DateTime?  // When the next charge is due. Billing cron queries this.
+                             // Set to trialEndsAt on card storage; updated after each charge.
+  billingFailures Int        @default(0)
+                             // Count of consecutive failed recurring charges.
+                             // Incremented by billing engine on each failure.
+                             // Reset to 0 on success.
+                             // ▶ Phase 3: after N failures → status = PAST_DUE → EXPIRED.
+
+  // ── Current billing period (filled after first paid charge) ───────────────
   currentPeriodStart DateTime?
   currentPeriodEnd   DateTime?
 
@@ -449,8 +498,9 @@ model Subscription {
 
   events SubscriptionEvent[]
 
-  @@index([status])           // fast queries: "all TRIALING users"
+  @@index([status])           // fast queries: "all TRIALING users", "all INCOMPLETE users"
   @@index([trialEndsAt])      // fast queries: "trials expiring soon"
+  @@index([nextBillingAt])    // Phase 3: billing cron cursor — "charge due now"
 }
 
 // ── SubscriptionEvent ──────────────────────────────────────────────────────────

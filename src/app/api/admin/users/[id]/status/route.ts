@@ -10,6 +10,7 @@ import { prisma }         from "@/lib/prisma";
 import { requireAdmin }   from "@/lib/require-admin";
 
 const VALID_STATUSES = [
+  "INCOMPLETE",  // Phase 2A: reset to "awaiting card" (useful for testing)
   "TRIALING",
   "ACTIVE",
   "PAST_DUE",

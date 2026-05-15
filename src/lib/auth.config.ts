@@ -85,7 +85,7 @@ export const authConfig: NextAuthConfig = {
 
         session.user.subscriptionStatus =
           ((token?.subscriptionStatus as string | undefined) ?? "EXPIRED") as
-          "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED";
+          "INCOMPLETE" | "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED";
 
         // trialEndsAt is stored as an ISO string in the JWT (JSON-serialisable).
         // Convert back to Date for callers.

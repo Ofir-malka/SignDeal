@@ -56,7 +56,7 @@ export default async function AdminUsersPage({
     subscription: u.subscription
       ? {
           plan:        u.subscription.plan   as "STANDARD" | "GROWTH" | "PRO" | "AGENCY",
-          status:      u.subscription.status as "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED",
+          status:      u.subscription.status as "INCOMPLETE" | "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED",
           trialEndsAt: u.subscription.trialEndsAt?.toISOString() ?? null,
         }
       : null,

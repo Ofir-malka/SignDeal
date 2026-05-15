@@ -38,19 +38,21 @@ const INTERVAL_LABELS: Record<string, string> = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  TRIALING: "בניסיון חינם",
-  ACTIVE:   "פעיל",
-  PAST_DUE: "חיוב נכשל",
-  CANCELED: "מבוטל",
-  EXPIRED:  "לא פעיל",
+  INCOMPLETE: "נדרש אמצעי תשלום",  // Phase 2A: card not yet provided
+  TRIALING:   "בניסיון חינם",
+  ACTIVE:     "פעיל",
+  PAST_DUE:   "חיוב נכשל",
+  CANCELED:   "מבוטל",
+  EXPIRED:    "לא פעיל",
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  TRIALING: "bg-blue-50 text-blue-700 border-blue-200",
-  ACTIVE:   "bg-emerald-50 text-emerald-700 border-emerald-200",
-  PAST_DUE: "bg-amber-50 text-amber-700 border-amber-200",
-  CANCELED: "bg-gray-100 text-gray-500 border-gray-200",
-  EXPIRED:  "bg-red-50 text-red-700 border-red-200",
+  INCOMPLETE: "bg-orange-50 text-orange-700 border-orange-200",
+  TRIALING:   "bg-blue-50 text-blue-700 border-blue-200",
+  ACTIVE:     "bg-emerald-50 text-emerald-700 border-emerald-200",
+  PAST_DUE:   "bg-amber-50 text-amber-700 border-amber-200",
+  CANCELED:   "bg-gray-100 text-gray-500 border-gray-200",
+  EXPIRED:    "bg-red-50 text-red-700 border-red-200",
 };
 
 function formatDate(date: Date): string {

@@ -50,10 +50,11 @@ const PLAN_AMOUNTS: Record<"STANDARD" | "GROWTH" | "PRO", { monthly: number; yea
 };
 
 // ── Plan labels (shown on HYP payment page via Info param) ───────────────────
+// GROWTH uses the masculine form "מתקדם" (מסלול is masculine in Hebrew).
 
 const PLAN_LABELS: Record<"STANDARD" | "GROWTH" | "PRO", string> = {
   STANDARD: "מסלול סטנדרט",
-  GROWTH:   "מסלול מתקדמת",
+  GROWTH:   "מסלול מתקדם",
   PRO:      "מסלול פרו",
 };
 
@@ -161,8 +162,12 @@ export class HypBillingProvider implements BillingProvider {
     const order = `sd-${crypto.randomUUID()}`;
 
     // ── Build Info string ────────────────────────────────────────────────────
+    // Shown on the HYP hosted payment page next to the amount.
+    // Separator: middle dot U+00B7 " · " — chosen over em-dash U+2014 "—"
+    // because HYP's display engine renders the 3-byte em-dash as "?" even
+    // with UTF8=True.  The middle dot (2-byte UTF-8) displays correctly.
     const intervalLabel = params.interval === "YEARLY" ? "שנתי" : "חודשי";
-    const info = `${PLAN_LABELS[params.plan]} — ${intervalLabel}`;
+    const info = `${PLAN_LABELS[params.plan]} · ${intervalLabel}`;
 
     // ── Derive ClientName from email ─────────────────────────────────────────
     // HYP shows this on the payment page. Use the local part of the email.

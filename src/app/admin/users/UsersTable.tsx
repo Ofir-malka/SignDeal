@@ -13,7 +13,7 @@ export type AdminUserRow = {
   createdAt: string; // ISO
   subscription: {
     plan:        "STANDARD" | "GROWTH" | "PRO" | "AGENCY";
-    status:      "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED";
+    status:      "INCOMPLETE" | "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED";
     trialEndsAt: string | null; // ISO
   } | null;
 };
@@ -21,7 +21,7 @@ export type AdminUserRow = {
 // ── Constants ─────────────────────────────────────────────────────────────────
 // Active plan values only — STARTER and ENTERPRISE are deprecated.
 const PLANS    = ["STANDARD", "GROWTH", "PRO", "AGENCY"] as const;
-const STATUSES = ["TRIALING", "ACTIVE", "PAST_DUE", "CANCELED", "EXPIRED"] as const;
+const STATUSES = ["INCOMPLETE", "TRIALING", "ACTIVE", "PAST_DUE", "CANCELED", "EXPIRED"] as const;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function fmtDate(iso: string | null | undefined): string {

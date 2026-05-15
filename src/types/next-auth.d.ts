@@ -18,7 +18,7 @@ type PlanType =
   | "STARTER"     // deprecated — no new rows written; may appear in old JWTs
   | "ENTERPRISE"; // deprecated — no new rows written; may appear in old JWTs
 
-type SubscriptionStatus = "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED";
+type SubscriptionStatus = "INCOMPLETE" | "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED";
 
 declare module "next-auth" {
   interface Session {

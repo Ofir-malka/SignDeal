@@ -113,7 +113,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         session.user.subscriptionStatus =
           ((token?.subscriptionStatus as string | undefined) ?? "EXPIRED") as
-          "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED";
+          "INCOMPLETE" | "TRIALING" | "ACTIVE" | "PAST_DUE" | "CANCELED" | "EXPIRED";
 
         session.user.trialEndsAt =
           typeof token?.trialEndsAt === "string"
