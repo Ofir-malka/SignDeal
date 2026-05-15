@@ -199,10 +199,16 @@ export class HypBillingProvider implements BillingProvider {
       SuccessUrl: params.successUrl,
       ErrorUrl:   params.errorUrl,
       CancelUrl:  params.cancelUrl,
-      // HK module — monthly recurring agreement
+      // HK module — recurring agreement
+      // freq = number of months between charges:
+      //   "1"  → charge every 1 month  (MONTHLY billing)
+      //   "12" → charge every 12 months (YEARLY billing)
+      // Sending freq=1 for yearly plans caused HYP to display "חודשי" on the
+      // payment-page header and set up a monthly recurring agreement instead of
+      // a yearly one — fixed by deriving freq from params.interval.
       HK:            "True",
       Tash:          "999",  // 999 = unlimited instalments (recurring until cancelled)
-      freq:          "1",    // 1 = monthly
+      freq:          params.interval === "YEARLY" ? "12" : "1",
       OnlyOnApprove: "True", // redirect to SuccessUrl only on approval; errors go to ErrorUrl
     });
 
