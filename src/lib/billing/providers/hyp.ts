@@ -234,13 +234,27 @@ export class HypBillingProvider implements BillingProvider {
       return { ok: false, reason: `HYP APISign network error: ${reason}` };
     }
 
-    // ── Step 3: validate the returned URL ────────────────────────────────────
-    // HYP should return a full HTTPS URL we can redirect the browser to.
-    // A minimal sanity check: must start with https:// and contain pay.hyp.co.il.
-    // This guards against empty bodies, error strings, or unexpected formats.
-    if (!signedUrl.startsWith("https://") || !signedUrl.includes("pay.hyp.co.il")) {
+    // ── Step 3: normalise the returned body into a full checkout URL ─────────
+    //
+    // HYP APISign can return the signed payment-page address in two formats:
+    //
+    //   A) Full URL  — "https://pay.hyp.co.il/p/?action=pay&Amount=…"
+    //      Returned by some terminal configurations.  Use as-is.
+    //
+    //   B) Query-string only — "Amount=…&CancelUrl=…&HK=True&…"
+    //      Returned by other terminal configurations.  We prefix HYP_PAY_URL
+    //      to build the full URL:  https://pay.hyp.co.il/p/?<body>
+    //
+    //   C) Error string  — "CCode=902" or similar.
+    //      Reject immediately.
+    //
+    // Detection order: check for explicit error first, then full URL, then
+    // query-string.  Anything else is also rejected.
+
+    // Case C — HYP error string (CCode=NNN …).
+    if (signedUrl.startsWith("CCode=")) {
       console.error(
-        `[billing/hyp] APISign invalid response —` +
+        `[billing/hyp] APISign returned error —` +
         ` httpStatus=${httpStatus}` +
         ` order=${order}` +
         ` plan=${params.plan} interval=${params.interval} amount=${amount}agorot` +
@@ -248,18 +262,69 @@ export class HypBillingProvider implements BillingProvider {
       );
       return {
         ok:     false,
-        reason: `HYP APISign invalid response: ${signedUrl.slice(0, 200)}`,
+        reason: `HYP APISign error response: ${signedUrl.slice(0, 200)}`,
+      };
+    }
+
+    let checkoutUrl: string;
+
+    if (signedUrl.startsWith("http")) {
+      // Case A — HYP returned a full URL directly.
+      checkoutUrl = signedUrl;
+    } else if (signedUrl.includes("=") && signedUrl.includes("&")) {
+      // Case B — HYP returned signed query-string params; prepend the base URL.
+      checkoutUrl = `${HYP_PAY_URL}?${signedUrl}`;
+    } else {
+      // Unrecognised format.
+      console.error(
+        `[billing/hyp] APISign unrecognised response —` +
+        ` httpStatus=${httpStatus}` +
+        ` order=${order}` +
+        ` plan=${params.plan} interval=${params.interval} amount=${amount}agorot` +
+        ` body(500)=${signedUrl.slice(0, 500)}`,
+      );
+      return {
+        ok:     false,
+        reason: `HYP APISign unrecognised response: ${signedUrl.slice(0, 200)}`,
+      };
+    }
+
+    // ── Step 4: safety checks on the final URL ────────────────────────────────
+    // 1. Must be an HTTPS URL served by pay.hyp.co.il/p/ — never an arbitrary host.
+    // 2. Must NOT contain PassP= or KEY= — credentials must never reach the browser.
+    if (!checkoutUrl.startsWith("https://pay.hyp.co.il/p/")) {
+      console.error(
+        `[billing/hyp] APISign URL failed host check —` +
+        ` order=${order} urlPrefix=${checkoutUrl.slice(0, 60)}`,
+      );
+      return {
+        ok:     false,
+        reason: "HYP APISign returned URL with unexpected host. Check HYP_MASOF / HYP_PASSP / HYP_API_KEY.",
+      };
+    }
+
+    if (checkoutUrl.includes("PassP=") || checkoutUrl.includes("KEY=")) {
+      // This must never happen — log without the URL itself (it may contain secrets).
+      console.error(
+        `[billing/hyp] APISign URL contains credentials — order=${order}` +
+        ` containsPassP=${checkoutUrl.includes("PassP=")}` +
+        ` containsKEY=${checkoutUrl.includes("KEY=")}`,
+      );
+      return {
+        ok:     false,
+        reason: "HYP APISign response contained credentials. Aborting for security.",
       };
     }
 
     console.log(
-      `[billing/hyp] APISign success — signed URL received` +
+      `[billing/hyp] APISign success —` +
       ` order=${order}` +
-      ` urlLength=${signedUrl.length}`,
+      ` responseFormat=${signedUrl.startsWith("http") ? "full-url" : "query-string"}` +
+      ` urlLength=${checkoutUrl.length}`,
     );
 
-    // signedUrl is the HYP-generated payment page URL.
+    // checkoutUrl is the HYP-generated payment page URL.
     // It does NOT contain PassP or KEY — safe to send to the browser.
-    return { ok: true, checkoutUrl: signedUrl, order };
+    return { ok: true, checkoutUrl, order };
   }
 }
