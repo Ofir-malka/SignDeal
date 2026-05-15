@@ -32,6 +32,8 @@ const { auth } = NextAuth(authConfig);
 const PUBLIC_PREFIXES = [
   "/login",
   "/register",
+  "/forgot-password", // password-reset request form — must be accessible unauthenticated
+  "/reset-password",  // password-reset form (/reset-password?token=...) — same
   "/legal",          // /legal/terms, /legal/privacy, /legal/cookies
   "/pay",            // /pay/complete (client-facing payment result page)
   "/pricing",        // future public pricing page
