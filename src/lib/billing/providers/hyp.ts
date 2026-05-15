@@ -143,11 +143,18 @@ export class HypBillingProvider implements BillingProvider {
     }
 
     // ── Resolve amount ───────────────────────────────────────────────────────
+    // PLAN_AMOUNTS stores prices in agorot (100 agorot = ₪1) — the same unit
+    // used throughout the codebase for DB columns and fee calculations.
+    // HYP's Amount parameter expects whole shekels (ILS), so we divide by 100
+    // before sending.  The integer division is exact because all prices are
+    // multiples of 100 agorot (no fractional-shekel plans).
     const amounts = PLAN_AMOUNTS[params.plan];
     if (!amounts) {
       return { ok: false, reason: `Unknown plan: ${params.plan}` };
     }
-    const amount = params.interval === "YEARLY" ? amounts.yearly : amounts.monthly;
+    const amountAgorot = params.interval === "YEARLY" ? amounts.yearly : amounts.monthly;
+    // Amount sent to HYP APISign — must be in whole shekels (ILS), not agorot.
+    const amountShekels = amountAgorot / 100;
 
     // ── Generate unique order ID ─────────────────────────────────────────────
     // "sd-" (3) + UUID (36) = 39 chars.
@@ -171,7 +178,9 @@ export class HypBillingProvider implements BillingProvider {
       KEY:       apiKey,         // ← HYP_API_KEY: server-side credential only
       Masof:     masof,
       PassP:     passp,          // ← server-side credential — consumed by HYP, not returned
-      Amount:    String(amount),
+      // HYP Amount parameter = whole shekels (ILS).
+      // amountAgorot is divided by 100 here; internal storage stays in agorot.
+      Amount:    String(amountShekels),
       Coin:      "1",            // 1 = ILS
       Info:      info,
       Order:     order,
@@ -199,7 +208,7 @@ export class HypBillingProvider implements BillingProvider {
       `[billing/hyp] calling HYP APISign` +
       ` userId=${params.userId.slice(0, 8)}…` +
       ` plan=${params.plan} interval=${params.interval}` +
-      ` amount=${amount}agorot order=${order}`,
+      ` amount=${amountShekels}nis (${amountAgorot}agorot) order=${order}`,
     );
 
     let signedUrl: string;
@@ -257,7 +266,7 @@ export class HypBillingProvider implements BillingProvider {
         `[billing/hyp] APISign returned error —` +
         ` httpStatus=${httpStatus}` +
         ` order=${order}` +
-        ` plan=${params.plan} interval=${params.interval} amount=${amount}agorot` +
+        ` plan=${params.plan} interval=${params.interval} amount=${amountShekels}nis (${amountAgorot}agorot)` +
         ` body(500)=${signedUrl.slice(0, 500)}`,
       );
       return {
@@ -280,7 +289,7 @@ export class HypBillingProvider implements BillingProvider {
         `[billing/hyp] APISign unrecognised response —` +
         ` httpStatus=${httpStatus}` +
         ` order=${order}` +
-        ` plan=${params.plan} interval=${params.interval} amount=${amount}agorot` +
+        ` plan=${params.plan} interval=${params.interval} amount=${amountShekels}nis (${amountAgorot}agorot)` +
         ` body(500)=${signedUrl.slice(0, 500)}`,
       );
       return {
