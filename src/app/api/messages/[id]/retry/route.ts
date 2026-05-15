@@ -19,6 +19,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
+import { requireActiveSubscription } from "@/lib/subscription";
 import { sendSms } from "@/lib/messaging/sms-provider";
 import { rateLimit } from "@/lib/rate-limit";
 
@@ -49,6 +50,12 @@ export async function POST(
         { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
       );
     }
+
+    // ── Subscription guard ────────────────────────────────────────────────────
+    // Blocks EXPIRED / CANCELED / PAST_DUE / expired-trial users from
+    // retrying SMS sends (which have a per-message cost).
+    const subBlock = await requireActiveSubscription(userId);
+    if (subBlock) return subBlock;
 
     // ── Load message, verify ownership ───────────────────────────────────────
     const message = await prisma.message.findUnique({ where: { id } });

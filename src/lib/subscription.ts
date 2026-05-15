@@ -275,3 +275,41 @@ export async function requireActiveSubscription(
  * Remove in Phase 2.
  */
 export const canUserCreateContract = canCreateContract;
+
+// ── UI helpers (used by server components to build UpgradeBanner props) ───────
+
+const PLAN_LABELS: Record<string, string> = {
+  STANDARD:   "סטנדרט",
+  GROWTH:     "צמיחה",
+  PRO:        "מקצועני",
+  AGENCY:     "משרד",
+  // deprecated plan names — keep so stale JWT tokens don't produce "undefined"
+  STARTER:    "סטארטר",
+  ENTERPRISE: "ארגוני",
+};
+
+/** Hebrew display label for a plan key, e.g. "STANDARD" → "סטנדרט". */
+export function getPlanLabel(plan: string): string {
+  return PLAN_LABELS[plan] ?? plan;
+}
+
+/**
+ * Server-side check: does this ContractCreationCheck warrant an UpgradeBanner?
+ *
+ * Mirrors the variant logic in UpgradeBanner.getBannerVariant() so server
+ * components can avoid rendering an empty wrapper div when no banner is needed.
+ *
+ * Returns false for:
+ *  - AGENCY users (unlimited quota, no limit banner)
+ *  - Active users with monthlyRemaining >= 2 and more than 3 trial days left
+ */
+export function checkNeedsBanner(check: ContractCreationCheck): boolean {
+  if (check.monthlyDocLimit === null) return false;   // AGENCY — unlimited
+  if (!check.isActive) return true;                   // expired / inactive
+  if (check.isTrialing && check.trialEndsAt) {
+    const msLeft = new Date(check.trialEndsAt).getTime() - Date.now();
+    if (msLeft <= 3 * 86_400_000) return true;        // trial ending ≤ 3 days
+  }
+  // At limit (0 remaining) or near limit (1 remaining)
+  return check.monthlyRemaining !== null && check.monthlyRemaining <= 1;
+}

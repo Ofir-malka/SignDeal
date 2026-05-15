@@ -26,6 +26,29 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import Link from "next/link";
 import { parsePropertyAddress } from "@/lib/format-address";
 import { formatNisInput } from "@/lib/format-nis";
+import { UpgradeBanner } from "@/components/UpgradeBanner";
+import type { UsageData } from "@/components/UsageCard";
+
+// ── Subscription status (passed from server page) ─────────────────────────────
+
+/**
+ * Passed from the server component (contracts/new/page.tsx) so the form
+ * can show a contextual upgrade banner and disable the submit button without
+ * a client-side API round-trip.  Shape mirrors ContractCreationCheck + planLabel.
+ */
+export interface SubscriptionStatus {
+  allowed:          boolean;
+  reason?:          "SUBSCRIPTION_INACTIVE" | "MONTHLY_LIMIT_REACHED";
+  plan:             string;
+  planLabel:        string;
+  isTrialing:       boolean;
+  isActive:         boolean;
+  isExpired:        boolean;
+  trialEndsAt:      string | null;
+  monthlyDocCount:  number;
+  monthlyDocLimit:  number | null;
+  monthlyRemaining: number | null;
+}
 
 // ── API response shapes ────────────────────────────────────────────────────────
 
@@ -1011,11 +1034,36 @@ function CommissionPreviewChip({ label }: { label: string }) {
 
 // ── Main form ──────────────────────────────────────────────────────────────────
 
-export function NewContractForm() {
+export function NewContractForm({ subscription }: { subscription?: SubscriptionStatus }) {
   const [form,   setForm]   = useState<FormState>(INITIAL);
   const [stage,  setStage]  = useState<Stage>({ name: "idle" });
   const [errors, setErrors] = useState<FieldError>({});
   const firstErrorRef = useRef<HTMLDivElement>(null);
+
+  // ── Subscription gate ─────────────────────────────────────────────────────
+  // Computed once; subscription data comes from the server so it never changes.
+  const subscriptionBlocked = subscription != null && !subscription.allowed;
+
+  // Build a UsageData-compatible object for UpgradeBanner when the user is blocked.
+  const bannerData: UsageData | null = subscriptionBlocked && subscription
+    ? {
+        plan:             subscription.plan,
+        planLabel:        subscription.planLabel,
+        isTrialing:       subscription.isTrialing,
+        isActive:         subscription.isActive,
+        isExpired:        subscription.isExpired,
+        trialEndsAt:      subscription.trialEndsAt,
+        monthlyDocCount:  subscription.monthlyDocCount,
+        monthlyDocLimit:  subscription.monthlyDocLimit,
+        monthlyRemaining: subscription.monthlyRemaining,
+        // backward-compat aliases (same values)
+        activeCount:      subscription.monthlyDocCount,
+        limit:            subscription.monthlyDocLimit,
+        remaining:        subscription.monthlyRemaining,
+        allowed:          subscription.allowed,
+        reason:           subscription.reason,
+      }
+    : null;
 
   // Selection tracking — UI-only; not included in API payload
   const [selectedClientId,   setSelectedClientId]   = useState<string | null>(null);
@@ -1280,6 +1328,9 @@ export function NewContractForm() {
         <h1 className="text-2xl font-bold text-gray-900">חוזה חדש</h1>
         <p className="text-sm text-gray-500 mt-1">מלא את הפרטים ושלח לחתימה בלחיצה אחת</p>
       </div>
+
+      {/* Subscription upgrade banner — shown when user is blocked */}
+      {bannerData && <UpgradeBanner data={bannerData} />}
 
       <div className="space-y-5">
 
@@ -1817,10 +1868,16 @@ export function NewContractForm() {
             className="px-4 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-all">
             ביטול
           </Link>
-          <button type="button" onClick={handleSubmit} disabled={submitting}
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={submitting || subscriptionBlocked}
+            title={subscriptionBlocked ? "שדרג את המנוי כדי ליצור חוזים חדשים" : undefined}
             className={[
               "flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold text-white transition-all",
-              submitting ? "bg-indigo-400 cursor-not-allowed" : "bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-200",
+              submitting || subscriptionBlocked
+                ? "bg-indigo-400 cursor-not-allowed opacity-60"
+                : "bg-indigo-600 hover:bg-indigo-700 shadow-md shadow-indigo-200",
             ].join(" ")}>
             {submitting ? (
               <>

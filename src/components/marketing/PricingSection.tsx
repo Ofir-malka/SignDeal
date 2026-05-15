@@ -7,7 +7,7 @@ import { SectionBadge }   from "@/components/marketing/ui/SectionBadge";
 import { AnimateIn }      from "@/components/marketing/ui/AnimateIn";
 
 /**
- * PricingSection — Phase 6 rewrite.
+ * PricingSection — Phase 6 rewrite + Phase 1 billing upgrade.
  *
  * New plan lineup: STANDARD / מתקדמת / פרו (3-col grid) + AGENCY (full-width row)
  * Yearly toggle shows per-month equivalent + emerald saving badge + annual total note.
@@ -16,7 +16,10 @@ import { AnimateIn }      from "@/components/marketing/ui/AnimateIn";
  * Trust strip: 4 items including "14 יום ניסיון חינם".
  * Disclaimer: VAT note + yearly billing note.
  *
- * All self-serve CTAs → /register.
+ * CTA behaviour:
+ *   isLoggedIn=false (default) → Link to /register
+ *   isLoggedIn=true            → POST /api/billing/checkout → redirect to HYP
+ *
  * id="pricing" matches the #pricing NavBar anchor.
  */
 
@@ -26,6 +29,8 @@ type Period = "monthly" | "yearly";
 
 interface SelfServePlan {
   id:            string;
+  /** Exact value accepted by POST /api/billing/checkout { plan }. */
+  backendId:     "STANDARD" | "GROWTH" | "PRO";
   name:          string;
   tagline:       string;
   monthlyPrice:  number;   // ₪/month, billed monthly
@@ -42,6 +47,7 @@ interface SelfServePlan {
 const SELF_SERVE: SelfServePlan[] = [
   {
     id:            "standard",
+    backendId:     "STANDARD",
     name:          "סטנדרט",
     tagline:       "הכול כדי להתחיל לעבוד דיגיטל",
     monthlyPrice:  39,
@@ -60,6 +66,7 @@ const SELF_SERVE: SelfServePlan[] = [
   },
   {
     id:            "growth",
+    backendId:     "GROWTH",
     name:          "מתקדמת",
     tagline:       "לסוכן שמתרחב ורוצה יותר",
     monthlyPrice:  49,
@@ -79,6 +86,7 @@ const SELF_SERVE: SelfServePlan[] = [
   },
   {
     id:            "pro",
+    backendId:     "PRO",
     name:          "פרו",
     tagline:       "הכי מתאים לסוכנים פעילים",
     monthlyPrice:  110,
@@ -186,7 +194,17 @@ function ArrowRightIcon() {
 
 // ─── Self-serve plan card ─────────────────────────────────────────────────────
 
-function PlanCard({ plan, period, index }: { plan: SelfServePlan; period: Period; index: number }) {
+interface PlanCardProps {
+  plan:        SelfServePlan;
+  period:      Period;
+  index:       number;
+  isLoggedIn:  boolean;
+  isLoading:   boolean;   // this specific plan is loading checkout
+  anyLoading:  boolean;   // any plan is loading (disable all CTAs)
+  onCheckout:  (backendId: "STANDARD" | "GROWTH" | "PRO", period: Period) => void;
+}
+
+function PlanCard({ plan, period, index, isLoggedIn, isLoading, anyLoading, onCheckout }: PlanCardProps) {
   const isHighlighted = plan.highlighted;
 
   const displayPrice    = period === "yearly" ? plan.yearlyMonthly : plan.monthlyPrice;
@@ -282,19 +300,37 @@ function PlanCard({ plan, period, index }: { plan: SelfServePlan; period: Period
               )}
             </div>
 
-            {/* CTA */}
-            <Link
-              href="/register"
-              className={[
-                "w-full text-center text-sm font-bold py-3.5 rounded-xl",
-                "transition-all active:scale-[0.98]",
-                isHighlighted
-                  ? "bg-white text-indigo-700 hover:bg-indigo-50 shadow-xl shadow-black/20 ring-1 ring-white/30"
-                  : "bg-white/8 border border-white/15 text-white hover:bg-white/[0.13]",
-              ].join(" ")}
-            >
-              {plan.cta}
-            </Link>
+            {/* CTA — Link for guests, button (→ checkout) for logged-in users */}
+            {isLoggedIn ? (
+              <button
+                type="button"
+                onClick={() => onCheckout(plan.backendId, period)}
+                disabled={anyLoading}
+                className={[
+                  "w-full text-center text-sm font-bold py-3.5 rounded-xl",
+                  "transition-all active:scale-[0.98]",
+                  "disabled:opacity-60 disabled:cursor-not-allowed",
+                  isHighlighted
+                    ? "bg-white text-indigo-700 hover:bg-indigo-50 shadow-xl shadow-black/20 ring-1 ring-white/30"
+                    : "bg-white/8 border border-white/15 text-white hover:bg-white/[0.13]",
+                ].join(" ")}
+              >
+                {isLoading ? "פותח..." : "בחר מסלול"}
+              </button>
+            ) : (
+              <Link
+                href="/register"
+                className={[
+                  "w-full text-center text-sm font-bold py-3.5 rounded-xl",
+                  "transition-all active:scale-[0.98]",
+                  isHighlighted
+                    ? "bg-white text-indigo-700 hover:bg-indigo-50 shadow-xl shadow-black/20 ring-1 ring-white/30"
+                    : "bg-white/8 border border-white/15 text-white hover:bg-white/[0.13]",
+                ].join(" ")}
+              >
+                {plan.cta}
+              </Link>
+            )}
 
             {/* Divider */}
             <div className="border-t border-white/10" />
@@ -440,8 +476,42 @@ function TrustStrip() {
 
 // ─── Exported section ─────────────────────────────────────────────────────────
 
-export function PricingSection() {
-  const [period, setPeriod] = useState<Period>("monthly");
+interface PricingSectionProps {
+  /**
+   * True when the visitor is authenticated.
+   * Switches self-serve CTAs from Link→/register to a checkout button.
+   * Defaults to false so existing call sites without the prop are unaffected.
+   */
+  isLoggedIn?: boolean;
+}
+
+export function PricingSection({ isLoggedIn = false }: PricingSectionProps) {
+  const [period,        setPeriod]        = useState<Period>("monthly");
+  const [loadingPlanId, setLoadingPlanId] = useState<"STANDARD" | "GROWTH" | "PRO" | null>(null);
+  const [checkoutError, setCheckoutError] = useState("");
+
+  async function handleCheckout(backendId: "STANDARD" | "GROWTH" | "PRO", p: Period) {
+    setCheckoutError("");
+    setLoadingPlanId(backendId);
+    try {
+      const interval = p === "yearly" ? "YEARLY" : "MONTHLY";
+      const res  = await fetch("/api/billing/checkout", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ plan: backendId, interval }),
+      });
+      const data = await res.json() as { checkoutUrl?: string; error?: string };
+      if (!res.ok || !data.checkoutUrl) {
+        setCheckoutError(data.error ?? "שגיאה בפתיחת עמוד התשלום. נסה שוב.");
+        return;
+      }
+      window.location.assign(data.checkoutUrl);
+    } catch {
+      setCheckoutError("שגיאת רשת — בדוק חיבור לאינטרנט ונסה שנית.");
+    } finally {
+      setLoadingPlanId(null);
+    }
+  }
 
   return (
     <SectionWrapper id="pricing">
@@ -496,13 +566,32 @@ export function PricingSection() {
         </div>
       </AnimateIn>
 
+      {/* Checkout error — shown below toggle, above cards */}
+      {checkoutError && (
+        <div
+          dir="rtl"
+          className="mb-6 mx-auto max-w-md rounded-xl bg-red-500/10 border border-red-400/30 px-4 py-3 text-sm text-red-300 text-center"
+        >
+          {checkoutError}
+        </div>
+      )}
+
       {/* 3-col self-serve grid */}
       <div
         dir="rtl"
         className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch"
       >
         {SELF_SERVE.map((plan, i) => (
-          <PlanCard key={plan.id} plan={plan} period={period} index={i} />
+          <PlanCard
+            key={plan.id}
+            plan={plan}
+            period={period}
+            index={i}
+            isLoggedIn={isLoggedIn}
+            isLoading={loadingPlanId === plan.backendId}
+            anyLoading={loadingPlanId !== null}
+            onCheckout={handleCheckout}
+          />
         ))}
       </div>
 

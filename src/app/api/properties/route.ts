@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
 import { rateLimit } from "@/lib/rate-limit";
+import { requireActiveSubscription } from "@/lib/subscription";
 import {
   parseEnum,
   parseOptionalPositiveFloat,
@@ -43,6 +44,12 @@ export async function POST(request: Request) {
         { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
       );
     }
+
+    // ── Subscription guard ────────────────────────────────────────────────────
+    // Blocks EXPIRED / CANCELED / PAST_DUE / expired-trial users.
+    // Does NOT enforce the monthly contract quota (properties are not quota-limited).
+    const subBlock = await requireActiveSubscription(userId);
+    if (subBlock) return subBlock;
 
     const body = await request.json();
     const { address, city, type, listingType, rooms, floor, sizeSqm, askingPrice } = body;

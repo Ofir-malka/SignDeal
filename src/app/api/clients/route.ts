@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
 import { rateLimit } from "@/lib/rate-limit";
+import { requireActiveSubscription } from "@/lib/subscription";
 
 export async function GET() {
   try {
@@ -34,6 +35,12 @@ export async function POST(req: NextRequest) {
         { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
       );
     }
+
+    // ── Subscription guard ────────────────────────────────────────────────────
+    // Blocks EXPIRED / CANCELED / PAST_DUE / expired-trial users.
+    // Does NOT enforce the monthly contract quota (clients are not quota-limited).
+    const subBlock = await requireActiveSubscription(userId);
+    if (subBlock) return subBlock;
 
     const body = await req.json();
     const name     = String(body.name     ?? "").trim();

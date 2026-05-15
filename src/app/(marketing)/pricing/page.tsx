@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { NavBar }          from "@/components/marketing/NavBar";
 import { PricingSection }  from "@/components/marketing/PricingSection";
 import { MarketingFooter } from "@/components/marketing/MarketingFooter";
+import { auth }            from "@/lib/auth";
 
 export const metadata: Metadata = {
   title:       "מחירים | SignDeal",
@@ -13,18 +14,23 @@ export const metadata: Metadata = {
 /**
  * Public standalone pricing page.
  *
- * Reuses the existing PricingSection component — no billing logic here.
- * This route is in proxy.ts PUBLIC_PREFIXES so authenticated users are
- * NOT redirected to /dashboard when landing here from the upgrade CTA.
+ * Reuses PricingSection — checks auth server-side so logged-in users get
+ * checkout CTAs directly instead of being sent to /register.
+ *
+ * This route is in proxy.ts PUBLIC_PREFIXES so authenticated users are NOT
+ * redirected to /dashboard when landing here from an upgrade CTA.
  */
-export default function PricingPage() {
+export default async function PricingPage() {
+  const session   = await auth();
+  const isLoggedIn = !!session?.user;
+
   return (
     <div className="min-h-screen bg-[#0a0a1a] text-white" dir="rtl">
       <NavBar />
 
       {/* Spacer for the fixed NavBar (~72px tall) */}
       <div className="pt-20 sm:pt-24">
-        <PricingSection />
+        <PricingSection isLoggedIn={isLoggedIn} />
       </div>
 
       <MarketingFooter />

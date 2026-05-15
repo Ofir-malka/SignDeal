@@ -20,6 +20,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
+import { requireActiveSubscription } from "@/lib/subscription";
 import { sendNotification } from "@/lib/messaging/notify";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { rateLimit } from "@/lib/rate-limit";
@@ -43,6 +44,12 @@ export async function POST(
         { status: 429, headers: { "Retry-After": String(rl.retryAfter) } },
       );
     }
+
+    // ── Subscription guard ────────────────────────────────────────────────────
+    // Blocks EXPIRED / CANCELED / PAST_DUE / expired-trial users from
+    // triggering SMS sends (which have a per-message cost).
+    const subBlock = await requireActiveSubscription(userId);
+    if (subBlock) return subBlock;
 
     // ── Parse body — channel defaults to SMS ─────────────────────────────────
     let channel: "SMS" | "WHATSAPP" = "SMS";

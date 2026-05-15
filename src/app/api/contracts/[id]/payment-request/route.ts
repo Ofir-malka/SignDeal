@@ -1,6 +1,7 @@
 import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
+import { requireActiveSubscription } from "@/lib/subscription";
 import { calculateFees, defaultFeeConfig } from "@/lib/payments/fee-calculator";
 import { getPaymentProvider } from "@/lib/payments";
 import { sendSms, getSmsProviderName } from "@/lib/messaging/sms-provider";
@@ -40,6 +41,12 @@ export async function POST(
         { status: 429, headers: { "Retry-After": String(retryAfter) } },
       );
     }
+
+    // ── Subscription guard ────────────────────────────────────────────────────
+    // Blocks EXPIRED / CANCELED / PAST_DUE / expired-trial users from
+    // creating payment links and triggering external payment provider calls.
+    const subBlock = await requireActiveSubscription(userId);
+    if (subBlock) return subBlock;
 
     const contract = await prisma.contract.findFirst({
       where:  { id, userId },

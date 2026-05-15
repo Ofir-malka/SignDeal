@@ -1,6 +1,35 @@
-import { DashboardShell } from "@/components/DashboardShell";
+import { redirect }           from "next/navigation";
+import { auth }                from "@/lib/auth";
+import { DashboardShell }      from "@/components/DashboardShell";
+import { UpgradeBanner }       from "@/components/UpgradeBanner";
+import { canCreateContract, getPlanLabel, checkNeedsBanner } from "@/lib/subscription";
+import type { UsageData }      from "@/components/UsageCard";
 
-export default function PaymentsPage() {
+export default async function PaymentsPage() {
+  const session = await auth();
+  if (!session?.user?.id) redirect("/login");
+
+  const check = await canCreateContract(session.user.id);
+
+  const bannerData: UsageData | null = checkNeedsBanner(check)
+    ? {
+        plan:             check.plan,
+        planLabel:        getPlanLabel(check.plan),
+        isTrialing:       check.isTrialing,
+        isActive:         check.isActive,
+        isExpired:        check.isExpired,
+        trialEndsAt:      check.trialEndsAt,
+        monthlyDocCount:  check.monthlyDocCount,
+        monthlyDocLimit:  check.monthlyDocLimit,
+        monthlyRemaining: check.monthlyRemaining,
+        activeCount:      check.monthlyDocCount,
+        limit:            check.monthlyDocLimit,
+        remaining:        check.monthlyRemaining,
+        allowed:          check.allowed,
+        reason:           check.reason,
+      }
+    : null;
+
   return (
     <DashboardShell>
       <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between shrink-0">
@@ -18,6 +47,12 @@ export default function PaymentsPage() {
       </header>
 
       <main className="flex-1 overflow-y-auto px-8 py-8">
+        {bannerData && (
+          <div className="mb-4">
+            <UpgradeBanner data={bannerData} />
+          </div>
+        )}
+
         <div className="bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col items-center justify-center py-24 gap-4">
           <div className="w-14 h-14 rounded-full bg-indigo-50 flex items-center justify-center">
             <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#6366f1" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

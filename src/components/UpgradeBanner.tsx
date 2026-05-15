@@ -3,10 +3,11 @@
 import type { UsageData } from "@/components/UsageCard";
 
 // ── Upgrade navigation ────────────────────────────────────────────────────────
-// Hard browser navigation so /#pricing hash scroll works from /dashboard.
-// Replace with billing portal / upgrade modal when HYP is connected.
+// Sends dashboard users to the billing settings page where PlanUpgradeButton
+// lives.  Hard navigation (not router.push) so the full page reloads and picks
+// up the latest subscription state from the server.
 function navigateToUpgrade() {
-  window.location.assign("/pricing");
+  window.location.assign("/settings/billing");
 }
 
 // ── Days left helper ──────────────────────────────────────────────────────────
