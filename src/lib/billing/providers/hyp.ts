@@ -1,28 +1,35 @@
 /**
- * HypBillingProvider — HYP Pay Protocol hosted payment page.
+ * HypBillingProvider — HYP Pay Protocol hosted payment page (APISign flow).
  *
  * Flow:
- *   1. Build a signed redirect URL to https://pay.hyp.co.il/p/
- *   2. Return that URL → caller (checkout route) redirects the browser there
- *   3. Customer pays on HYP's hosted page (card entry, 3DS, etc.)
- *   4. HYP redirects to SuccessUrl / ErrorUrl / CancelUrl with query params
+ *   1. Build params for action=APISign server-to-server request to HYP.
+ *   2. POST/GET https://pay.hyp.co.il/p/?action=APISign&… from the Node.js server.
+ *   3. HYP validates credentials and returns a signed payment-page URL in the body.
+ *   4. Return that URL → caller (checkout route) redirects the browser there.
+ *   5. Customer pays on HYP's hosted page (card entry, 3DS, HK recurring setup).
+ *   6. HYP redirects to SuccessUrl / ErrorUrl / CancelUrl with signed callback params.
  *
- * This file handles steps 1–2 only.
- * Step 4 callback verification is handled by /billing/success (see verifyHypResponseMac below).
+ * This file handles steps 1–4.
+ * Step 6 callback verification is handled by /billing/success (verifyHypResponseMac).
+ *
+ * ── Security model ─────────────────────────────────────────────────────────────
+ * PassP and HYP_API_KEY (KEY) are used ONLY in the server-side fetch (step 2).
+ * They are NEVER included in any value returned to the browser.
+ * The URL returned by HYP does not contain credentials — it is a signed redirect
+ * that HYP itself generated and is safe to forward to the client.
  *
  * Activate with:  BILLING_PROVIDER=hyp
  * Default is:     BILLING_PROVIDER=stub  (safe for dev / staging)
  *
  * Required env vars:
- *   HYP_MASOF     Terminal identifier (Masof) — 10-digit string from HYP merchant portal.
- *   HYP_PASSP     Terminal password (PassP) — from HYP merchant portal.
+ *   HYP_MASOF     Terminal identifier (Masof) — 10-digit string from HYP portal.
+ *   HYP_PASSP     Terminal password (PassP) — from HYP portal. Server-side only.
+ *   HYP_API_KEY   SHA-1 APIKey (KEY) — from HYP portal. Required for APISign.
+ *                 Server-side only — never sent to the browser.
  *
- * Optional env vars:
- *   HYP_API_KEY   SHA-1 KEY — reserved for Soft Protocol (server-to-server recurring charge).
- *                 Not used for initial checkout. Set it now for future use.
- *
- * NOTE: the old env vars (HYP_USER, HYP_PASSWORD, HYP_TERMINAL_NUMBER, HYP_MID, HYP_BASE_URL)
- * were used by the previous CreditGuard Relay XML implementation and are no longer read.
+ * NOTE: the old env vars (HYP_USER, HYP_PASSWORD, HYP_TERMINAL_NUMBER, HYP_MID,
+ * HYP_BASE_URL) were used by the previous CreditGuard Relay XML implementation
+ * and are no longer read.
  */
 
 import crypto from "crypto";
@@ -110,24 +117,28 @@ export function verifyHypResponseMac(
 export class HypBillingProvider implements BillingProvider {
   async createCheckoutSession(params: CheckoutParams): Promise<CheckoutResult> {
 
-    // ── Read config ──────────────────────────────────────────────────────────
-    const masof = process.env.HYP_MASOF?.trim();
-    const passp = process.env.HYP_PASSP?.trim();
+    // ── Read + validate config ───────────────────────────────────────────────
+    const masof  = process.env.HYP_MASOF?.trim();
+    const passp  = process.env.HYP_PASSP?.trim();
+    const apiKey = process.env.HYP_API_KEY?.trim();
 
-    // Log which vars are set — never log their values.
+    // Log which vars are set — NEVER log their values.
     console.log(
       `[billing/hyp] config check:` +
       ` HYP_MASOF=${Boolean(masof)}` +
       ` HYP_PASSP=${Boolean(passp)}` +
-      ` HYP_API_KEY=${Boolean(process.env.HYP_API_KEY)} (reserved/future)`,
+      ` HYP_API_KEY=${Boolean(apiKey)}`,
     );
 
-    if (!masof || !passp) {
+    if (!masof || !passp || !apiKey) {
+      const missing = [
+        !masof  && "HYP_MASOF",
+        !passp  && "HYP_PASSP",
+        !apiKey && "HYP_API_KEY",
+      ].filter(Boolean).join(", ");
       return {
         ok:     false,
-        reason:
-          "HYP not configured: HYP_MASOF and HYP_PASSP are required. " +
-          "Set them from the HYP merchant portal.",
+        reason: `HYP not configured: ${missing} required. Set them from the HYP merchant portal.`,
       };
     }
 
@@ -150,18 +161,21 @@ export class HypBillingProvider implements BillingProvider {
     // HYP shows this on the payment page. Use the local part of the email.
     const clientName = params.userEmail.split("@")[0] ?? params.userEmail;
 
-    // ── Build Pay Protocol URL ───────────────────────────────────────────────
-    // All params that may contain non-ASCII or special chars must be
-    // percent-encoded. URLSearchParams handles this automatically.
+    // ── Build APISign request params ─────────────────────────────────────────
+    // action=APISign + What=SIGN + KEY are required for the server-to-server call.
+    // PassP and KEY are ONLY used in this server-side fetch — they are never
+    // returned to the browser or included in any client-visible value.
     const qp = new URLSearchParams({
-      action:    "pay",
+      action:    "APISign",      // ← server-to-server signing request
+      What:      "SIGN",         // ← operation type required by APISign
+      KEY:       apiKey,         // ← HYP_API_KEY: server-side credential only
       Masof:     masof,
-      PassP:     passp,
+      PassP:     passp,          // ← server-side credential — consumed by HYP, not returned
       Amount:    String(amount),
-      Coin:      "1",           // 1 = ILS
+      Coin:      "1",            // 1 = ILS
       Info:      info,
       Order:     order,
-      UserId:    "000000000",   // Israeli ID — 9 zeros when not required
+      UserId:    "000000000",    // Israeli ID — 9 zeros when not required
       ClientName: clientName,
       email:     params.userEmail,
       UTF8:      "True",
@@ -178,16 +192,67 @@ export class HypBillingProvider implements BillingProvider {
       OnlyOnApprove: "True", // redirect to SuccessUrl only on approval; errors go to ErrorUrl
     });
 
-    const checkoutUrl = `${HYP_PAY_URL}?${qp.toString()}`;
-
-    // Log enough to trace in dev — PassP and full URL never logged.
+    // ── Step 2: server-to-server call to HYP APISign ─────────────────────────
+    // HYP validates credentials server-side and returns a signed payment-page
+    // URL in the response body. We never log the full request URL (contains PassP).
     console.log(
-      `[billing/hyp] Pay Protocol URL built` +
+      `[billing/hyp] calling HYP APISign` +
       ` userId=${params.userId.slice(0, 8)}…` +
       ` plan=${params.plan} interval=${params.interval}` +
       ` amount=${amount}agorot order=${order}`,
     );
 
-    return { ok: true, checkoutUrl, order };
+    let signedUrl: string;
+    try {
+      const apiSignUrl = `${HYP_PAY_URL}?${qp.toString()}`;
+      const response   = await fetch(apiSignUrl, {
+        method:  "GET",
+        // 10-second timeout — HYP is a payment gateway; we never want to hang forever.
+        signal:  AbortSignal.timeout(10_000),
+      });
+
+      if (!response.ok) {
+        const body = await response.text().catch(() => "");
+        console.error(
+          `[billing/hyp] APISign HTTP error — status=${response.status}` +
+          ` body=${body.slice(0, 200)}`,
+        );
+        return {
+          ok:     false,
+          reason: `HYP APISign returned HTTP ${response.status}`,
+        };
+      }
+
+      signedUrl = (await response.text()).trim();
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error(`[billing/hyp] APISign network error — ${reason}`);
+      return { ok: false, reason: `HYP APISign network error: ${reason}` };
+    }
+
+    // ── Step 3: validate the returned URL ────────────────────────────────────
+    // HYP should return a full HTTPS URL we can redirect the browser to.
+    // A minimal sanity check: must start with https:// and contain pay.hyp.co.il.
+    // This guards against empty bodies, error strings, or unexpected formats.
+    if (!signedUrl.startsWith("https://") || !signedUrl.includes("pay.hyp.co.il")) {
+      console.error(
+        `[billing/hyp] APISign returned unexpected body — expected signed URL, ` +
+        `got: ${signedUrl.slice(0, 120)}`,
+      );
+      return {
+        ok:     false,
+        reason: "HYP APISign did not return a valid signed URL. Check HYP_MASOF / HYP_PASSP / HYP_API_KEY.",
+      };
+    }
+
+    console.log(
+      `[billing/hyp] APISign success — signed URL received` +
+      ` order=${order}` +
+      ` urlLength=${signedUrl.length}`,
+    );
+
+    // signedUrl is the HYP-generated payment page URL.
+    // It does NOT contain PassP or KEY — safe to send to the browser.
+    return { ok: true, checkoutUrl: signedUrl, order };
   }
 }
