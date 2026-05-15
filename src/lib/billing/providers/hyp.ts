@@ -203,6 +203,7 @@ export class HypBillingProvider implements BillingProvider {
     );
 
     let signedUrl: string;
+    let httpStatus = 0;
     try {
       const apiSignUrl = `${HYP_PAY_URL}?${qp.toString()}`;
       const response   = await fetch(apiSignUrl, {
@@ -211,19 +212,22 @@ export class HypBillingProvider implements BillingProvider {
         signal:  AbortSignal.timeout(10_000),
       });
 
+      httpStatus = response.status;
+      // Read body once — calling response.text() twice throws "body already consumed".
+      const rawBody = await response.text().catch(() => "");
+
       if (!response.ok) {
-        const body = await response.text().catch(() => "");
         console.error(
           `[billing/hyp] APISign HTTP error — status=${response.status}` +
-          ` body=${body.slice(0, 200)}`,
+          ` body=${rawBody.slice(0, 200)}`,
         );
         return {
           ok:     false,
-          reason: `HYP APISign returned HTTP ${response.status}`,
+          reason: `HYP APISign returned HTTP ${response.status}: ${rawBody.slice(0, 200)}`,
         };
       }
 
-      signedUrl = (await response.text()).trim();
+      signedUrl = rawBody.trim();
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       console.error(`[billing/hyp] APISign network error — ${reason}`);
@@ -236,12 +240,15 @@ export class HypBillingProvider implements BillingProvider {
     // This guards against empty bodies, error strings, or unexpected formats.
     if (!signedUrl.startsWith("https://") || !signedUrl.includes("pay.hyp.co.il")) {
       console.error(
-        `[billing/hyp] APISign returned unexpected body — expected signed URL, ` +
-        `got: ${signedUrl.slice(0, 120)}`,
+        `[billing/hyp] APISign invalid response —` +
+        ` httpStatus=${httpStatus}` +
+        ` order=${order}` +
+        ` plan=${params.plan} interval=${params.interval} amount=${amount}agorot` +
+        ` body(500)=${signedUrl.slice(0, 500)}`,
       );
       return {
         ok:     false,
-        reason: "HYP APISign did not return a valid signed URL. Check HYP_MASOF / HYP_PASSP / HYP_API_KEY.",
+        reason: `HYP APISign invalid response: ${signedUrl.slice(0, 200)}`,
       };
     }
 
