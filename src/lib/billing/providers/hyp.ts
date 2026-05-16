@@ -273,17 +273,27 @@ export class HypBillingProvider implements BillingProvider {
       // redirects the browser, so activation can happen even when the portal
       // overrides SuccessUrl with a bare 302 that strips query params.
       // The endpoint returns "OK" on success or HTTP 5xx to trigger HYP retry.
+      //
+      // ── Capitalization note ───────────────────────────────────────────────
+      // HYP's APISign documentation uses "URLserver" (capital URL, lowercase s).
+      // If this param is silently ignored by the terminal, also try:
+      //   "UrlServer"  — some older HYP portal versions use this form
+      //   "urlserver"  — all lowercase
+      // Change the key below if HYP support confirms a different spelling.
       URLserver: `${appBase}/api/billing/hyp-notify`,
     });
 
     // ── Step 2: server-to-server call to HYP APISign ─────────────────────────
     // HYP validates credentials server-side and returns a signed payment-page
     // URL in the response body. We never log the full request URL (contains PassP).
+    // Log the URLserver value (not sensitive — it's our own endpoint URL).
     console.log(
       `[billing/hyp] calling HYP APISign` +
       ` userId=${params.userId.slice(0, 8)}…` +
       ` plan=${params.plan} interval=${params.interval}` +
-      ` amount=${amountShekels}nis (${amountAgorot}agorot) order=${order}`,
+      ` amount=${amountShekels}nis (${amountAgorot}agorot)` +
+      ` order=${order}` +
+      ` URLserver=${appBase}/api/billing/hyp-notify`,
     );
 
     let signedUrl: string;
