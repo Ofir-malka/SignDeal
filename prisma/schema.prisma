@@ -498,7 +498,8 @@ model Subscription {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  events SubscriptionEvent[]
+  events  SubscriptionEvent[]
+  charges BillingCharge[]      // Phase 3B: one row per charge attempt
 
   @@index([status])           // fast queries: "all TRIALING users", "all INCOMPLETE users"
   @@index([trialEndsAt])      // fast queries: "trials expiring soon"
@@ -602,4 +603,63 @@ model BillingCheckout {
   @@index([userId])
   @@index([status])
   @@index([expiresAt])
+}
+
+// ── BillingCharge ──────────────────────────────────────────────────────────────
+//
+// One row per charge attempt against a Subscription.
+// Written by the recurring billing cron (Phase 3B+).
+//
+// Lifecycle:
+//   PENDING    → created when a charge is initiated (Phase 3C will add this)
+//   SUCCEEDED  → HYP action=soft returned CCode=0; money collected
+//   FAILED     → HYP action=soft returned non-zero CCode; retry logic applies
+//   SKIPPED    → subscription not eligible at run time (already charged, expired, etc.)
+//
+// The cron keeps Subscription.billingFailures and Subscription.nextBillingAt
+// in sync after each attempt. BillingCharge rows are append-only audit records.
+
+enum BillingChargeStatus {
+  PENDING    // charge initiated — in flight (Phase 3C)
+  SUCCEEDED  // HYP CCode=0 — money collected
+  FAILED     // HYP non-zero CCode — retry logic applies
+  SKIPPED    // not eligible at charge time; no HYP call made
+}
+
+model BillingCharge {
+  id             String              @id @default(cuid())
+  subscriptionId String
+  subscription   Subscription        @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  userId         String              // denormalised for fast queries without a join
+
+  status         BillingChargeStatus @default(PENDING)
+
+  // ── Amount + plan snapshot ─────────────────────────────────────────────────
+  // Captured at charge time so the record is self-contained even if the
+  // subscription is later upgraded, downgraded, or cancelled.
+  amountAgorot   Int                 // amount in agorot (100 agorot = ₪1)
+  plan           PlanType            // plan at time of charge
+  interval       BillingInterval     // billing interval at time of charge
+
+  // ── Billing period this charge covers ──────────────────────────────────────
+  periodStart    DateTime            // currentPeriodEnd before this charge
+  periodEnd      DateTime            // new currentPeriodEnd after a successful charge
+
+  // ── HYP response fields (populated by Phase 3C soft-charge) ───────────────
+  hypTransId     String?             // HYP transaction ID returned on success
+  hypCCode       String?             // raw CCode returned by HYP
+  hypRaw         String? @db.Text    // raw HYP response body (truncated for debugging)
+
+  // ── Retry state ────────────────────────────────────────────────────────────
+  attemptNumber  Int       @default(1)  // 1 = first attempt; incremented on each retry
+  nextRetryAt    DateTime?              // when to retry; null = no retry scheduled
+
+  // ── Timestamps ─────────────────────────────────────────────────────────────
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([subscriptionId])  // look up all charges for a subscription
+  @@index([userId])          // look up all charges for a user
+  @@index([status])          // "all FAILED charges", "all PENDING charges"
+  @@index([createdAt])       // chronological queries + billing reports
 }
