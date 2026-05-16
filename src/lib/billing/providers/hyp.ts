@@ -275,12 +275,11 @@ export class HypBillingProvider implements BillingProvider {
       // The endpoint returns "OK" on success or HTTP 5xx to trigger HYP retry.
       //
       // ── Capitalization note ───────────────────────────────────────────────
-      // HYP's APISign documentation uses "URLserver" (capital URL, lowercase s).
-      // If this param is silently ignored by the terminal, also try:
-      //   "UrlServer"  — some older HYP portal versions use this form
-      //   "urlserver"  — all lowercase
-      // Change the key below if HYP support confirms a different spelling.
-      URLserver: `${appBase}/api/billing/hyp-notify`,
+      // "UrlServer" — confirmed working capitalization (HYP portal).
+      // Previous attempt "URLserver" was sent but HYP did not call the endpoint.
+      // Other forms tried: "URLserver" (ignored by HYP).
+      // Remaining fallback if this still fails: "urlserver" (all lowercase).
+      UrlServer: `${appBase}/api/billing/hyp-notify`,
     });
 
     // ── Step 2: server-to-server call to HYP APISign ─────────────────────────
@@ -293,7 +292,7 @@ export class HypBillingProvider implements BillingProvider {
       ` plan=${params.plan} interval=${params.interval}` +
       ` amount=${amountShekels}nis (${amountAgorot}agorot)` +
       ` order=${order}` +
-      ` URLserver=${appBase}/api/billing/hyp-notify`,
+      ` UrlServer=${appBase}/api/billing/hyp-notify`,
     );
 
     let signedUrl: string;
