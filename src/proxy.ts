@@ -5,18 +5,25 @@
  * Auth.js v5 JWT strategy: reads the session JWT from the cookie (no DB hit).
  * Uses only `lib/auth.config.ts` (edge-safe — no Prisma, no bcrypt).
  *
- * Rules:
- *  • /  (root)             → unauthenticated: serve marketing homepage
- *                            authenticated + complete: redirect to /dashboard
- *                            authenticated + incomplete: fall through to rule 3
- *  • Public prefixes       → always pass through (no auth check)
- *  • No session            → redirect to /login?callbackUrl=<path>
- *  • profileComplete=false → redirect to /onboarding (unless already there)
- *  • profileComplete=true  → redirect away from /onboarding to /dashboard
+ * Rules (in order):
+ *  1. /admin               → must have ADMIN role; otherwise /login or /dashboard
+ *  0. / (root)             → unauthenticated: serve marketing homepage
+ *                            authenticated + profileComplete + ACTIVE/TRIALING: /dashboard
+ *                            authenticated + profileComplete + INCOMPLETE: /onboarding/billing
+ *                            authenticated + !profileComplete: fall through to rule 3
+ *  1. Public prefixes      → always pass through (no auth check)
+ *  2. No session           → redirect to /login?callbackUrl=<path>
+ *  3. profileComplete=false → /onboarding (unless already there)
+ *  3b. INCOMPLETE status   → /onboarding/billing (unless on an INCOMPLETE-allowed path)
+ *       INCOMPLETE-allowed: /onboarding/billing, /billing/success, /billing/error,
+ *                           /settings/billing
+ *       Admins bypass this rule — they keep full access regardless of status.
+ *  4. profileComplete=true on /onboarding → /onboarding/billing (if INCOMPLETE)
+ *                                         → /dashboard (otherwise)
  *
  * Note: all /api/ routes are excluded from the matcher — they manage their
- * own auth via requireUserId(). The Rapyd webhook and Auth.js callbacks
- * are therefore unaffected by this middleware.
+ * own auth via requireUserId(). Auth.js callbacks and billing routes are
+ * therefore unaffected by this middleware.
  */
 import NextAuth from "next-auth";
 import { NextResponse } from "next/server";
@@ -34,14 +41,32 @@ const PUBLIC_PREFIXES = [
   "/register",
   "/forgot-password", // password-reset request form — must be accessible unauthenticated
   "/reset-password",  // password-reset form (/reset-password?token=...) — same
-  "/legal",          // /legal/terms, /legal/privacy, /legal/cookies
-  "/pay",            // /pay/complete (client-facing payment result page)
-  "/pricing",        // future public pricing page
-  "/contracts/sign", // public contract signing links sent to clients
+  "/legal",           // /legal/terms, /legal/privacy, /legal/cookies
+  "/pay",             // /pay/complete (client-facing payment result page)
+  "/pricing",         // public pricing page
+  "/contracts/sign",  // public contract signing links sent to clients
+];
+
+/**
+ * Paths that INCOMPLETE users (no card yet) are allowed to visit.
+ * Everything else redirects them to /onboarding/billing.
+ * Admins bypass this list entirely.
+ */
+const INCOMPLETE_ALLOWED_PREFIXES = [
+  "/onboarding/billing", // billing onboarding — pick plan + enter card
+  "/billing/success",    // HYP success redirect
+  "/billing/error",      // HYP error redirect
+  "/settings/billing",   // fallback: users who navigate here directly can still subscribe
 ];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PREFIXES.some(
+    (p) => pathname === p || pathname.startsWith(p + "/"),
+  );
+}
+
+function isIncompleteAllowed(pathname: string): boolean {
+  return INCOMPLETE_ALLOWED_PREFIXES.some(
     (p) => pathname === p || pathname.startsWith(p + "/"),
   );
 }
@@ -65,21 +90,23 @@ export default auth(function middleware(req) {
       // Authenticated but not an admin → bounce to dashboard
       return NextResponse.redirect(new URL("/dashboard", req.url));
     }
-    // Admin user: fall through so the profile-completeness checks can also run
+    // Admin user: fall through — admins bypass INCOMPLETE check further below
   }
 
   // ── 0. Root path — special case ───────────────────────────────────────────
   // Cannot add "/" to PUBLIC_PREFIXES (it would match every path).
-  // Unauthenticated users see the marketing homepage at /.
-  // Authenticated users with a complete profile go directly to /dashboard.
-  // Authenticated users with an incomplete profile fall through to rule 3
-  // which redirects them to /onboarding.
   if (pathname === "/") {
-    if (!req.auth?.user) return NextResponse.next();
-    if (req.auth.user.profileComplete) {
+    if (!req.auth?.user) return NextResponse.next(); // unauthenticated → homepage
+    if (!req.auth.user.profileComplete) {
+      // Fall through to rule 3 → /onboarding
+    } else if (
+      req.auth.user.subscriptionStatus === "INCOMPLETE" &&
+      req.auth.user.role !== "ADMIN"
+    ) {
+      return NextResponse.redirect(new URL("/onboarding/billing", req.url));
+    } else {
       return NextResponse.redirect(new URL("/dashboard", req.url));
     }
-    // profileComplete=false → fall through to rule 3 below
   }
 
   // ── 1. Public paths — no auth check ──────────────────────────────────────
@@ -98,10 +125,27 @@ export default auth(function middleware(req) {
     return NextResponse.redirect(new URL("/onboarding", req.url));
   }
 
-  // ── 4. Profile complete, trying to re-visit /onboarding → /dashboard ──────
-  // Direct to /dashboard rather than / to avoid a second middleware hop.
+  // ── 3b. INCOMPLETE subscription → /onboarding/billing ────────────────────
+  // profileComplete is guaranteed true at this point (rule 3 would have fired).
+  // Admins are exempt — they retain full dashboard access regardless of status.
+  if (
+    req.auth.user.subscriptionStatus === "INCOMPLETE" &&
+    req.auth.user.role !== "ADMIN" &&
+    !isIncompleteAllowed(pathname)
+  ) {
+    return NextResponse.redirect(new URL("/onboarding/billing", req.url));
+  }
+
+  // ── 4. Profile complete, trying to re-visit /onboarding ───────────────────
+  // Direct to /onboarding/billing for INCOMPLETE users (avoids a second hop),
+  // or to /dashboard for users whose subscription is already active/trialing.
   if (req.auth.user.profileComplete && pathname === "/onboarding") {
-    return NextResponse.redirect(new URL("/dashboard", req.url));
+    const dest =
+      req.auth.user.subscriptionStatus === "INCOMPLETE" &&
+      req.auth.user.role !== "ADMIN"
+        ? "/onboarding/billing"
+        : "/dashboard";
+    return NextResponse.redirect(new URL(dest, req.url));
   }
 
   return NextResponse.next();

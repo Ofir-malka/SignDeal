@@ -19,7 +19,6 @@ import bcrypt from "bcryptjs";
 import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authConfig } from "@/lib/auth.config";
-import { TRIAL_DAYS } from "@/lib/plans";
 import { sendEmail, welcomeEmail } from "@/lib/email";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -149,14 +148,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       });
       if (existing) return;
 
-      const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
-
+      // Phase 2B: start as INCOMPLETE (no card yet).
+      // trialEndsAt is NOT set here; it will be set when the user provides a
+      // card via /onboarding/billing and the billing success webhook fires.
       const subscription = await prisma.subscription.create({
         data: {
-          userId:      user.id,
-          plan:        "STANDARD",
-          status:      "TRIALING",
-          trialEndsAt,
+          userId: user.id,
+          plan:   "STANDARD",
+          status: "INCOMPLETE",
         },
         select: { id: true },
       });
@@ -164,14 +163,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       await prisma.subscriptionEvent.create({
         data: {
           subscriptionId: subscription.id,
-          event:          "trial_started",
+          event:          "account_created",
           fromPlan:       null,
           toPlan:         "STANDARD",
           fromStatus:     null,
-          toStatus:       "TRIALING",
+          toStatus:       "INCOMPLETE",
           source:         "oauth_registration",
           actorId:        null,
-          metadata:       JSON.stringify({ trialDays: TRIAL_DAYS }),
+          metadata:       JSON.stringify({ note: "card_required_to_start_trial" }),
         },
       });
 

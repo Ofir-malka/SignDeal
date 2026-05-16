@@ -2,7 +2,6 @@ import { NextResponse, after } from "next/server";
 import { prisma }              from "@/lib/prisma";
 import bcrypt                  from "bcryptjs";
 import { rateLimit, getRealIp } from "@/lib/rate-limit";
-import { TRIAL_DAYS }           from "@/lib/plans";
 import { sendEmail, welcomeEmail } from "@/lib/email";
 
 // ── POST /api/users ───────────────────────────────────────────────────────────
@@ -68,7 +67,6 @@ export async function POST(request: Request) {
     // The transaction guarantees that no user ever exists without a Subscription
     // row. If either insert fails the whole registration is rolled back.
     const passwordHash = await bcrypt.hash(password!.trim(), 10);
-    const trialEndsAt  = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
 
     const user = await prisma.$transaction(async (tx) => {
       // 1. Create the user
@@ -95,16 +93,14 @@ export async function POST(request: Request) {
         },
       });
 
-      // 2. Create the subscription — STANDARD trial for all new registrations.
-      // billingInterval defaults to MONTHLY in the schema; no need to write it
-      // explicitly here. It will be overwritten by the billing provider webhook
-      // when the user subscribes (Phase 4).
+      // 2. Create the subscription — Phase 2B: start as INCOMPLETE (no card yet).
+      // trialEndsAt is NOT set here; it will be set by the billing success webhook
+      // when the user provides a card and the 14-day trial clock starts.
       const subscription = await tx.subscription.create({
         data: {
-          userId:      newUser.id,
-          plan:        "STANDARD",
-          status:      "TRIALING",
-          trialEndsAt,
+          userId: newUser.id,
+          plan:   "STANDARD",
+          status: "INCOMPLETE",
         },
       });
 
@@ -112,14 +108,14 @@ export async function POST(request: Request) {
       await tx.subscriptionEvent.create({
         data: {
           subscriptionId: subscription.id,
-          event:          "trial_started",
+          event:          "account_created",
           fromPlan:       null,
           toPlan:         "STANDARD",
           fromStatus:     null,
-          toStatus:       "TRIALING",
+          toStatus:       "INCOMPLETE",
           source:         "registration",
           actorId:        null,
-          metadata:       JSON.stringify({ trialDays: TRIAL_DAYS }),
+          metadata:       JSON.stringify({ note: "card_required_to_start_trial" }),
         },
       });
 
