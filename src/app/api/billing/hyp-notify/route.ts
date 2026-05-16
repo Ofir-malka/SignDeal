@@ -1,7 +1,21 @@
 /**
  * /api/billing/hyp-notify
  *
- * HYP URLserver server-to-server notification endpoint.
+ * ⚠️  DEPRECATED — NOT CALLED IN PRODUCTION ⚠️
+ *
+ * URLserver / UrlServer does NOT exist in HYP's official APISign protocol.
+ * HYP silently ignores the param and never calls this endpoint.
+ *
+ * The correct activation flow (per official HYP docs) is:
+ *   1. HYP browser-redirects to portal GoodURL (/billing/success) with signed params.
+ *   2. /billing/success calls action=APISign&What=VERIFY to verify the transaction.
+ *   3. On CCode=0 from VERIFY, /billing/success atomically activates the subscription.
+ *
+ * This file is kept for historical reference. Do NOT depend on it for subscription
+ * activation. It can be safely deleted in a future cleanup.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * HYP URLserver server-to-server notification endpoint (UNUSED).
  *
  * ── What HYP sends ────────────────────────────────────────────────────────────
  * HYP fires this request BEFORE (or concurrent with) the browser redirect to

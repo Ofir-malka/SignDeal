@@ -1,45 +1,48 @@
 /**
- * /billing/success
+ * /billing/success — HYP browser-redirect + What=VERIFY activation flow.
  *
- * Post-payment landing page — DB-driven (URLserver architecture).
- *
- * ── Architecture ──────────────────────────────────────────────────────────────
- * Activation no longer happens here. HYP fires a server-to-server GET to
- * /api/billing/hyp-notify BEFORE (or concurrent with) the browser redirect.
- * hyp-notify verifies the MAC, runs the atomic INCOMPLETE→TRIALING transaction,
- * and stores all card fields in the DB.
- *
- * This page only READS the DB and renders the appropriate UI based on the
- * subscription's current status. No params, no MAC verification needed.
- *
- * ── Flows ─────────────────────────────────────────────────────────────────────
- *   A. Stub        — query has stub=true (local dev / staging)
- *   B. TRIALING    — hyp-notify already activated: show trial success UI
- *   C. ACTIVE      — upgrade / re-activation already activated: show active UI
- *   D. INCOMPLETE  — hyp-notify hasn't fired yet: show PaymentPolling (client)
- *                    PaymentPolling calls router.refresh() every 3 s until
- *                    status changes to TRIALING / ACTIVE.
- *   E. No session  — shouldn't reach here (middleware blocks unauthenticated);
- *                    redirect to /login as fallback.
- *   F. Unknown     — direct navigation or unrecognised state.
+ * ── Protocol (per official HYP docs) ─────────────────────────────────────────
+ * 1. HYP browser-redirects to our GoodURL (/billing/success) with signed params:
+ *      Id, Order, Sign, CCode, HKId, L4digit, Tmonth, Tyear, Amount, ACode
+ * 2. This server component calls action=APISign&What=VERIFY + credentials + params.
+ * 3. HYP responds: CCode=0 (valid) or CCode=902 (invalid).
+ * 4. On CCode=0: atomically activate subscription (PENDING→SUCCEEDED, INCOMPLETE→TRIALING).
+ * 5. Read updated subscription from DB and render.
  *
  * ── Security ─────────────────────────────────────────────────────────────────
- *   All sensitive data (txId, cardLast4, plan) comes from our own DB, not
- *   from URL params. No MAC verification needed on this page.
- *   The hyp-notify route already did all security checks.
+ * Browser params are UNTRUSTED — we never activate on params alone.
+ * Activation only happens after What=VERIFY returns CCode=0 from HYP.
+ * The atomic `updateMany WHERE status=PENDING` guard prevents double-activation.
+ *
+ * ── Idempotency ──────────────────────────────────────────────────────────────
+ * Page refresh = same params → same VERIFY call → `updateMany WHERE PENDING`
+ * catches the repeat → subscription already TRIALING → success rendered from DB.
+ *
+ * ── Portal GoodURL requirement ────────────────────────────────────────────────
+ * GoodURL in the HYP portal MUST match SuccessUrl exactly:
+ *   https://www.signdeal.co.il/billing/success
+ * If they differ, HYP strips all query params on redirect — VERIFY will fail.
+ *
+ * ── Note on hyp-notify ────────────────────────────────────────────────────────
+ * /api/billing/hyp-notify is UNUSED. URLserver does not exist in HYP's protocol.
+ * HYP never calls it. See that file for details.
  */
 
-import type { Metadata }  from "next";
-import Link               from "next/link";
-import { redirect }       from "next/navigation";
-import { auth }           from "@/lib/auth";
-import { prisma }         from "@/lib/prisma";
-import { PaymentPolling } from "./PaymentPolling";
+import type { Metadata } from "next";
+import Link              from "next/link";
+import { redirect }      from "next/navigation";
+import { auth }          from "@/lib/auth";
+import { prisma }        from "@/lib/prisma";
+import { TRIAL_DAYS }    from "@/lib/plans";
 
 export const metadata: Metadata = {
   title:  "תוצאת תשלום | SignDeal",
   robots: { index: false, follow: false },
 };
+
+// ── HYP endpoint ──────────────────────────────────────────────────────────────
+
+const HYP_PAY_URL = "https://pay.hyp.co.il/p/";
 
 // ── Display helpers ───────────────────────────────────────────────────────────
 
@@ -281,25 +284,79 @@ function UpgradeActivationSuccess({
   );
 }
 
-// ── Flow D: Payment verifying (status = INCOMPLETE) ───────────────────────────
-// Renders the polling client component inside a static shell.
+// ── Flow D: Payment declined by HYP ──────────────────────────────────────────
 
-function PaymentVerifying() {
+function PaymentDeclined({ cCode }: { cCode: string }) {
   return (
     <>
-      <div className="bg-indigo-500 px-6 py-5 text-white">
+      <div className="bg-red-500 px-6 py-5 text-white">
         <div className="flex items-center gap-3 justify-end">
           <div>
-            <h1 className="text-xl font-bold">מאמתים את התשלום</h1>
-            <p className="text-sm text-indigo-100 mt-0.5">
-              הכרטיס כנראה אושר — ממתינים לאישור מ-HYP.
+            <h1 className="text-xl font-bold">התשלום לא אושר</h1>
+            <p className="text-sm text-red-100 mt-0.5">
+              הכרטיס לא אושר על ידי HYP {cCode ? `(קוד: ${cCode})` : ""}.
             </p>
           </div>
-          <span className="text-4xl" aria-hidden="true">⏳</span>
+          <span className="text-4xl" aria-hidden="true">❌</span>
         </div>
       </div>
-      {/* PaymentPolling is a client component — polls router.refresh() every 3 s */}
-      <PaymentPolling />
+      <div className="px-6 py-6 flex flex-col gap-4">
+        <p className="text-sm text-gray-600 text-center leading-relaxed">
+          ייתכן שהכרטיס נדחה או פג תוקפו. אנא נסה שנית עם כרטיס אחר.
+        </p>
+        <Link
+          href="/onboarding/billing"
+          className="w-full text-center text-sm font-bold py-3 rounded-xl
+                     bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+        >
+          נסה שנית
+        </Link>
+        <a
+          href="mailto:support@signdeal.co.il"
+          className="w-full text-center text-sm py-2.5 rounded-xl
+                     border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
+        >
+          פנה לתמיכה
+        </a>
+      </div>
+    </>
+  );
+}
+
+// ── Flow E: VERIFY call failed ────────────────────────────────────────────────
+
+function VerifyFailed() {
+  return (
+    <>
+      <div className="bg-amber-500 px-6 py-5 text-white">
+        <div className="flex items-center gap-3 justify-end">
+          <div>
+            <h1 className="text-xl font-bold">אימות התשלום נכשל</h1>
+            <p className="text-sm text-amber-100 mt-0.5">
+              לא הצלחנו לאמת את התשלום אל מול HYP.
+            </p>
+          </div>
+          <span className="text-4xl" aria-hidden="true">⚠️</span>
+        </div>
+      </div>
+      <div className="px-6 py-6 flex flex-col gap-4">
+        <p className="text-sm text-gray-600 text-center leading-relaxed">
+          ייתכן שהתשלום אושר אך האימות נכשל. אנא פנה לתמיכה עם פרטי ההזמנה.
+        </p>
+        <a
+          href="mailto:support@signdeal.co.il"
+          className="w-full text-center text-sm font-bold py-3 rounded-xl
+                     bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+        >
+          פנה לתמיכה
+        </a>
+        <Link
+          href="/dashboard"
+          className="text-xs text-center text-gray-400 hover:text-gray-600 transition-colors"
+        >
+          עבור ללוח הבקרה →
+        </Link>
+      </div>
     </>
   );
 }
@@ -328,39 +385,440 @@ function UnknownFlow() {
   );
 }
 
+// ── VERIFY: server-side transaction verification ──────────────────────────────
+// Calls action=APISign&What=VERIFY + credentials + all redirect params.
+// HYP responds with CCode=0 (valid) or CCode=902 (invalid).
+// NEVER activate the subscription without CCode=0 from this call.
+
+async function callHypVerify(params: {
+  id:      string;
+  order:   string;
+  sign:    string;
+  amount:  string;
+  l4digit?: string;
+  tmonth?:  string;
+  tyear?:   string;
+}): Promise<{ cCode: string; raw: string }> {
+  const masof  = process.env.HYP_MASOF?.trim()   ?? "";
+  const passp  = process.env.HYP_PASSP?.trim()   ?? "";
+  const apiKey = process.env.HYP_API_KEY?.trim() ?? "";
+
+  const qp = new URLSearchParams({
+    action:  "APISign",
+    What:    "VERIFY",
+    KEY:     apiKey,
+    Masof:   masof,
+    PassP:   passp,
+    Id:      params.id,
+    Order:   params.order,
+    Sign:    params.sign,
+    Amount:  params.amount || "0",
+    Coin:    "1",
+    UTF8:    "True",
+    UTF8out: "True",
+  });
+
+  if (params.l4digit) qp.set("L4digit", params.l4digit);
+  if (params.tmonth)  qp.set("Tmonth",  params.tmonth);
+  if (params.tyear)   qp.set("Tyear",   params.tyear);
+
+  let raw = "";
+  try {
+    const resp = await fetch(`${HYP_PAY_URL}?${qp.toString()}`, {
+      method: "GET",
+      signal: AbortSignal.timeout(10_000),
+    });
+    raw = await resp.text().catch(() => "");
+  } catch (err) {
+    console.error(
+      "[billing/success] VERIFY network error:",
+      err instanceof Error ? err.message : err,
+    );
+    return { cCode: "999", raw: "" };
+  }
+
+  // HYP response is query-string format: "CCode=0&Id=…&Amount=…"
+  let cCode = "999";
+  try {
+    cCode = new URLSearchParams(raw.trim()).get("CCode") ?? "999";
+  } catch {
+    const m = raw.match(/CCode=(\d+)/);
+    cCode   = m?.[1] ?? "999";
+  }
+
+  return { cCode, raw };
+}
+
+// ── Activation: atomic PENDING→SUCCEEDED + INCOMPLETE→TRIALING ───────────────
+
+async function activateCheckout(params: {
+  order:    string;
+  userId:   string;
+  hypId:    string;
+  hkId?:    string;
+  l4digit?: string;
+  tmonth?:  string;
+  tyear?:   string;
+  aCode?:   string;
+}): Promise<void> {
+  const { order, userId, hypId, hkId, l4digit, tmonth, tyear, aCode } = params;
+
+  // Fetch checkout and subscription in parallel.
+  const [checkout, subscription] = await Promise.all([
+    prisma.billingCheckout.findUnique({ where: { order } }),
+    prisma.subscription.findUnique({
+      where:  { userId },
+      select: { id: true, status: true, plan: true },
+    }),
+  ]);
+
+  if (!checkout) throw new Error("CHECKOUT_NOT_FOUND");
+  if (checkout.userId !== userId) throw new Error("CHECKOUT_USER_MISMATCH");
+
+  // Already activated — idempotent return.
+  if (checkout.status === "SUCCEEDED") return;
+
+  if (checkout.status !== "PENDING") {
+    console.warn(
+      `[billing/success] activateCheckout unexpected checkout status` +
+      ` status=${checkout.status} order="${order}"`,
+    );
+    throw new Error(`CHECKOUT_STATUS_${checkout.status}`);
+  }
+
+  if (!subscription) throw new Error("SUBSCRIPTION_NOT_FOUND");
+
+  const isTrialActivation = subscription.status === "INCOMPLETE";
+  const now               = new Date();
+
+  // Parse card fields from official HYP redirect params.
+  // L4digit  → last 4 digits (strip non-digits as safety measure)
+  // Tmonth   → expiry month as integer
+  // Tyear    → expiry year as integer (HYP sends 4-digit year per docs)
+  const cardLast4    = l4digit ? (l4digit.replace(/\D/g, "").slice(-4) || null) : null;
+  const cardExpMonth = tmonth  ? (parseInt(tmonth, 10) || null)                 : null;
+  const cardExpYear  = tyear   ? (parseInt(tyear,  10) || null)                 : null;
+
+  let trialEndsAt:      Date | null = null;
+  let currentPeriodEnd: Date | null = null;
+
+  if (isTrialActivation) {
+    trialEndsAt = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
+  } else {
+    currentPeriodEnd = new Date(now);
+    if (checkout.interval === "YEARLY") {
+      currentPeriodEnd.setFullYear(currentPeriodEnd.getFullYear() + 1);
+    } else {
+      currentPeriodEnd.setMonth(currentPeriodEnd.getMonth() + 1);
+    }
+  }
+
+  console.log(
+    `[billing/success] ACTIVATING` +
+    ` path=${isTrialActivation ? "INCOMPLETE→TRIALING" : "→ACTIVE"}` +
+    ` userId=${userId}` +
+    ` order="${order}"` +
+    ` plan=${checkout.plan}` +
+    ` interval=${checkout.interval}` +
+    ` hasHkId=${Boolean(hkId)}` +
+    ` cardLast4=${cardLast4 ?? "(none)"}`,
+  );
+
+  await prisma.$transaction(async (tx) => {
+    // Atomic guard: updateMany WHERE status=PENDING prevents double-activation
+    // on concurrent page loads (e.g. user opens two tabs simultaneously).
+    const checkoutUpdate = await tx.billingCheckout.updateMany({
+      where: { order, status: "PENDING" },
+      data:  {
+        status:     "SUCCEEDED",
+        txId:       hypId   || null,   // HYP's transaction Id
+        hkId:       hkId    || null,   // HYP recurring agreement HKId
+        cardMask:   l4digit || null,   // L4digit stored here for display
+        authNumber: aCode   || null,   // bank authorisation number ACode
+        resolvedAt: now,
+      },
+    });
+
+    if (checkoutUpdate.count === 0) {
+      // Another concurrent request won the race — throw to trigger idempotent path.
+      throw new Error("ALREADY_PROCESSED");
+    }
+
+    if (isTrialActivation) {
+      // INCOMPLETE → TRIALING: card entered for the first time, trial begins now.
+      await tx.subscription.update({
+        where: { userId },
+        data:  {
+          status:                "TRIALING",
+          plan:                  checkout.plan,
+          billingInterval:       checkout.interval,
+          billingProvider:       "hyp",
+          billingSubscriptionId: hkId || null,  // HKId = recurring agreement cursor
+          cardToken:             hkId || null,  // same — used for Phase 3 charges
+          cardLast4,
+          cardExpMonth,
+          cardExpYear,
+          tokenCreatedAt:        now,
+          trialEndsAt,
+          nextBillingAt:         trialEndsAt,
+        },
+      });
+    } else {
+      // TRIALING / ACTIVE → ACTIVE: paid billing cycle begins.
+      await tx.subscription.update({
+        where: { userId },
+        data:  {
+          status:                "ACTIVE",
+          plan:                  checkout.plan,
+          billingInterval:       checkout.interval,
+          billingProvider:       "hyp",
+          billingSubscriptionId: hkId || null,
+          cardToken:             hkId || null,
+          cardLast4,
+          cardExpMonth,
+          cardExpYear,
+          tokenCreatedAt:        now,
+          firstPaymentAt:        now,
+          nextBillingAt:         currentPeriodEnd,
+          currentPeriodStart:    now,
+          currentPeriodEnd,
+        },
+      });
+    }
+
+    await tx.subscriptionEvent.create({
+      data: {
+        subscriptionId: subscription.id,
+        event:          isTrialActivation ? "trial_started" : "payment_succeeded",
+        fromPlan:       subscription.plan,
+        toPlan:         checkout.plan,
+        fromStatus:     subscription.status,
+        toStatus:       isTrialActivation ? "TRIALING" : "ACTIVE",
+        source:         "hyp_verify",
+        actorId:        null,
+        metadata:       JSON.stringify({
+          hypId,
+          hkId:       hkId  || null,
+          authNumber: aCode || null,
+          order,
+          cardLast4,
+          ...(isTrialActivation
+            ? { trialDays: TRIAL_DAYS, trialEndsAt: trialEndsAt!.toISOString() }
+            : { currentPeriodEnd: currentPeriodEnd!.toISOString() }
+          ),
+        }),
+      },
+    });
+  });
+
+  console.log(
+    `[billing/success] ACTIVATION_SUCCESS` +
+    ` path=${isTrialActivation ? "INCOMPLETE→TRIALING" : "→ACTIVE"}` +
+    ` userId=${userId}` +
+    ` order="${order}"`,
+  );
+}
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 export default async function BillingSuccessPage({
   searchParams,
 }: {
-  searchParams: Promise<{
-    stub?:     string;
-    plan?:     string;
-    interval?: string;
-  }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const p = await searchParams;
 
+  // Safe string extractor — handles both `"value"` and `["value"]` shapes.
+  const sp = (key: string): string => {
+    const v = p[key];
+    if (typeof v === "string") return v;
+    if (Array.isArray(v))      return v[0] ?? "";
+    return "";
+  };
+
   // ── Flow A: Stub (local dev / staging test) ───────────────────────────────
-  // Preserved as-is: no DB hit, safe for dev environments.
-  if (p.stub === "true") {
+  if (sp("stub") === "true") {
     return (
       <PageShell>
-        <StubSuccess plan={p.plan ?? ""} interval={p.interval ?? ""} />
+        <StubSuccess plan={sp("plan")} interval={sp("interval")} />
       </PageShell>
     );
   }
 
-  // ── Auth: get session user ────────────────────────────────────────────────
-  // Middleware ensures authenticated users only reach this page; redirect is a
-  // safety net for unexpected direct navigation with no cookie.
+  // ── Auth ──────────────────────────────────────────────────────────────────
   const session = await auth();
   if (!session?.user?.id) {
     redirect("/login?callbackUrl=/billing/success");
   }
   const userId = session.user.id;
 
-  // ── Query subscription from DB ────────────────────────────────────────────
+  // ── Read official HYP redirect params ────────────────────────────────────
+  // These are the exact param names from the official HYP APISign docs.
+  // Do NOT use: txId, uniqueID, responseMac, cardMask, cardExp — these are
+  // not real HYP params and will be absent in production redirects.
+  const order   = sp("Order")   || sp("order");  // our original Order value
+  const hypId   = sp("Id");                       // HYP transaction identifier
+  const sign    = sp("Sign");                     // HYP cryptographic signature
+  const cCode   = sp("CCode");                    // "0" = approved
+  const hkId    = sp("HKId")    || undefined;     // recurring agreement ID
+  const l4digit = sp("L4digit") || undefined;     // last 4 card digits
+  const tmonth  = sp("Tmonth")  || undefined;     // expiry month (MM)
+  const tyear   = sp("Tyear")   || undefined;     // expiry year (YYYY)
+  const amount  = sp("Amount")  || "0";           // transaction amount in shekels
+  const aCode   = sp("ACode")   || undefined;     // bank authorisation number
+
+  console.log(
+    `[billing/success] params` +
+    ` userId=${userId.slice(0, 8)}…` +
+    ` order="${order}"` +
+    ` CCode="${cCode}"` +
+    ` hasId=${Boolean(hypId)}` +
+    ` hasSign=${Boolean(sign)}` +
+    ` hasHKId=${Boolean(hkId)}` +
+    ` L4digit=${l4digit ?? "(none)"}` +
+    ` Tmonth=${tmonth ?? "(none)"}` +
+    ` Tyear=${tyear ?? "(none)"}`,
+  );
+
+  // ── Direct navigation / missing params ───────────────────────────────────
+  // No `Order` means either: (a) the user navigated here directly, or (b) HYP
+  // stripped params because portal GoodURL ≠ SuccessUrl.
+  //
+  // Fix for (b): set GoodURL in HYP portal to:
+  //   https://www.signdeal.co.il/billing/success
+  //
+  // For case (a), check if the subscription is already active (from a previous
+  // successful visit) and render success if so.
+  if (!order) {
+    const sub = await prisma.subscription.findUnique({
+      where:  { userId },
+      select: {
+        status:           true,
+        plan:             true,
+        billingInterval:  true,
+        trialEndsAt:      true,
+        currentPeriodEnd: true,
+        cardLast4:        true,
+      },
+    });
+
+    if (sub?.status === "TRIALING" && sub.trialEndsAt) {
+      return (
+        <PageShell>
+          <TrialActivationSuccess
+            plan={sub.plan}
+            interval={sub.billingInterval}
+            trialEndsAt={sub.trialEndsAt}
+            cardLast4={sub.cardLast4}
+            txId={null}
+            authNumber={null}
+          />
+        </PageShell>
+      );
+    }
+
+    if (sub?.status === "ACTIVE" && sub.currentPeriodEnd) {
+      return (
+        <PageShell>
+          <UpgradeActivationSuccess
+            plan={sub.plan}
+            interval={sub.billingInterval}
+            currentPeriodEnd={sub.currentPeriodEnd}
+            cardLast4={sub.cardLast4}
+            txId={null}
+            authNumber={null}
+          />
+        </PageShell>
+      );
+    }
+
+    console.warn(
+      `[billing/success] no HYP params + no active subscription` +
+      ` — direct navigation or portal GoodURL mismatch? userId=${userId}`,
+    );
+    return <PageShell><UnknownFlow /></PageShell>;
+  }
+
+  // ── Payment declined by HYP ───────────────────────────────────────────────
+  // CCode != "0" in the redirect means HYP declined the card.
+  // We should have been sent to ErrorUrl for this, but be defensive.
+  if (cCode !== "0") {
+    console.log(
+      `[billing/success] payment declined` +
+      ` CCode="${cCode}" order="${order}" userId=${userId}`,
+    );
+    return <PageShell><PaymentDeclined cCode={cCode} /></PageShell>;
+  }
+
+  // ── Verify + Activate (idempotent) ────────────────────────────────────────
+  // Check if already activated before calling VERIFY (page refresh optimisation).
+  const existingCheckout = await prisma.billingCheckout.findUnique({
+    where:  { order },
+    select: { status: true, userId: true },
+  });
+
+  // Security: reject if order belongs to a different user.
+  if (existingCheckout && existingCheckout.userId !== userId) {
+    console.error(
+      `[billing/success] order/user mismatch` +
+      ` order="${order}" requestUserId=${userId}` +
+      ` checkoutUserId=${existingCheckout.userId}`,
+    );
+    return <PageShell><UnknownFlow /></PageShell>;
+  }
+
+  let verifyError: string | null = null;
+
+  if (existingCheckout?.status !== "SUCCEEDED") {
+    // Step 1: cryptographic VERIFY — the only trusted confirmation.
+    const { cCode: verifyCCode, raw: verifyRaw } = await callHypVerify({
+      id:      hypId,
+      order,
+      sign,
+      amount,
+      l4digit,
+      tmonth,
+      tyear,
+    });
+
+    console.log(
+      `[billing/success] VERIFY response` +
+      ` CCode="${verifyCCode}"` +
+      ` order="${order}"` +
+      ` rawLength=${verifyRaw.length}`,
+    );
+
+    if (verifyCCode !== "0") {
+      verifyError = `VERIFY_CCODE_${verifyCCode}`;
+      console.error(
+        `[billing/success] VERIFY failed` +
+        ` CCode="${verifyCCode}" order="${order}" userId=${userId}` +
+        ` raw=${verifyRaw.slice(0, 200)}`,
+      );
+    } else {
+      // Step 2: activate subscription now that VERIFY confirmed CCode=0.
+      try {
+        await activateCheckout({ order, userId, hypId, hkId, l4digit, tmonth, tyear, aCode });
+      } catch (err) {
+        if (err instanceof Error && err.message === "ALREADY_PROCESSED") {
+          // Concurrent request won the race — harmless; DB is already correct.
+          console.log(
+            `[billing/success] ALREADY_PROCESSED (race condition) order="${order}"`,
+          );
+        } else {
+          verifyError = err instanceof Error ? err.message : String(err);
+          console.error(`[billing/success] activation error: ${verifyError}`);
+        }
+      }
+    }
+  }
+
+  // Show error UI if VERIFY or activation failed.
+  if (verifyError) {
+    return <PageShell><VerifyFailed /></PageShell>;
+  }
+
+  // ── Read updated subscription for display ─────────────────────────────────
   const subscription = await prisma.subscription.findUnique({
     where:  { userId },
     select: {
@@ -374,32 +832,21 @@ export default async function BillingSuccessPage({
   });
 
   if (!subscription) {
-    console.error(`[billing/success] subscription not found — userId=${userId}`);
+    console.error(
+      `[billing/success] subscription not found after activation — userId=${userId}`,
+    );
     return <PageShell><UnknownFlow /></PageShell>;
   }
-
-  // ── Query most-recent SUCCEEDED checkout for display fields ───────────────
-  // txId and authNumber are stored in BillingCheckout by hyp-notify.
-  // These are display-only — subscription activation already happened.
-  const latestCheckout = await prisma.billingCheckout.findFirst({
-    where:   { userId, status: "SUCCEEDED" },
-    orderBy: { resolvedAt: "desc" },
-    select:  { txId: true, authNumber: true },
-  });
-
-  // ── Render based on DB subscription status ────────────────────────────────
 
   const { status, plan, billingInterval } = subscription;
 
   console.log(
     `[billing/success] rendering` +
     ` userId=${userId.slice(0, 8)}…` +
-    ` status=${status}` +
-    ` plan=${plan}` +
-    ` interval=${billingInterval}`,
+    ` status=${status} plan=${plan} interval=${billingInterval}`,
   );
 
-  // Flow B: TRIALING — hyp-notify activated the trial
+  // Flow B: TRIALING — first-time trial activation.
   if (status === "TRIALING" && subscription.trialEndsAt) {
     return (
       <PageShell>
@@ -408,14 +855,14 @@ export default async function BillingSuccessPage({
           interval={billingInterval}
           trialEndsAt={subscription.trialEndsAt}
           cardLast4={subscription.cardLast4}
-          txId={latestCheckout?.txId}
-          authNumber={latestCheckout?.authNumber}
+          txId={hypId  || null}
+          authNumber={aCode || null}
         />
       </PageShell>
     );
   }
 
-  // Flow C: ACTIVE — upgrade / re-activation
+  // Flow C: ACTIVE — upgrade or re-activation.
   if (status === "ACTIVE" && subscription.currentPeriodEnd) {
     return (
       <PageShell>
@@ -424,22 +871,13 @@ export default async function BillingSuccessPage({
           interval={billingInterval}
           currentPeriodEnd={subscription.currentPeriodEnd}
           cardLast4={subscription.cardLast4}
-          txId={latestCheckout?.txId}
-          authNumber={latestCheckout?.authNumber}
+          txId={hypId  || null}
+          authNumber={aCode || null}
         />
       </PageShell>
     );
   }
 
-  // Flow D: INCOMPLETE — hyp-notify hasn't fired yet; poll until it does
-  if (status === "INCOMPLETE") {
-    return (
-      <PageShell>
-        <PaymentVerifying />
-      </PageShell>
-    );
-  }
-
-  // Flow F: any other status — shouldn't normally reach here
+  // Fallback: unexpected status after activation — should not normally reach here.
   return <PageShell><UnknownFlow /></PageShell>;
 }

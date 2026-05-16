@@ -10,7 +10,8 @@
  *   6. HYP redirects to SuccessUrl / ErrorUrl / CancelUrl with signed callback params.
  *
  * This file handles steps 1–4.
- * Step 6 callback verification is handled by /billing/success (verifyHypResponseMac).
+ * Step 6 browser-redirect verification (action=APISign&What=VERIFY) is handled
+ * by /billing/success server component.
  *
  * ── Security model ─────────────────────────────────────────────────────────────
  * PassP and HYP_API_KEY (KEY) are used ONLY in the server-side fetch (step 2).
@@ -226,7 +227,6 @@ export class HypBillingProvider implements BillingProvider {
     // action=APISign + What=SIGN + KEY are required for the server-to-server call.
     // PassP and KEY are ONLY used in this server-side fetch — they are never
     // returned to the browser or included in any client-visible value.
-    const appBase = (process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
     const qp = new URLSearchParams({
       action:    "APISign",      // ← server-to-server signing request
       What:      "SIGN",         // ← operation type required by APISign
@@ -267,19 +267,15 @@ export class HypBillingProvider implements BillingProvider {
       Tash:          "999",  // 999 = unlimited instalments (recurring until cancelled)
       freq:          params.interval === "YEARLY" ? "12" : "1",
       OnlyOnApprove: "True", // redirect to SuccessUrl only on approval; errors go to ErrorUrl
-      // URLserver — server-to-server notification fired by HYP before/alongside
-      // the browser redirect.  HYP GETs this URL with the full signed payload
-      // (txId, uniqueID, HKId, cardMask, cardExp, responseMac, …) BEFORE it
-      // redirects the browser, so activation can happen even when the portal
-      // overrides SuccessUrl with a bare 302 that strips query params.
-      // The endpoint returns "OK" on success or HTTP 5xx to trigger HYP retry.
+      // Sign=True instructs HYP to include a cryptographic signature (Sign param)
+      // in the browser redirect to GoodURL.  Required for What=VERIFY server-side
+      // verification in /billing/success.  Without this, VERIFY will fail.
       //
-      // ── Capitalization note ───────────────────────────────────────────────
-      // "UrlServer" — confirmed working capitalization (HYP portal).
-      // Previous attempt "URLserver" was sent but HYP did not call the endpoint.
-      // Other forms tried: "URLserver" (ignored by HYP).
-      // Remaining fallback if this still fails: "urlserver" (all lowercase).
-      UrlServer: `${appBase}/api/billing/hyp-notify`,
+      // IMPORTANT: GoodURL in the HYP portal MUST be set to match SuccessUrl exactly
+      // (https://www.signdeal.co.il/billing/success).  If they differ, HYP redirects
+      // to the portal GoodURL WITHOUT appending any query params — Sign, Id, Order
+      // will all be missing and VERIFY cannot succeed.
+      Sign: "True",
     });
 
     // ── Step 2: server-to-server call to HYP APISign ─────────────────────────
@@ -291,8 +287,7 @@ export class HypBillingProvider implements BillingProvider {
       ` userId=${params.userId.slice(0, 8)}…` +
       ` plan=${params.plan} interval=${params.interval}` +
       ` amount=${amountShekels}nis (${amountAgorot}agorot)` +
-      ` order=${order}` +
-      ` UrlServer=${appBase}/api/billing/hyp-notify`,
+      ` order=${order}`,
     );
 
     let signedUrl: string;
