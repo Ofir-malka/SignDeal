@@ -195,10 +195,13 @@ export class HypBillingProvider implements BillingProvider {
       UTF8:      "True",
       UTF8out:   "True",
       MoreData:  "True",
-      sendemail: "True",
+      SendEmail: "True",
       SuccessUrl: params.successUrl,
       ErrorUrl:   params.errorUrl,
       CancelUrl:  params.cancelUrl,
+      // J5=True enables browser redirect to SuccessUrl / ErrorUrl after payment.
+      // Without J5, HYP shows its own hosted receipt page and never redirects.
+      J5:         "True",
       // HK module — recurring agreement
       // freq = number of months between charges:
       //   "1"  → charge every 1 month  (MONTHLY billing)
