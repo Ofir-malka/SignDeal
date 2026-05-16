@@ -88,7 +88,7 @@ export default async function BillingErrorPage({
 
           {/* Try again button */}
           <Link
-            href="/pricing"
+            href="/onboarding/billing"
             className="w-full text-center text-sm font-bold py-3.5 rounded-xl
                        bg-indigo-600 text-white hover:bg-indigo-700
                        transition-colors active:scale-[0.98]"
@@ -99,7 +99,7 @@ export default async function BillingErrorPage({
           {/* Secondary actions */}
           <div className="flex items-center justify-between text-xs text-gray-400">
             <Link
-              href="/contracts"
+              href="/dashboard"
               className="hover:text-gray-600 transition-colors"
             >
               חזור ללוח הבקרה
