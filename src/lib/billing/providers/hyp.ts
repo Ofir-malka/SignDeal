@@ -202,6 +202,10 @@ export class HypBillingProvider implements BillingProvider {
       // J5=True enables browser redirect to SuccessUrl / ErrorUrl after payment.
       // Without J5, HYP shows its own hosted receipt page and never redirects.
       J5:         "True",
+      // SendHesh=True instructs HYP to append signed callback params
+      // (txId, uniqueID, responseMac, HKId, cardMask, cardExp, authNumber)
+      // to the redirect URL — including when a portal-level URL overrides SuccessUrl.
+      SendHesh:   "True",
       // HK module — recurring agreement
       // freq = number of months between charges:
       //   "1"  → charge every 1 month  (MONTHLY billing)
