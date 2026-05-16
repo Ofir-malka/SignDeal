@@ -405,56 +405,65 @@ function UnknownFlow() {
 }
 
 // ── VERIFY: server-side transaction verification ──────────────────────────────
-// Calls action=APISign&What=VERIFY + credentials + all redirect params.
-// HYP verifies the Sign cryptographic signature and responds:
-//   CCode=0   → authentic (Sign is valid). Expected for both CCode=0 and CCode=700 transactions.
-//   CCode=700 → J5 authorization confirmed authentic. May appear for J5 flows.
-//   CCode=902 → invalid / tampered.
-//   Other     → HYP-side error.
-// NEVER activate the subscription without a valid VERIFY response.
+//
+// Official HYP docs (APISign, Step 4):
+//   "We use the parameters from the last step and add them to the following
+//    link using: action=APISign, What=VERIFY, PassP, KEY, Masof"
+//
+// The example VERIFY URL in the docs contains EVERY callback param verbatim
+// (Id, CCode, Amount, ACode, Order, Sign, Bank, Payments, UserId, Brand,
+//  Issuer, L4digit, street, city, zip, cell, Coin, Tmonth, Tyear, errMsg,
+//  Hesh, Fild1, Fild2, Fild3, ...).
+//
+// HYP's Sign verification depends on ALL of these being present.
+// Sending a curated subset causes CCode=200 ("Application error" — Shva error,
+// meaning HYP received an incomplete/malformed request).
+//
+// Valid VERIFY responses:
+//   CCode=0   → authentic. Expected for both CCode=0 and CCode=700 transactions.
+//   CCode=700 → J5 auth-only confirmed authentic. May appear for J5 flows.
+//   CCode=902 → invalid / tampered Sign.
+//   Other     → HYP/Shva error. Do NOT activate.
 
-async function callHypVerify(params: {
-  id:      string;
-  order:   string;
-  sign:    string;
-  amount:  string;
-  l4digit?: string;
-  tmonth?:  string;
-  tyear?:   string;
-}): Promise<{ cCode: string; raw: string }> {
+/**
+ * Forward ALL HYP callback params verbatim to What=VERIFY, then
+ * add/override the five merchant-side params (action, What, KEY, PassP, Masof).
+ *
+ * @param callbackParams  Every key→value pair received from the HYP redirect URL.
+ */
+async function callHypVerify(
+  callbackParams: Record<string, string>,
+): Promise<{ cCode: string; raw: string }> {
   const masof  = process.env.HYP_MASOF?.trim()   ?? "";
   const passp  = process.env.HYP_PASSP?.trim()   ?? "";
   const apiKey = process.env.HYP_API_KEY?.trim() ?? "";
 
-  const qp = new URLSearchParams({
-    action:  "APISign",
-    What:    "VERIFY",
-    KEY:     apiKey,
-    Masof:   masof,
-    PassP:   passp,
-    Id:      params.id,
-    Order:   params.order,
-    Sign:    params.sign,
-    Amount:  params.amount || "0",
-    Coin:    "1",
-    UTF8:    "True",
-    UTF8out: "True",
-  });
+  // Start with every callback param forwarded verbatim — this is what HYP requires.
+  const qp = new URLSearchParams(callbackParams);
 
-  if (params.l4digit) qp.set("L4digit", params.l4digit);
-  if (params.tmonth)  qp.set("Tmonth",  params.tmonth);
-  if (params.tyear)   qp.set("Tyear",   params.tyear);
+  // Add / override merchant credentials and VERIFY directive.
+  // These are the only params we inject; everything else is the original callback.
+  qp.set("action",  "APISign");
+  qp.set("What",    "VERIFY");
+  qp.set("KEY",     apiKey);
+  qp.set("PassP",   passp);
+  qp.set("Masof",   masof);
+  qp.set("UTF8",    "True");
+  qp.set("UTF8out", "True");
 
   // ── VERIFY_REQUEST ─────────────────────────────────────────────────────────
-  // Log outgoing param keys only. Never log values of PassP, KEY, or Sign.
+  // Log every outgoing param key + value, masking PassP, KEY, and Sign.
   const VERIFY_SECRET_KEYS = new Set(["PassP", "KEY", "Sign"]);
   const verifyParamKeys = [...qp.keys()].sort();
   const verifyParamSafe = verifyParamKeys.map((k) =>
-    VERIFY_SECRET_KEYS.has(k) ? `${k}=[set:${Boolean(qp.get(k))}]` : `${k}=${qp.get(k)}`,
+    VERIFY_SECRET_KEYS.has(k)
+      ? `${k}=[set:${Boolean(qp.get(k))}]`
+      : `${k}=${qp.get(k)}`,
   );
   console.log(
     `[billing/success] VERIFY_REQUEST` +
-    ` paramCount=${verifyParamKeys.length}` +
+    ` totalParams=${verifyParamKeys.length}` +
+    ` callbackParamCount=${Object.keys(callbackParams).length}` +
     ` params=[${verifyParamSafe.join(" ")}]`,
   );
 
@@ -471,7 +480,7 @@ async function callHypVerify(params: {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(
       `[billing/success] VERIFY network error: ${msg}` +
-      ` order="${params.order}"`,
+      ` order="${callbackParams["Order"] ?? callbackParams["order"] ?? ""}"`,
     );
     return { cCode: "999", raw: "" };
   }
@@ -763,6 +772,18 @@ export default async function BillingSuccessPage({
     ` Amount="${amount}"`,
   );
 
+  // ── Flatten all callback params for VERIFY forwarding ────────────────────
+  // HYP VERIFY requires every param from the redirect forwarded verbatim.
+  // Build a plain Record<string,string> from searchParams (collapse arrays to [0]).
+  const callbackParams: Record<string, string> = {};
+  for (const [key, val] of Object.entries(p)) {
+    if (typeof val === "string") {
+      callbackParams[key] = val;
+    } else if (Array.isArray(val) && typeof val[0] === "string") {
+      callbackParams[key] = val[0];
+    }
+  }
+
   // ── Direct navigation / missing params ───────────────────────────────────
   // No `Order` means either: (a) the user navigated here directly, or (b) HYP
   // stripped params because portal GoodURL ≠ SuccessUrl.
@@ -855,15 +876,8 @@ export default async function BillingSuccessPage({
 
   if (existingCheckout?.status !== "SUCCEEDED") {
     // Step 1: cryptographic VERIFY — the only trusted confirmation.
-    const { cCode: verifyCCode, raw: verifyRaw } = await callHypVerify({
-      id:      hypId,
-      order,
-      sign,
-      amount,
-      l4digit,
-      tmonth,
-      tyear,
-    });
+    // All callback params are forwarded verbatim as required by HYP docs.
+    const { cCode: verifyCCode, raw: verifyRaw } = await callHypVerify(callbackParams);
 
     // ── VERIFY_RESULT ──────────────────────────────────────────────────────
     // VERIFY response validity:
