@@ -445,29 +445,67 @@ async function callHypVerify(params: {
   if (params.tmonth)  qp.set("Tmonth",  params.tmonth);
   if (params.tyear)   qp.set("Tyear",   params.tyear);
 
+  // ── VERIFY_REQUEST ─────────────────────────────────────────────────────────
+  // Log outgoing param keys only. Never log values of PassP, KEY, or Sign.
+  const VERIFY_SECRET_KEYS = new Set(["PassP", "KEY", "Sign"]);
+  const verifyParamKeys = [...qp.keys()].sort();
+  const verifyParamSafe = verifyParamKeys.map((k) =>
+    VERIFY_SECRET_KEYS.has(k) ? `${k}=[set:${Boolean(qp.get(k))}]` : `${k}=${qp.get(k)}`,
+  );
+  console.log(
+    `[billing/success] VERIFY_REQUEST` +
+    ` paramCount=${verifyParamKeys.length}` +
+    ` params=[${verifyParamSafe.join(" ")}]`,
+  );
+
   let raw = "";
+  let httpStatus = 0;
   try {
     const resp = await fetch(`${HYP_PAY_URL}?${qp.toString()}`, {
       method: "GET",
       signal: AbortSignal.timeout(10_000),
     });
+    httpStatus = resp.status;
     raw = await resp.text().catch(() => "");
   } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
     console.error(
-      "[billing/success] VERIFY network error:",
-      err instanceof Error ? err.message : err,
+      `[billing/success] VERIFY network error: ${msg}` +
+      ` order="${params.order}"`,
     );
     return { cCode: "999", raw: "" };
   }
 
+  // ── VERIFY_RAW_RESPONSE ────────────────────────────────────────────────────
+  console.log(
+    `[billing/success] VERIFY_RAW_RESPONSE` +
+    ` httpStatus=${httpStatus}` +
+    ` rawLength=${raw.length}` +
+    ` raw="${raw.slice(0, 500)}"`,
+  );
+
   // HYP response is query-string format: "CCode=0&Id=…&Amount=…"
   let cCode = "999";
+  let parsedParams: Record<string, string> = {};
   try {
-    cCode = new URLSearchParams(raw.trim()).get("CCode") ?? "999";
+    const parsed = new URLSearchParams(raw.trim());
+    cCode = parsed.get("CCode") ?? "999";
+    // Collect all parsed keys+values for diagnostic logging (no secrets in response).
+    for (const [k, v] of parsed.entries()) {
+      parsedParams[k] = v;
+    }
   } catch {
     const m = raw.match(/CCode=(\d+)/);
     cCode   = m?.[1] ?? "999";
   }
+
+  // ── VERIFY_PARSED ──────────────────────────────────────────────────────────
+  console.log(
+    `[billing/success] VERIFY_PARSED` +
+    ` CCode="${cCode}"` +
+    ` parsedKeys=[${Object.keys(parsedParams).sort().join(",")}]` +
+    ` parsedValues=${JSON.stringify(parsedParams)}`,
+  );
 
   return { cCode, raw };
 }
@@ -707,17 +745,22 @@ export default async function BillingSuccessPage({
   const amount  = sp("Amount")  || "0";           // transaction amount in shekels
   const aCode   = sp("ACode")   || undefined;     // bank authorisation number
 
+  // ── CALLBACK_RECEIVED ────────────────────────────────────────────────────
+  const allParamKeys = Object.keys(p).sort();
   console.log(
-    `[billing/success] params` +
+    `[billing/success] CALLBACK_RECEIVED` +
     ` userId=${userId.slice(0, 8)}…` +
-    ` order="${order}"` +
+    ` paramCount=${allParamKeys.length}` +
+    ` paramKeys=[${allParamKeys.join(",")}]` +
     ` CCode="${cCode}"` +
     ` hasId=${Boolean(hypId)}` +
+    ` hasOrder=${Boolean(order)}` +
     ` hasSign=${Boolean(sign)}` +
     ` hasHKId=${Boolean(hkId)}` +
     ` L4digit=${l4digit ?? "(none)"}` +
     ` Tmonth=${tmonth ?? "(none)"}` +
-    ` Tyear=${tyear ?? "(none)"}`,
+    ` Tyear=${tyear ?? "(none)"}` +
+    ` Amount="${amount}"`,
   );
 
   // ── Direct navigation / missing params ───────────────────────────────────
@@ -822,13 +865,7 @@ export default async function BillingSuccessPage({
       tyear,
     });
 
-    console.log(
-      `[billing/success] VERIFY response` +
-      ` CCode="${verifyCCode}"` +
-      ` order="${order}"` +
-      ` rawLength=${verifyRaw.length}`,
-    );
-
+    // ── VERIFY_RESULT ──────────────────────────────────────────────────────
     // VERIFY response validity:
     //   CCode=0   → Sign is authentic. Always valid.
     //   CCode=700 → J5 auth-only confirmed authentic. Accepted when redirect was also 700.
@@ -837,13 +874,28 @@ export default async function BillingSuccessPage({
       verifyCCode === "0" ||
       (verifyCCode === "700" && cCode === "700");
 
+    console.log(
+      `[billing/success] VERIFY_RESULT` +
+      ` verifyCCode="${verifyCCode}"` +
+      ` redirectCCode="${cCode}"` +
+      ` verifyOk=${verifyOk}` +
+      ` rawLength=${verifyRaw.length}` +
+      ` order="${order}"`,
+    );
+
     if (!verifyOk) {
       verifyError = `VERIFY_CCODE_${verifyCCode}`;
+      // ── VERIFY_FAILED_REASON ────────────────────────────────────────────
       console.error(
-        `[billing/success] VERIFY failed` +
-        ` verifyCCode="${verifyCCode}" redirectCCode="${cCode}"` +
-        ` order="${order}" userId=${userId}` +
-        ` raw=${verifyRaw.slice(0, 200)}`,
+        `[billing/success] VERIFY_FAILED_REASON` +
+        ` reason=VERIFY_CCODE_${verifyCCode}` +
+        ` verifyCCode="${verifyCCode}"` +
+        ` redirectCCode="${cCode}"` +
+        ` verifyOkConditions=[` +
+          `verifyCCode==="0":${verifyCCode === "0"}` +
+          ` verifyCCode==="700"&&cCode==="700":${verifyCCode === "700" && cCode === "700"}` +
+        `]` +
+        ` order="${order}" userId=${userId}`,
       );
     } else {
       // Step 2: activate subscription now that VERIFY confirmed authenticity.
@@ -859,7 +911,12 @@ export default async function BillingSuccessPage({
           );
         } else {
           verifyError = err instanceof Error ? err.message : String(err);
-          console.error(`[billing/success] activation error: ${verifyError}`);
+          console.error(
+            `[billing/success] VERIFY_FAILED_REASON` +
+            ` reason=ACTIVATION_ERROR` +
+            ` error="${verifyError}"` +
+            ` order="${order}" userId=${userId}`,
+          );
         }
       }
     }
