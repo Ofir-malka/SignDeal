@@ -44,6 +44,25 @@ export const metadata: Metadata = {
 
 const HYP_PAY_URL = "https://pay.hyp.co.il/p/";
 
+// ── Valid CCode values (official HYP docs) ────────────────────────────────────
+//
+//  CCode=0   Approved — real money was charged.
+//            Valid for ALL subscription paths (trial activation + paid charges).
+//
+//  CCode=700 "Approve without charge" / "אישור ללא חיוב"
+//            J5 flow: reserves the customer's credit line WITHOUT depositing funds.
+//            HYP sends this when J5=True + OnlyOnApprove=True and the card passes
+//            authorization.  The recurring agreement (HKId) IS created.
+//            Valid ONLY for INCOMPLETE → TRIALING (card-first trial activation).
+//            MUST NOT be treated as a successful charge for paid subscriptions.
+//
+//  Any other CCode = declined / error — redirect to payment declined UI.
+//
+// Source: HYP APISign docs, "Hypay Error Codes" table + J5 section.
+
+/** CCodes that may arrive at the SuccessUrl and are not hard failures. */
+const VALID_REDIRECT_CCODES = new Set(["0", "700"]);
+
 // ── Display helpers ───────────────────────────────────────────────────────────
 
 const PLAN_LABELS: Record<string, string> = {
@@ -387,8 +406,12 @@ function UnknownFlow() {
 
 // ── VERIFY: server-side transaction verification ──────────────────────────────
 // Calls action=APISign&What=VERIFY + credentials + all redirect params.
-// HYP responds with CCode=0 (valid) or CCode=902 (invalid).
-// NEVER activate the subscription without CCode=0 from this call.
+// HYP verifies the Sign cryptographic signature and responds:
+//   CCode=0   → authentic (Sign is valid). Expected for both CCode=0 and CCode=700 transactions.
+//   CCode=700 → J5 authorization confirmed authentic. May appear for J5 flows.
+//   CCode=902 → invalid / tampered.
+//   Other     → HYP-side error.
+// NEVER activate the subscription without a valid VERIFY response.
 
 async function callHypVerify(params: {
   id:      string;
@@ -455,13 +478,15 @@ async function activateCheckout(params: {
   order:    string;
   userId:   string;
   hypId:    string;
+  /** Original CCode from the HYP redirect. Used to enforce path-specific rules. */
+  cCode:    string;
   hkId?:    string;
   l4digit?: string;
   tmonth?:  string;
   tyear?:   string;
   aCode?:   string;
 }): Promise<void> {
-  const { order, userId, hypId, hkId, l4digit, tmonth, tyear, aCode } = params;
+  const { order, userId, hypId, cCode, hkId, l4digit, tmonth, tyear, aCode } = params;
 
   // Fetch checkout and subscription in parallel.
   const [checkout, subscription] = await Promise.all([
@@ -489,7 +514,20 @@ async function activateCheckout(params: {
   if (!subscription) throw new Error("SUBSCRIPTION_NOT_FOUND");
 
   const isTrialActivation = subscription.status === "INCOMPLETE";
-  const now               = new Date();
+
+  // CCode=700 (J5 auth-only / no charge) is valid ONLY for trial activation.
+  // If this fires on a paid-subscription path, something is wrong — reject it.
+  // A paid recurring charge MUST be CCode=0 (real money collected).
+  if (cCode === "700" && !isTrialActivation) {
+    console.error(
+      `[billing/success] CCode=700 on non-trial path` +
+      ` subscriptionStatus=${subscription.status} order="${order}" userId=${userId}` +
+      ` — J5 auth-only cannot activate a paid subscription. Rejecting.`,
+    );
+    throw new Error("INVALID_CCODE_700_ON_PAID_PATH");
+  }
+
+  const now = new Date();
 
   // Parse card fields from official HYP redirect params.
   // L4digit  → last 4 digits (strip non-digits as safety measure)
@@ -516,6 +554,7 @@ async function activateCheckout(params: {
   console.log(
     `[billing/success] ACTIVATING` +
     ` path=${isTrialActivation ? "INCOMPLETE→TRIALING" : "→ACTIVE"}` +
+    ` cCode=${cCode}` +
     ` userId=${userId}` +
     ` order="${order}"` +
     ` plan=${checkout.plan}` +
@@ -598,6 +637,7 @@ async function activateCheckout(params: {
         actorId:        null,
         metadata:       JSON.stringify({
           hypId,
+          cCode,          // "0" = paid charge; "700" = J5 auth-only (trial)
           hkId:       hkId  || null,
           authNumber: aCode || null,
           order,
@@ -659,7 +699,7 @@ export default async function BillingSuccessPage({
   const order   = sp("Order")   || sp("order");  // our original Order value
   const hypId   = sp("Id");                       // HYP transaction identifier
   const sign    = sp("Sign");                     // HYP cryptographic signature
-  const cCode   = sp("CCode");                    // "0" = approved
+  const cCode   = sp("CCode");                    // "0" = paid; "700" = J5 auth-only (trial)
   const hkId    = sp("HKId")    || undefined;     // recurring agreement ID
   const l4digit = sp("L4digit") || undefined;     // last 4 card digits
   const tmonth  = sp("Tmonth")  || undefined;     // expiry month (MM)
@@ -739,10 +779,11 @@ export default async function BillingSuccessPage({
     return <PageShell><UnknownFlow /></PageShell>;
   }
 
-  // ── Payment declined by HYP ───────────────────────────────────────────────
-  // CCode != "0" in the redirect means HYP declined the card.
-  // We should have been sent to ErrorUrl for this, but be defensive.
-  if (cCode !== "0") {
+  // ── CCode validity check ──────────────────────────────────────────────────
+  // CCode=0   → paid transaction.          Valid for all subscription paths.
+  // CCode=700 → J5 auth-only (no charge). Valid for INCOMPLETE → TRIALING only.
+  // Anything else → HYP declined the card; show declined UI.
+  if (!VALID_REDIRECT_CCODES.has(cCode)) {
     console.log(
       `[billing/success] payment declined` +
       ` CCode="${cCode}" order="${order}" userId=${userId}`,
@@ -788,17 +829,28 @@ export default async function BillingSuccessPage({
       ` rawLength=${verifyRaw.length}`,
     );
 
-    if (verifyCCode !== "0") {
+    // VERIFY response validity:
+    //   CCode=0   → Sign is authentic. Always valid.
+    //   CCode=700 → J5 auth-only confirmed authentic. Accepted when redirect was also 700.
+    //   Any other → tampered / HYP error. Abort.
+    const verifyOk =
+      verifyCCode === "0" ||
+      (verifyCCode === "700" && cCode === "700");
+
+    if (!verifyOk) {
       verifyError = `VERIFY_CCODE_${verifyCCode}`;
       console.error(
         `[billing/success] VERIFY failed` +
-        ` CCode="${verifyCCode}" order="${order}" userId=${userId}` +
+        ` verifyCCode="${verifyCCode}" redirectCCode="${cCode}"` +
+        ` order="${order}" userId=${userId}` +
         ` raw=${verifyRaw.slice(0, 200)}`,
       );
     } else {
-      // Step 2: activate subscription now that VERIFY confirmed CCode=0.
+      // Step 2: activate subscription now that VERIFY confirmed authenticity.
+      // cCode is forwarded so activateCheckout can enforce path-specific rules
+      // (CCode=700 is only valid for the INCOMPLETE → TRIALING trial path).
       try {
-        await activateCheckout({ order, userId, hypId, hkId, l4digit, tmonth, tyear, aCode });
+        await activateCheckout({ order, userId, hypId, cCode, hkId, l4digit, tmonth, tyear, aCode });
       } catch (err) {
         if (err instanceof Error && err.message === "ALREADY_PROCESSED") {
           // Concurrent request won the race — harmless; DB is already correct.
