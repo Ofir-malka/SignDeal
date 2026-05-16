@@ -34,6 +34,7 @@ import { redirect }      from "next/navigation";
 import { auth }          from "@/lib/auth";
 import { prisma }        from "@/lib/prisma";
 import { TRIAL_DAYS }    from "@/lib/plans";
+import { callGetToken }  from "@/lib/billing/providers/hyp";
 
 export const metadata: Metadata = {
   title:  "תוצאת תשלום | SignDeal",
@@ -704,6 +705,47 @@ async function activateCheckout(params: {
     ` userId=${userId}` +
     ` order="${order}"`,
   );
+
+  // ── Phase 3A: capture 19-digit charge token for future recurring charges ──
+  // action=getToken returns a 19-digit Token usable for action=soft charges
+  // (Phase 3B). This is best-effort — failure does NOT break trial activation.
+  // Valid on CCode=700 transactions per HYP docs (700 = J5 auth-only, still
+  // creates a valid transaction record from which a token can be retrieved).
+  if (hypId) {
+    try {
+      const tokenResult = await callGetToken(hypId);
+      if (tokenResult.ok && tokenResult.token) {
+        await prisma.subscription.update({
+          where: { userId },
+          data: {
+            chargeToken: tokenResult.token,
+            // Tokef confirms / refines expiry from the initial redirect Tmonth/Tyear.
+            ...(tokenResult.cardExpMonth !== null && { cardExpMonth: tokenResult.cardExpMonth }),
+            ...(tokenResult.cardExpYear  !== null && { cardExpYear:  tokenResult.cardExpYear }),
+          },
+        });
+        console.log(
+          `[billing/success] chargeToken stored` +
+          ` userId=${userId} order="${order}"` +
+          ` cardExpMonth=${tokenResult.cardExpMonth}` +
+          ` cardExpYear=${tokenResult.cardExpYear}`,
+        );
+      } else {
+        console.warn(
+          `[billing/success] getToken returned no token` +
+          ` CCode="${tokenResult.cCode}" userId=${userId} order="${order}"` +
+          ` — chargeToken not stored; Phase 3B will need manual intervention.`,
+        );
+      }
+    } catch (err) {
+      // Non-fatal — trial activation already committed above.
+      console.warn(
+        `[billing/success] getToken error (non-fatal) — chargeToken not stored:`,
+        err instanceof Error ? err.message : err,
+        `userId=${userId} order="${order}"`,
+      );
+    }
+  }
 }
 
 // ── Page ─────────────────────────────────────────────────────────────────────

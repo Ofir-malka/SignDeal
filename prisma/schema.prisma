@@ -467,6 +467,8 @@ model Subscription {
   //
   cardToken    String?    // HYP HKId recurring agreement ID — used for Phase 3 charges.
                           // Treat as sensitive: do not log, do not expose to client.
+  chargeToken  String?    // 19-digit token from action=getToken — used for Phase 3B action=soft charges.
+                          // Different from cardToken (HKId). Treat as sensitive: never log, never expose to client.
   cardBrand    String?    // e.g. "VISA", "MASTERCARD" — populated if provider returns it.
   cardLast4    String?    // Last 4 digits extracted from HYP cardMask (e.g. "1111").
   cardExpMonth Int?       // Card expiry month 1-12.

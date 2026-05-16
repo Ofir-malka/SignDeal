@@ -163,6 +163,101 @@ export function verifyHypResponseMac(
   }
 }
 
+// ── getToken: capture 19-digit charge token for action=soft (Phase 3B) ───────
+//
+// Calls action=getToken with the HYP transaction ID (TransId) to retrieve a
+// 19-digit Token usable for server-initiated charges via action=soft.
+//
+// This token is DIFFERENT from cardToken (HKId):
+//   cardToken (HKId) — recurring agreement ID; used for HKStatus only.
+//   chargeToken      — 19-digit token; used as CC param in action=soft calls.
+//
+// Tokef format: YYMM  e.g. "2606" = year 2026, month June.
+// Per HYP docs, getToken is valid after CCode=0 and CCode=700 (J5) transactions.
+//
+// Security: NEVER log the Token value. Log only hasToken presence.
+
+export interface GetTokenResult {
+  ok:           boolean;
+  token:        string | null;
+  tokef:        string | null;    // YYMM e.g. "2606" = June 2026
+  cCode:        string;
+  cardExpMonth: number | null;    // parsed from Tokef (1–12)
+  cardExpYear:  number | null;    // parsed from Tokef (4-digit, e.g. 2026)
+}
+
+export async function callGetToken(hypId: string): Promise<GetTokenResult> {
+  const masof = process.env.HYP_MASOF?.trim() ?? "";
+  const passp = process.env.HYP_PASSP?.trim() ?? "";
+
+  const qp = new URLSearchParams({
+    action:  "getToken",
+    Masof:   masof,
+    PassP:   passp,
+    TransId: hypId,
+  });
+
+  let raw = "";
+  try {
+    const resp = await fetch(`${HYP_PAY_URL}?${qp.toString()}`, {
+      method: "GET",
+      signal: AbortSignal.timeout(10_000),
+    });
+    raw = await resp.text().catch(() => "");
+  } catch (err) {
+    console.warn(
+      `[billing/hyp] getToken network error hypId=${hypId}:`,
+      err instanceof Error ? err.message : err,
+    );
+    return { ok: false, token: null, tokef: null, cCode: "999", cardExpMonth: null, cardExpYear: null };
+  }
+
+  let cCode = "999";
+  let token: string | null = null;
+  let tokef: string | null = null;
+  try {
+    const parsed = new URLSearchParams(raw.trim());
+    cCode = parsed.get("CCode") ?? "999";
+    token = parsed.get("Token") ?? null;
+    tokef = parsed.get("Tokef") ?? null;
+  } catch {
+    const m = raw.match(/CCode=(\d+)/);
+    cCode   = m?.[1] ?? "999";
+  }
+
+  // Parse Tokef YYMM → 4-digit year + month (e.g. "2606" → year=2026, month=6)
+  let cardExpMonth: number | null = null;
+  let cardExpYear:  number | null = null;
+  if (tokef && /^\d{4}$/.test(tokef)) {
+    const year  = 2000 + parseInt(tokef.slice(0, 2), 10);
+    const month = parseInt(tokef.slice(2, 4), 10);
+    if (year >= 2020 && month >= 1 && month <= 12) {
+      cardExpYear  = year;
+      cardExpMonth = month;
+    }
+  }
+
+  // Log presence only — NEVER log the token value itself.
+  console.log(
+    `[billing/hyp] getToken` +
+    ` CCode="${cCode}"` +
+    ` hasToken=${Boolean(token)}` +
+    ` tokef="${tokef ?? "(none)"}"` +
+    ` cardExpMonth=${cardExpMonth ?? "(none)"}` +
+    ` cardExpYear=${cardExpYear ?? "(none)"}`,
+  );
+
+  if (cCode !== "0") {
+    console.warn(
+      `[billing/hyp] getToken failed CCode="${cCode}" hypId=${hypId}` +
+      ` raw=${raw.slice(0, 200)}`,
+    );
+    return { ok: false, token: null, tokef, cCode, cardExpMonth: null, cardExpYear: null };
+  }
+
+  return { ok: true, token, tokef, cCode, cardExpMonth, cardExpYear };
+}
+
 // ── Provider class ────────────────────────────────────────────────────────────
 
 export class HypBillingProvider implements BillingProvider {
