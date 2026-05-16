@@ -190,6 +190,14 @@ export async function callGetToken(hypId: string): Promise<GetTokenResult> {
   const masof = process.env.HYP_MASOF?.trim() ?? "";
   const passp = process.env.HYP_PASSP?.trim() ?? "";
 
+  // ── 1. GET_TOKEN_REQUEST ─────────────────────────────────────────────────────
+  console.log(
+    `[billing/hyp] GET_TOKEN_REQUEST` +
+    ` hypId=${hypId}` +
+    ` hasMasof=${Boolean(masof)}` +
+    ` hasPassP=${Boolean(passp)}`,
+  );
+
   const qp = new URLSearchParams({
     action:  "getToken",
     Masof:   masof,
@@ -198,19 +206,30 @@ export async function callGetToken(hypId: string): Promise<GetTokenResult> {
   });
 
   let raw = "";
+  let httpStatus = 0;
   try {
     const resp = await fetch(`${HYP_PAY_URL}?${qp.toString()}`, {
       method: "GET",
       signal: AbortSignal.timeout(10_000),
     });
+    httpStatus = resp.status;
     raw = await resp.text().catch(() => "");
   } catch (err) {
     console.warn(
-      `[billing/hyp] getToken network error hypId=${hypId}:`,
+      `[billing/hyp] GET_TOKEN_REQUEST network error` +
+      ` hypId=${hypId}:`,
       err instanceof Error ? err.message : err,
     );
     return { ok: false, token: null, tokef: null, cCode: "999", cardExpMonth: null, cardExpYear: null };
   }
+
+  // ── 2. GET_TOKEN_RESPONSE ────────────────────────────────────────────────────
+  console.log(
+    `[billing/hyp] GET_TOKEN_RESPONSE` +
+    ` httpStatus=${httpStatus}` +
+    ` rawLength=${raw.length}` +
+    ` rawPreview="${raw.slice(0, 200)}"`,
+  );
 
   let cCode = "999";
   let token: string | null = null;
@@ -225,6 +244,15 @@ export async function callGetToken(hypId: string): Promise<GetTokenResult> {
     cCode   = m?.[1] ?? "999";
   }
 
+  // ── 3. GET_TOKEN_PARSED ──────────────────────────────────────────────────────
+  // NEVER log the token value — log presence only.
+  console.log(
+    `[billing/hyp] GET_TOKEN_PARSED` +
+    ` cCode="${cCode}"` +
+    ` hasToken=${Boolean(token)}` +
+    ` hasTokef=${Boolean(tokef)}`,
+  );
+
   // Parse Tokef YYMM → 4-digit year + month (e.g. "2606" → year=2026, month=6)
   let cardExpMonth: number | null = null;
   let cardExpYear:  number | null = null;
@@ -237,23 +265,24 @@ export async function callGetToken(hypId: string): Promise<GetTokenResult> {
     }
   }
 
-  // Log presence only — NEVER log the token value itself.
-  console.log(
-    `[billing/hyp] getToken` +
-    ` CCode="${cCode}"` +
-    ` hasToken=${Boolean(token)}` +
-    ` tokef="${tokef ?? "(none)"}"` +
-    ` cardExpMonth=${cardExpMonth ?? "(none)"}` +
-    ` cardExpYear=${cardExpYear ?? "(none)"}`,
-  );
-
+  // ── 4 / 5. GET_TOKEN_SUCCESS or GET_TOKEN_FAILED ─────────────────────────────
   if (cCode !== "0") {
     console.warn(
-      `[billing/hyp] getToken failed CCode="${cCode}" hypId=${hypId}` +
-      ` raw=${raw.slice(0, 200)}`,
+      `[billing/hyp] GET_TOKEN_FAILED` +
+      ` hypId=${hypId}` +
+      ` cCode="${cCode}"` +
+      ` rawPreview="${raw.slice(0, 200)}"`,
     );
     return { ok: false, token: null, tokef, cCode, cardExpMonth: null, cardExpYear: null };
   }
+
+  console.log(
+    `[billing/hyp] GET_TOKEN_SUCCESS` +
+    ` hypId=${hypId}` +
+    ` hasToken=true` +
+    ` expMonth=${cardExpMonth ?? "(none)"}` +
+    ` expYear=${cardExpYear ?? "(none)"}`,
+  );
 
   return { ok: true, token, tokef, cCode, cardExpMonth, cardExpYear };
 }
