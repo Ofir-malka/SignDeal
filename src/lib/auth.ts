@@ -69,8 +69,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       }
 
       // ── Session update trigger (e.g. after onboarding completes) ─────────────
-      // Allows useSession().update({ profileComplete, name }) to refresh the JWT
-      // without a full sign-out/sign-in cycle.
+      // Allows useSession().update({ … }) to refresh the JWT without a full
+      // sign-out/sign-in cycle.
       if (trigger === "update" && sessionUpdate) {
         if (typeof sessionUpdate.profileComplete === "boolean") {
           token.profileComplete = sessionUpdate.profileComplete;
@@ -78,8 +78,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (typeof sessionUpdate.name === "string") {
           token.name = sessionUpdate.name;
         }
-        // Future: support trigger === "update" + sessionUpdate.refreshSubscription
-        // to re-fetch plan from DB when an admin upgrades a user mid-session.
+        // ── Subscription refresh ────────────────────────────────────────────────
+        // Called by DashboardLink after /billing/success activates a subscription
+        // (INCOMPLETE → TRIALING). Without this, the JWT carries the stale
+        // INCOMPLETE status for the rest of the session and middleware redirects
+        // the user back to /onboarding/billing on every navigation to /dashboard.
+        if (sessionUpdate.refreshSubscription === true && typeof token.id === "string") {
+          const sub = await prisma.subscription.findUnique({
+            where:  { userId: token.id },
+            select: { plan: true, status: true, trialEndsAt: true },
+          });
+          if (sub) {
+            token.plan               = sub.plan;
+            token.subscriptionStatus = sub.status;
+            token.trialEndsAt        = sub.trialEndsAt?.toISOString() ?? null;
+          }
+        }
       }
 
       return token;

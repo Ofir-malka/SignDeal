@@ -35,6 +35,7 @@ import { auth }          from "@/lib/auth";
 import { prisma }        from "@/lib/prisma";
 import { TRIAL_DAYS }    from "@/lib/plans";
 import { callGetToken }  from "@/lib/billing/providers/hyp";
+import { DashboardLink } from "./DashboardLink";
 
 export const metadata: Metadata = {
   title:  "תוצאת תשלום | SignDeal",
@@ -221,13 +222,12 @@ function TrialActivationSuccess({
           <p>✓ ניתן לבטל בכל עת מהגדרות → מנוי.</p>
         </div>
 
-        <Link
-          href="/dashboard"
+        <DashboardLink
           className="w-full text-center text-sm font-bold py-3.5 rounded-xl
                      bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
         >
           עבור ללוח הבקרה →
-        </Link>
+        </DashboardLink>
 
         <p className="text-center text-xs text-gray-400">
           שאלות?{" "}
@@ -285,13 +285,12 @@ function UpgradeActivationSuccess({
           {txId       && <SummaryRow label="מזהה עסקה"  value={txId} />}
         </div>
 
-        <Link
-          href="/dashboard"
+        <DashboardLink
           className="w-full text-center text-sm font-bold py-3.5 rounded-xl
                      bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
         >
           עבור ללוח הבקרה →
-        </Link>
+        </DashboardLink>
 
         <p className="text-center text-xs text-gray-400">
           שאלות?{" "}
