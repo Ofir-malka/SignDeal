@@ -58,8 +58,57 @@ const PLAN_LABELS: Record<"STANDARD" | "GROWTH" | "PRO", string> = {
   PRO:      "מסלול פרו",
 };
 
+// ── Card field parser ─────────────────────────────────────────────────────────
+// Exported here so both /billing/success and /api/billing/hyp-notify can share
+// the same parsing logic without duplicating it.
+//
+// HYP callback fields used for card storage:
+//   HKId      → cardToken (HYP recurring agreement ID — used for Phase 3 charges)
+//   cardMask  → cardLast4 (strip non-digits, take last 4)
+//   cardExp   → cardExpMonth + cardExpYear (MMYY format, e.g. "0328" → 3/2028)
+//
+// IMPORTANT: cardToken (HKId) is the Phase 3 charge cursor.
+// Treat as sensitive: never log, never expose to client.
+
+export function parseCardFields(params: {
+  HKId?:     string;
+  cardToken?: string;
+  cardMask?:  string;
+  cardExp?:   string;
+}): {
+  cardToken:    string | null;
+  cardLast4:    string | null;
+  cardExpMonth: number | null;
+  cardExpYear:  number | null;
+} {
+  // Prefer HKId (recurring agreement) as the persistent token for Phase 3 charges.
+  const cardToken = params.HKId?.trim() || params.cardToken?.trim() || null;
+
+  // Extract last 4 digits from cardMask (e.g. "411111*****1111" → "1111").
+  let cardLast4: string | null = null;
+  if (params.cardMask) {
+    const digits = params.cardMask.replace(/\D/g, "");
+    if (digits.length >= 4) cardLast4 = digits.slice(-4);
+  }
+
+  // Parse MMYY expiry (e.g. "0328" → month=3, year=2028).
+  let cardExpMonth: number | null = null;
+  let cardExpYear:  number | null = null;
+  if (params.cardExp && /^\d{4}$/.test(params.cardExp)) {
+    const month = parseInt(params.cardExp.slice(0, 2), 10);
+    const year  = 2000 + parseInt(params.cardExp.slice(2, 4), 10);
+    if (month >= 1 && month <= 12 && year >= 2020) {
+      cardExpMonth = month;
+      cardExpYear  = year;
+    }
+  }
+
+  return { cardToken, cardLast4, cardExpMonth, cardExpYear };
+}
+
 // ── Callback MAC verification ─────────────────────────────────────────────────
-// Exported here so /billing/success can import without duplicating the algorithm.
+// Exported here so /billing/success and /api/billing/hyp-notify can share
+// the verification algorithm without duplicating it.
 
 /** Query-string params HYP appends to SuccessUrl / ErrorUrl on redirect. */
 export interface HypCallbackParams {
@@ -177,6 +226,7 @@ export class HypBillingProvider implements BillingProvider {
     // action=APISign + What=SIGN + KEY are required for the server-to-server call.
     // PassP and KEY are ONLY used in this server-side fetch — they are never
     // returned to the browser or included in any client-visible value.
+    const appBase = (process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
     const qp = new URLSearchParams({
       action:    "APISign",      // ← server-to-server signing request
       What:      "SIGN",         // ← operation type required by APISign
@@ -217,6 +267,13 @@ export class HypBillingProvider implements BillingProvider {
       Tash:          "999",  // 999 = unlimited instalments (recurring until cancelled)
       freq:          params.interval === "YEARLY" ? "12" : "1",
       OnlyOnApprove: "True", // redirect to SuccessUrl only on approval; errors go to ErrorUrl
+      // URLserver — server-to-server notification fired by HYP before/alongside
+      // the browser redirect.  HYP GETs this URL with the full signed payload
+      // (txId, uniqueID, HKId, cardMask, cardExp, responseMac, …) BEFORE it
+      // redirects the browser, so activation can happen even when the portal
+      // overrides SuccessUrl with a bare 302 that strips query params.
+      // The endpoint returns "OK" on success or HTTP 5xx to trigger HYP retry.
+      URLserver: `${appBase}/api/billing/hyp-notify`,
     });
 
     // ── Step 2: server-to-server call to HYP APISign ─────────────────────────

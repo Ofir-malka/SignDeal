@@ -1,67 +1,40 @@
 /**
  * /billing/success
  *
- * Post-payment landing page. Handles five distinct flows:
+ * Post-payment landing page — DB-driven (URLserver architecture).
  *
- *   A. Stub        — query has stub=true (local dev only, no DB writes)
- *   B. Trial start — MAC verified + BillingCheckout found + INCOMPLETE→TRIALING
- *   C. Upgrade     — MAC verified + BillingCheckout found + TRIALING/ACTIVE→ACTIVE
- *   D. MAC failed  — responseMac missing or does not match
- *   E. Checkout error — checkout missing / expired / already resolved / mismatch
- *   F. Unknown     — no recognisable params (direct navigation / stale link)
+ * ── Architecture ──────────────────────────────────────────────────────────────
+ * Activation no longer happens here. HYP fires a server-to-server GET to
+ * /api/billing/hyp-notify BEFORE (or concurrent with) the browser redirect.
+ * hyp-notify verifies the MAC, runs the atomic INCOMPLETE→TRIALING transaction,
+ * and stores all card fields in the DB.
  *
- * ── Activation flow (Phase 2C) ────────────────────────────────────────────────
- * On valid HYP callback:
- *   1. Verify responseMac using HYP_PASSP — BEFORE any DB read.
- *   2. Find BillingCheckout by uniqueID (= our Order param).
- *   3. Guards: not found / expired / already SUCCEEDED / already FAILED.
- *   4. Fetch current Subscription (pre-transition state for audit trail).
- *   5. Compute target state based on current status:
- *        INCOMPLETE  → TRIALING  (trial_started)  — card stored, trial clock starts
- *        TRIALING/ACTIVE → ACTIVE (payment_succeeded) — upgrade / re-activation
- *   6. prisma.$transaction() with atomic BillingCheckout guard (updateMany WHERE PENDING):
- *        - BillingCheckout  → SUCCEEDED, txId, hkId, cardToken, cardExp, cardMask, authNumber
- *        - Subscription     → status + card fields + billing dates (see bifurcation below)
- *        - SubscriptionEvent → trial_started | payment_succeeded
+ * This page only READS the DB and renders the appropriate UI based on the
+ * subscription's current status. No params, no MAC verification needed.
  *
- * ── INCOMPLETE → TRIALING (new trial) ────────────────────────────────────────
- *   Subscription updates:
- *     status           = TRIALING
- *     plan             = checkout.plan
- *     billingInterval  = checkout.interval
- *     billingProvider  = "hyp"
- *     billingSubscriptionId = HKId   (HYP recurring agreement — Phase 3 charge cursor)
- *     cardToken        = HKId        (same as billingSubscriptionId — used for charges)
- *     cardLast4        = last 4 of cardMask
- *     cardExpMonth/Year = parsed from cardExp (MMYY format)
- *     tokenCreatedAt   = now
- *     trialEndsAt      = now + 14 days
- *     nextBillingAt    = trialEndsAt (Phase 3 billing cron cursor)
- *
- * ── TRIALING/ACTIVE → ACTIVE (upgrade / re-activation) ───────────────────────
- *   Subscription updates:
- *     status               = ACTIVE
- *     plan + billingInterval + billingProvider + billingSubscriptionId
- *     card fields (refresh: cardToken, cardLast4, cardExpMonth/Year, tokenCreatedAt)
- *     firstPaymentAt       = now
- *     nextBillingAt        = currentPeriodEnd
- *     currentPeriodStart   = now
- *     currentPeriodEnd     = now + 1 month | 1 year
+ * ── Flows ─────────────────────────────────────────────────────────────────────
+ *   A. Stub        — query has stub=true (local dev / staging)
+ *   B. TRIALING    — hyp-notify already activated: show trial success UI
+ *   C. ACTIVE      — upgrade / re-activation already activated: show active UI
+ *   D. INCOMPLETE  — hyp-notify hasn't fired yet: show PaymentPolling (client)
+ *                    PaymentPolling calls router.refresh() every 3 s until
+ *                    status changes to TRIALING / ACTIVE.
+ *   E. No session  — shouldn't reach here (middleware blocks unauthenticated);
+ *                    redirect to /login as fallback.
+ *   F. Unknown     — direct navigation or unrecognised state.
  *
  * ── Security ─────────────────────────────────────────────────────────────────
- *   • responseMac verified BEFORE any DB read (prevents spoofed callbacks)
- *   • BillingCheckout.order is a UUID — hard to guess (prevents replay attacks)
- *   • All DB writes use checkout.userId (never a query param) → no cross-user risk
- *   • Atomic guard: updateMany WHERE status=PENDING prevents concurrent double-activation
- *   • Idempotency: SUCCEEDED checkout returns early without a second transaction
+ *   All sensitive data (txId, cardLast4, plan) comes from our own DB, not
+ *   from URL params. No MAC verification needed on this page.
+ *   The hyp-notify route already did all security checks.
  */
 
-import type { Metadata } from "next";
-import Link              from "next/link";
-import { prisma }        from "@/lib/prisma";
-import { TRIAL_DAYS }    from "@/lib/plans";
-import { verifyHypResponseMac } from "@/lib/billing/providers/hyp";
-import type { HypCallbackParams } from "@/lib/billing/providers/hyp";
+import type { Metadata }  from "next";
+import Link               from "next/link";
+import { redirect }       from "next/navigation";
+import { auth }           from "@/lib/auth";
+import { prisma }         from "@/lib/prisma";
+import { PaymentPolling } from "./PaymentPolling";
 
 export const metadata: Metadata = {
   title:  "תוצאת תשלום | SignDeal",
@@ -87,54 +60,7 @@ function formatHeDate(date: Date): string {
   });
 }
 
-// ── Card field parser ─────────────────────────────────────────────────────────
-//
-// HYP callback fields used for card storage:
-//   HKId      → cardToken (HYP recurring agreement ID — used for Phase 3 charges)
-//   cardMask  → cardLast4 (strip non-digits, take last 4)
-//   cardExp   → cardExpMonth + cardExpYear (MMYY format, e.g. "0328" → 3/2028)
-//   cardBrand — HYP does not return brand; left null
-//
-// IMPORTANT: cardToken (HKId) is the Phase 3 charge cursor.
-// Treat as sensitive: never log, never expose to client.
-
-function parseCardFields(params: {
-  HKId?:     string;
-  cardToken?: string;
-  cardMask?:  string;
-  cardExp?:   string;
-}): {
-  cardToken:    string | null;
-  cardLast4:    string | null;
-  cardExpMonth: number | null;
-  cardExpYear:  number | null;
-} {
-  // Prefer HKId (recurring agreement) as the persistent token for Phase 3 charges.
-  const cardToken = params.HKId?.trim() || params.cardToken?.trim() || null;
-
-  // Extract last 4 digits from cardMask (e.g. "411111*****1111" → "1111").
-  let cardLast4: string | null = null;
-  if (params.cardMask) {
-    const digits = params.cardMask.replace(/\D/g, "");
-    if (digits.length >= 4) cardLast4 = digits.slice(-4);
-  }
-
-  // Parse MMYY expiry (e.g. "0328" → month=3, year=2028).
-  let cardExpMonth: number | null = null;
-  let cardExpYear:  number | null = null;
-  if (params.cardExp && /^\d{4}$/.test(params.cardExp)) {
-    const month = parseInt(params.cardExp.slice(0, 2), 10);
-    const year  = 2000 + parseInt(params.cardExp.slice(2, 4), 10);
-    if (month >= 1 && month <= 12 && year >= 2020) {
-      cardExpMonth = month;
-      cardExpYear  = year;
-    }
-  }
-
-  return { cardToken, cardLast4, cardExpMonth, cardExpYear };
-}
-
-// ── Shared card shell ─────────────────────────────────────────────────────────
+// ── Shared page shell ─────────────────────────────────────────────────────────
 
 function PageShell({ children }: { children: React.ReactNode }) {
   return (
@@ -158,10 +84,10 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ── Flow A: Stub ─────────────────────────────────────────────────────────────
+// ── Flow A: Stub ──────────────────────────────────────────────────────────────
 
 function StubSuccess({ plan, interval }: { plan: string; interval: string }) {
-  const planLabel     = PLAN_LABELS[plan]     ?? plan;
+  const planLabel     = PLAN_LABELS[plan]         ?? plan;
   const intervalLabel = INTERVAL_LABELS[interval] ?? interval;
 
   return (
@@ -207,28 +133,26 @@ function StubSuccess({ plan, interval }: { plan: string; interval: string }) {
   );
 }
 
-// ── Flow B: Trial activation success (INCOMPLETE → TRIALING) ─────────────────
+// ── Flow B: Trial activation success (status = TRIALING) ─────────────────────
 
 function TrialActivationSuccess({
-  txId,
   plan,
   interval,
-  authNumber,
-  cardMask,
   trialEndsAt,
+  cardLast4,
+  txId,
+  authNumber,
 }: {
-  txId:        string;
-  plan:        string;
-  interval:    string;
-  authNumber?: string;
-  cardMask?:   string;
-  trialEndsAt: Date;
+  plan:         string;
+  interval:     string;
+  trialEndsAt:  Date;
+  cardLast4?:   string | null;
+  txId?:        string | null;
+  authNumber?:  string | null;
 }) {
-  const planLabel     = PLAN_LABELS[plan]     ?? plan;
+  const planLabel     = PLAN_LABELS[plan]         ?? plan;
   const intervalLabel = INTERVAL_LABELS[interval] ?? interval;
   const trialEndStr   = formatHeDate(trialEndsAt);
-  // Last 4 from cardMask for display
-  const last4 = cardMask ? cardMask.replace(/\D/g, "").slice(-4) || null : null;
 
   return (
     <>
@@ -259,12 +183,12 @@ function TrialActivationSuccess({
 
         {/* Trial summary */}
         <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-4 flex flex-col gap-2">
-          <SummaryRow label="מסלול"              value={planLabel} />
-          <SummaryRow label="חיוב"               value={intervalLabel} />
-          <SummaryRow label="ניסיון מסתיים"      value={trialEndStr} />
-          {last4      && <SummaryRow label="כרטיס"        value={`••••${last4}`} />}
-          {authNumber && <SummaryRow label="מספר אישור"   value={authNumber} />}
-          <SummaryRow label="מזהה עסקה"          value={txId} />
+          <SummaryRow label="מסלול"         value={planLabel} />
+          <SummaryRow label="חיוב"          value={intervalLabel} />
+          <SummaryRow label="ניסיון מסתיים" value={trialEndStr} />
+          {cardLast4  && <SummaryRow label="כרטיס"      value={`••••${cardLast4}`} />}
+          {authNumber && <SummaryRow label="מספר אישור" value={authNumber} />}
+          {txId       && <SummaryRow label="מזהה עסקה"  value={txId} />}
         </div>
 
         {/* How it works */}
@@ -293,27 +217,26 @@ function TrialActivationSuccess({
   );
 }
 
-// ── Flow C: Upgrade / re-activation success (TRIALING/ACTIVE → ACTIVE) ────────
+// ── Flow C: Upgrade / re-activation success (status = ACTIVE) ────────────────
 
 function UpgradeActivationSuccess({
-  txId,
   plan,
   interval,
+  currentPeriodEnd,
+  cardLast4,
+  txId,
   authNumber,
-  cardMask,
-  periodEnd,
 }: {
-  txId:        string;
-  plan:        string;
-  interval:    string;
-  authNumber?: string;
-  cardMask?:   string;
-  periodEnd:   Date;
+  plan:             string;
+  interval:         string;
+  currentPeriodEnd: Date;
+  cardLast4?:       string | null;
+  txId?:            string | null;
+  authNumber?:      string | null;
 }) {
-  const planLabel     = PLAN_LABELS[plan]     ?? plan;
+  const planLabel     = PLAN_LABELS[plan]         ?? plan;
   const intervalLabel = INTERVAL_LABELS[interval] ?? interval;
-  const periodEndStr  = formatHeDate(periodEnd);
-  const last4 = cardMask ? cardMask.replace(/\D/g, "").slice(-4) || null : null;
+  const periodEndStr  = formatHeDate(currentPeriodEnd);
 
   return (
     <>
@@ -331,12 +254,12 @@ function UpgradeActivationSuccess({
 
       <div className="px-6 py-6 flex flex-col gap-5">
         <div className="rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-4 flex flex-col gap-2">
-          <SummaryRow label="מסלול"      value={planLabel} />
-          <SummaryRow label="חיוב"       value={intervalLabel} />
-          <SummaryRow label="חידוש הבא"  value={periodEndStr} />
-          {last4      && <SummaryRow label="כרטיס"        value={`••••${last4}`} />}
-          {authNumber && <SummaryRow label="מספר אישור"   value={authNumber} />}
-          <SummaryRow label="מזהה עסקה"  value={txId} />
+          <SummaryRow label="מסלול"     value={planLabel} />
+          <SummaryRow label="חיוב"      value={intervalLabel} />
+          <SummaryRow label="חידוש הבא" value={periodEndStr} />
+          {cardLast4  && <SummaryRow label="כרטיס"      value={`••••${cardLast4}`} />}
+          {authNumber && <SummaryRow label="מספר אישור" value={authNumber} />}
+          {txId       && <SummaryRow label="מזהה עסקה"  value={txId} />}
         </div>
 
         <Link
@@ -358,166 +281,25 @@ function UpgradeActivationSuccess({
   );
 }
 
-// ── Idempotent: Already activated ────────────────────────────────────────────
+// ── Flow D: Payment verifying (status = INCOMPLETE) ───────────────────────────
+// Renders the polling client component inside a static shell.
 
-function AlreadyActivated({ txId }: { txId: string }) {
+function PaymentVerifying() {
   return (
     <>
-      <div className="bg-emerald-500 px-6 py-5 text-white">
+      <div className="bg-indigo-500 px-6 py-5 text-white">
         <div className="flex items-center gap-3 justify-end">
           <div>
-            <h1 className="text-xl font-bold">המנוי כבר פעיל</h1>
-            <p className="text-sm text-emerald-100 mt-0.5">
-              התשלום כבר עובד ואושר קודם לכן.
+            <h1 className="text-xl font-bold">מאמתים את התשלום</h1>
+            <p className="text-sm text-indigo-100 mt-0.5">
+              הכרטיס כנראה אושר — ממתינים לאישור מ-HYP.
             </p>
           </div>
-          <span className="text-4xl" aria-hidden="true">✅</span>
+          <span className="text-4xl" aria-hidden="true">⏳</span>
         </div>
       </div>
-      <div className="px-6 py-6 flex flex-col gap-5">
-        <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3">
-          <SummaryRow label="מזהה עסקה" value={txId} />
-        </div>
-        <p className="text-sm text-center text-gray-500 leading-relaxed">
-          הדף כבר עובד — נראה שנטענת פעמיים. המנוי שלך פעיל.
-        </p>
-        <Link
-          href="/dashboard"
-          className="w-full text-center text-sm font-bold py-3 rounded-xl
-                     bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-        >
-          עבור ללוח הבקרה →
-        </Link>
-      </div>
-    </>
-  );
-}
-
-// ── Flow D: MAC verification failed ──────────────────────────────────────────
-
-function HypVerificationFailed({ txId }: { txId?: string }) {
-  return (
-    <>
-      <div className="bg-red-500 px-6 py-5 text-white">
-        <div className="flex items-center gap-3 justify-end">
-          <div>
-            <h1 className="text-xl font-bold">אימות התשלום נכשל</h1>
-            <p className="text-sm text-red-100 mt-0.5">
-              לא ניתן לאמת את פרטי העסקה.
-            </p>
-          </div>
-          <span className="text-4xl" aria-hidden="true">❌</span>
-        </div>
-      </div>
-
-      <div className="px-6 py-6 flex flex-col gap-5">
-        <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3">
-          <p className="text-xs font-semibold text-red-800 mb-0.5">מה קרה?</p>
-          <p className="text-xs text-red-700 leading-relaxed">
-            חתימת HYP לא תאמה לנתוני העסקה.
-            ייתכן שהדף נפתח מחדש (הקישור תקף לשימוש אחד בלבד),
-            או שהתגלתה בעיית אבטחה.
-          </p>
-          {txId && (
-            <p className="text-xs text-red-600 mt-1.5 font-mono break-all">
-              txId: {txId}
-            </p>
-          )}
-        </div>
-
-        <p className="text-center text-xs text-gray-500 leading-relaxed">
-          אם חויבת, פנה לתמיכה עם מזהה העסקה למעלה.
-        </p>
-
-        <div className="flex flex-col gap-2">
-          <Link
-            href="/onboarding/billing"
-            className="w-full text-center text-sm font-bold py-3 rounded-xl
-                       bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-          >
-            חזור לבחירת מסלול
-          </Link>
-          <a
-            href="mailto:support@signdeal.co.il"
-            className="w-full text-center text-sm py-2.5 rounded-xl
-                       border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            פנה לתמיכה
-          </a>
-        </div>
-      </div>
-    </>
-  );
-}
-
-// ── Flow E: Checkout lookup / activation errors ───────────────────────────────
-
-type CheckoutErrorReason = "not_found" | "expired" | "failed" | "activation_error";
-
-function CheckoutError({
-  reason,
-  txId,
-}: {
-  reason: CheckoutErrorReason;
-  txId?:  string;
-}) {
-  const messages: Record<CheckoutErrorReason, { title: string; body: string }> = {
-    not_found: {
-      title: "סשן התשלום לא נמצא",
-      body:  "לא נמצא סשן תשלום תואם. ייתכן שהסשן פג תוקף לפני שהגעת לדף זה.",
-    },
-    expired: {
-      title: "סשן התשלום פג תוקף",
-      body:  "הסשן תקף ל-30 דקות בלבד. אנא התחל את תהליך התשלום מחדש.",
-    },
-    failed: {
-      title: "עסקה זו כבר נכשלה",
-      body:  "סשן זה כבר סומן כנכשל. אנא נסה שנית.",
-    },
-    activation_error: {
-      title: "שגיאה בהפעלת המנוי",
-      body:  "התשלום אושר אך הייתה בעיה בהפעלת המנוי. צוות התמיכה יפנה אליך בהקדם.",
-    },
-  };
-
-  const { title, body } = messages[reason];
-
-  return (
-    <>
-      <div className="bg-amber-500 px-6 py-5 text-white">
-        <div className="flex items-center gap-3 justify-end">
-          <div>
-            <h1 className="text-xl font-bold">{title}</h1>
-          </div>
-          <span className="text-4xl" aria-hidden="true">⚠️</span>
-        </div>
-      </div>
-      <div className="px-6 py-6 flex flex-col gap-5">
-        <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3">
-          <p className="text-sm text-amber-800 leading-relaxed">{body}</p>
-          {txId && (
-            <p className="text-xs text-amber-600 mt-1.5 font-mono break-all">
-              txId: {txId}
-            </p>
-          )}
-        </div>
-        <div className="flex flex-col gap-2">
-          <Link
-            href="/onboarding/billing"
-            className="w-full text-center text-sm font-bold py-3 rounded-xl
-                       bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-          >
-            נסה שנית ←
-          </Link>
-          <a
-            href="mailto:support@signdeal.co.il"
-            className="w-full text-center text-sm py-2.5 rounded-xl
-                       border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
-          >
-            פנה לתמיכה
-          </a>
-        </div>
-      </div>
+      {/* PaymentPolling is a client component — polls router.refresh() every 3 s */}
+      <PaymentPolling />
     </>
   );
 }
@@ -552,26 +334,15 @@ export default async function BillingSuccessPage({
   searchParams,
 }: {
   searchParams: Promise<{
-    // Stub flow
-    stub?:       string;
-    plan?:       string;
-    interval?:   string;
-    // HYP callback params (appended by HYP to SuccessUrl)
-    uniqueID?:   string;
-    txId?:       string;
-    cgUid?:      string;
-    cardToken?:  string;
-    cardExp?:    string;
-    cardMask?:   string;
-    personalId?: string;
-    authNumber?: string;
-    HKId?:       string;
-    responseMac?: string;
+    stub?:     string;
+    plan?:     string;
+    interval?: string;
   }>;
 }) {
   const p = await searchParams;
 
   // ── Flow A: Stub (local dev / staging test) ───────────────────────────────
+  // Preserved as-is: no DB hit, safe for dev environments.
   if (p.stub === "true") {
     return (
       <PageShell>
@@ -580,327 +351,95 @@ export default async function BillingSuccessPage({
     );
   }
 
-  // ── Flows B–E: HYP callback ───────────────────────────────────────────────
-  if (p.txId && p.uniqueID && p.responseMac) {
-    const cbParams: HypCallbackParams = {
-      uniqueID:    p.uniqueID,
-      txId:        p.txId,
-      cgUid:       p.cgUid,
-      cardToken:   p.cardToken,
-      cardExp:     p.cardExp,
-      cardMask:    p.cardMask,
-      personalId:  p.personalId,
-      authNumber:  p.authNumber,
-      HKId:        p.HKId,
-      responseMac: p.responseMac,
-    };
+  // ── Auth: get session user ────────────────────────────────────────────────
+  // Middleware ensures authenticated users only reach this page; redirect is a
+  // safety net for unexpected direct navigation with no cookie.
+  const session = await auth();
+  if (!session?.user?.id) {
+    redirect("/login?callbackUrl=/billing/success");
+  }
+  const userId = session.user.id;
 
-    const passp = process.env.HYP_PASSP?.trim() ?? "";
+  // ── Query subscription from DB ────────────────────────────────────────────
+  const subscription = await prisma.subscription.findUnique({
+    where:  { userId },
+    select: {
+      status:           true,
+      plan:             true,
+      billingInterval:  true,
+      trialEndsAt:      true,
+      currentPeriodEnd: true,
+      cardLast4:        true,
+    },
+  });
 
-    console.log(
-      `[billing/success] HYP callback received` +
-      ` txId=${p.txId}` +
-      ` uniqueID=${p.uniqueID}` +
-      ` hasHKId=${Boolean(p.HKId)}` +
-      ` hasCardMask=${Boolean(p.cardMask)}` +
-      ` hasCardExp=${Boolean(p.cardExp)}` +
-      ` hasAuthNumber=${Boolean(p.authNumber)}`,
-    );
+  if (!subscription) {
+    console.error(`[billing/success] subscription not found — userId=${userId}`);
+    return <PageShell><UnknownFlow /></PageShell>;
+  }
 
-    // ── Step 1: verify MAC BEFORE any DB read ─────────────────────────────
-    // This is the primary security gate. Prevents forged or tampered callbacks.
-    if (!passp) {
-      console.error("[billing/success] HYP_PASSP is not set — cannot verify responseMac.");
-    }
+  // ── Query most-recent SUCCEEDED checkout for display fields ───────────────
+  // txId and authNumber are stored in BillingCheckout by hyp-notify.
+  // These are display-only — subscription activation already happened.
+  const latestCheckout = await prisma.billingCheckout.findFirst({
+    where:   { userId, status: "SUCCEEDED" },
+    orderBy: { resolvedAt: "desc" },
+    select:  { txId: true, authNumber: true },
+  });
 
-    const macValid = passp ? verifyHypResponseMac(cbParams, passp) : false;
-    console.log(`[billing/success] MAC verification: ${macValid ? "PASS" : "FAIL"}`);
+  // ── Render based on DB subscription status ────────────────────────────────
 
-    if (!macValid) {
-      return (
-        <PageShell>
-          <HypVerificationFailed txId={p.txId} />
-        </PageShell>
-      );
-    }
+  const { status, plan, billingInterval } = subscription;
 
-    // ── Step 2: look up BillingCheckout by order ──────────────────────────
-    // BillingCheckout.order is the UUID we issued ("sd-<uuid>") — hard to guess.
-    // All subsequent DB writes use checkout.userId, never a query param.
-    const checkout = await prisma.billingCheckout.findUnique({
-      where: { order: p.uniqueID },
-    });
+  console.log(
+    `[billing/success] rendering` +
+    ` userId=${userId.slice(0, 8)}…` +
+    ` status=${status}` +
+    ` plan=${plan}` +
+    ` interval=${billingInterval}`,
+  );
 
-    console.log(
-      `[billing/success] BillingCheckout lookup` +
-      ` order=${p.uniqueID}` +
-      ` found=${Boolean(checkout)}` +
-      (checkout
-        ? ` status=${checkout.status} expired=${checkout.expiresAt < new Date()}`
-        : ""),
-    );
-
-    if (!checkout) {
-      return (
-        <PageShell>
-          <CheckoutError reason="not_found" txId={p.txId} />
-        </PageShell>
-      );
-    }
-
-    if (checkout.expiresAt < new Date()) {
-      return (
-        <PageShell>
-          <CheckoutError reason="expired" txId={p.txId} />
-        </PageShell>
-      );
-    }
-
-    // Idempotency: already SUCCEEDED → safe early return (page reload / double redirect).
-    if (checkout.status === "SUCCEEDED") {
-      console.log(`[billing/success] checkout already SUCCEEDED — idempotent response`);
-      return (
-        <PageShell>
-          <AlreadyActivated txId={p.txId} />
-        </PageShell>
-      );
-    }
-
-    // Already FAILED
-    if (checkout.status === "FAILED") {
-      return (
-        <PageShell>
-          <CheckoutError reason="failed" txId={p.txId} />
-        </PageShell>
-      );
-    }
-
-    // ── Step 3: fetch pre-transition subscription state ───────────────────
-    // Needed to bifurcate the activation path and to populate SubscriptionEvent
-    // fromPlan / fromStatus for the audit trail.
-    const subscription = await prisma.subscription.findUnique({
-      where:  { userId: checkout.userId },
-      select: { id: true, status: true, plan: true },
-    });
-
-    if (!subscription) {
-      console.error(
-        `[billing/success] subscription not found for userId=${checkout.userId} ` +
-        `order=${p.uniqueID} — data integrity issue`,
-      );
-      return (
-        <PageShell>
-          <CheckoutError reason="activation_error" txId={p.txId} />
-        </PageShell>
-      );
-    }
-
-    // ── Step 4: determine activation path ────────────────────────────────
-    // INCOMPLETE → TRIALING : first-time card, trial starts now (Phase 2C)
-    // everything else → ACTIVE : upgrade, re-activation, or plan change
-    const isTrialActivation = subscription.status === "INCOMPLETE";
-
-    const now = new Date();
-
-    // Parse card fields from callback
-    const { cardToken, cardLast4, cardExpMonth, cardExpYear } = parseCardFields({
-      HKId:      p.HKId,
-      cardToken: p.cardToken,
-      cardMask:  p.cardMask,
-      cardExp:   p.cardExp,
-    });
-
-    // Compute billing dates — different for each path
-    let trialEndsAt:      Date | null = null;
-    let currentPeriodEnd: Date | null = null;
-
-    if (isTrialActivation) {
-      trialEndsAt = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
-    } else {
-      currentPeriodEnd = new Date(now);
-      if (checkout.interval === "YEARLY") {
-        currentPeriodEnd.setFullYear(currentPeriodEnd.getFullYear() + 1);
-      } else {
-        currentPeriodEnd.setMonth(currentPeriodEnd.getMonth() + 1);
-      }
-    }
-
-    // ── Step 5: atomic activation transaction ────────────────────────────
-    // The updateMany WHERE status=PENDING is the atomic guard against concurrent
-    // double-activation (e.g. HYP retry + user reload racing).
-    // If count=0 → someone else processed this checkout first.
-    try {
-      await prisma.$transaction(async (tx) => {
-
-        // 5a. Mark checkout SUCCEEDED (atomic: only if still PENDING)
-        const checkoutUpdate = await tx.billingCheckout.updateMany({
-          where: { order: p.uniqueID!, status: "PENDING" },
-          data: {
-            status:     "SUCCEEDED",
-            txId:       p.txId         ?? null,
-            hkId:       p.HKId         ?? null,
-            cardToken:  p.cardToken    ?? null,   // raw HYP cardToken
-            cardExp:    p.cardExp      ?? null,   // raw MMYY expiry
-            cardMask:   p.cardMask     ?? null,
-            authNumber: p.authNumber   ?? null,
-            resolvedAt: now,
-          },
-        });
-
-        if (checkoutUpdate.count === 0) {
-          // Another concurrent request already processed this checkout.
-          throw new Error("ALREADY_PROCESSED");
-        }
-
-        // 5b. Update subscription — bifurcated by path
-        if (isTrialActivation) {
-          // ── INCOMPLETE → TRIALING ──────────────────────────────────────
-          // Card stored; 14-day trial clock starts now.
-          // No charge yet — trialEndsAt is also the Phase 3 billing cron cursor.
-          await tx.subscription.update({
-            where: { userId: checkout.userId },
-            data: {
-              status:               "TRIALING",
-              plan:                 checkout.plan,
-              billingInterval:      checkout.interval,
-              billingProvider:      "hyp",
-              billingSubscriptionId: p.HKId ?? null, // HK agreement ID — Phase 3 charge cursor
-              // Card-on-file fields (Phase 2C)
-              cardToken,       // = HKId — used by Phase 3 to charge via HYP HK
-              cardLast4,
-              cardExpMonth,
-              cardExpYear,
-              tokenCreatedAt:  now,
-              // Trial timing
-              trialEndsAt,
-              nextBillingAt:   trialEndsAt, // Phase 3 cron will charge on this date
-            },
-          });
-        } else {
-          // ── TRIALING / ACTIVE → ACTIVE ────────────────────────────────
-          // Upgrade or re-activation. First paid charge, period starts now.
-          await tx.subscription.update({
-            where: { userId: checkout.userId },
-            data: {
-              status:               "ACTIVE",
-              plan:                 checkout.plan,
-              billingInterval:      checkout.interval,
-              billingProvider:      "hyp",
-              billingSubscriptionId: p.HKId ?? null,
-              // Refresh card-on-file (user may have entered a new card)
-              cardToken,
-              cardLast4,
-              cardExpMonth,
-              cardExpYear,
-              tokenCreatedAt:     now,
-              firstPaymentAt:     now,
-              nextBillingAt:      currentPeriodEnd,
-              currentPeriodStart: now,
-              currentPeriodEnd,
-            },
-          });
-        }
-
-        // 5c. Append audit event
-        await tx.subscriptionEvent.create({
-          data: {
-            subscriptionId: subscription.id,
-            event:          isTrialActivation ? "trial_started" : "payment_succeeded",
-            fromPlan:       subscription.plan,
-            toPlan:         checkout.plan,
-            fromStatus:     subscription.status,
-            toStatus:       isTrialActivation ? "TRIALING" : "ACTIVE",
-            source:         "hyp_callback",
-            actorId:        null,
-            metadata:       JSON.stringify({
-              txId:       p.txId,
-              hkId:       p.HKId       ?? null,
-              authNumber: p.authNumber ?? null,
-              order:      p.uniqueID,
-              cardLast4,
-              ...(isTrialActivation
-                ? { trialDays: TRIAL_DAYS, trialEndsAt: trialEndsAt!.toISOString() }
-                : { currentPeriodEnd: currentPeriodEnd!.toISOString() }
-              ),
-            }),
-          },
-        });
-      });
-
-      console.log(
-        `[billing/success] activation SUCCESS` +
-        ` path=${isTrialActivation ? "INCOMPLETE→TRIALING" : "→ACTIVE"}` +
-        ` userId=${checkout.userId}` +
-        ` plan=${checkout.plan}` +
-        ` interval=${checkout.interval}` +
-        ` txId=${p.txId}` +
-        ` hkId=${p.HKId ?? "(none)"}` +
-        (isTrialActivation
-          ? ` trialEndsAt=${trialEndsAt!.toISOString()}`
-          : ` periodEnd=${currentPeriodEnd!.toISOString()}`
-        ),
-      );
-
-    } catch (err) {
-      // Concurrent double-activation — show idempotent success, don't error out.
-      if (err instanceof Error && err.message === "ALREADY_PROCESSED") {
-        console.log(
-          `[billing/success] ALREADY_PROCESSED (race condition) — idempotent response` +
-          ` order=${p.uniqueID} txId=${p.txId}`,
-        );
-        return (
-          <PageShell>
-            <AlreadyActivated txId={p.txId} />
-          </PageShell>
-        );
-      }
-
-      console.error(
-        "[billing/success] activation FAILED — transaction error:",
-        err instanceof Error ? err.message : err,
-        `userId=${checkout.userId} txId=${p.txId} order=${p.uniqueID}`,
-      );
-      return (
-        <PageShell>
-          <CheckoutError reason="activation_error" txId={p.txId} />
-        </PageShell>
-      );
-    }
-
-    // ── Step 6: render success ─────────────────────────────────────────────
-    if (isTrialActivation) {
-      return (
-        <PageShell>
-          <TrialActivationSuccess
-            txId={p.txId}
-            plan={checkout.plan}
-            interval={checkout.interval}
-            authNumber={p.authNumber}
-            cardMask={p.cardMask}
-            trialEndsAt={trialEndsAt!}
-          />
-        </PageShell>
-      );
-    }
-
+  // Flow B: TRIALING — hyp-notify activated the trial
+  if (status === "TRIALING" && subscription.trialEndsAt) {
     return (
       <PageShell>
-        <UpgradeActivationSuccess
-          txId={p.txId}
-          plan={checkout.plan}
-          interval={checkout.interval}
-          authNumber={p.authNumber}
-          cardMask={p.cardMask}
-          periodEnd={currentPeriodEnd!}
+        <TrialActivationSuccess
+          plan={plan}
+          interval={billingInterval}
+          trialEndsAt={subscription.trialEndsAt}
+          cardLast4={subscription.cardLast4}
+          txId={latestCheckout?.txId}
+          authNumber={latestCheckout?.authNumber}
         />
       </PageShell>
     );
   }
 
-  // ── Flow F: Unknown / direct navigation ──────────────────────────────────
-  return (
-    <PageShell>
-      <UnknownFlow />
-    </PageShell>
-  );
+  // Flow C: ACTIVE — upgrade / re-activation
+  if (status === "ACTIVE" && subscription.currentPeriodEnd) {
+    return (
+      <PageShell>
+        <UpgradeActivationSuccess
+          plan={plan}
+          interval={billingInterval}
+          currentPeriodEnd={subscription.currentPeriodEnd}
+          cardLast4={subscription.cardLast4}
+          txId={latestCheckout?.txId}
+          authNumber={latestCheckout?.authNumber}
+        />
+      </PageShell>
+    );
+  }
+
+  // Flow D: INCOMPLETE — hyp-notify hasn't fired yet; poll until it does
+  if (status === "INCOMPLETE") {
+    return (
+      <PageShell>
+        <PaymentVerifying />
+      </PageShell>
+    );
+  }
+
+  // Flow F: any other status — shouldn't normally reach here
+  return <PageShell><UnknownFlow /></PageShell>;
 }
