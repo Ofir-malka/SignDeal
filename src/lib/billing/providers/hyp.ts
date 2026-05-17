@@ -316,20 +316,28 @@ export async function callHypSoft(params: {
   );
 
   const qp = new URLSearchParams({
-    action:  "soft",
-    Masof:   masof,
-    PassP:   passp,
-    Amount:  String(params.amountShekels),
-    CC:      params.chargeToken,   // 19-digit token — not logged
-    Tmonth:  params.cardExpMonth.toString().padStart(2, "0"),
-    Tyear:   String(params.cardExpYear),
-    Token:   "True",               // tells HYP: CC is a stored token, not a PAN
-    Coin:    "1",                  // 1 = ILS
-    Tash:    "1",                  // 1 instalment — full charge now
-    Order:   params.order,
-    Info:    params.info,
-    UTF8:    "True",
-    UTF8out: "True",
+    action:     "soft",
+    Masof:      masof,
+    PassP:      passp,
+    Amount:     String(params.amountShekels),
+    CC:         params.chargeToken,   // 19-digit token — not logged
+    Tmonth:     params.cardExpMonth.toString().padStart(2, "0"),
+    Tyear:      String(params.cardExpYear),
+    Token:      "True",               // tells HYP: CC is a stored token, not a PAN
+    Coin:       "1",                  // 1 = ILS
+    Tash:       "1",                  // 1 instalment — full charge now
+    Order:      params.order,
+    Info:       params.info,
+    // UserId is Required by the Shva/HYP soft protocol.
+    // 9 zeros is the documented safe value when the national ID is not on file
+    // (same value sent in createCheckoutSession). Absence causes Shva CCode=6.
+    UserId:     "000000000",
+    // ClientName is Required by the soft protocol.
+    // Re-using the Info label (plan name) is safe for server-initiated charges
+    // where no interactive cardholder name is available.
+    ClientName: params.info,
+    UTF8:       "True",
+    UTF8out:    "True",
   });
 
   let cCode      = "999";
