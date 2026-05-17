@@ -569,14 +569,20 @@ async function activateCheckout(params: {
     !isTrialActivation &&
     (subscription.status === "PAST_DUE" || subscription.billingFailures > 0);
 
-  // CCode=700 (J5 auth-only / no charge) is valid ONLY for trial activation.
-  // If this fires on a paid-subscription path, something is wrong — reject it.
-  // A paid recurring charge MUST be CCode=0 (real money collected).
-  if (cCode === "700" && !isTrialActivation) {
+  // CCode=700 (J5 auth-only / no charge) is valid for TWO paths:
+  //   1. Trial activation (INCOMPLETE → TRIALING): card-first J5 flow, no charge today.
+  //   2. Recovery (PAST_DUE / billing-warning → ACTIVE): the user is re-entering card
+  //      details to update their payment method. HYP re-runs J5 to authorise the card
+  //      and issues a new HKId — exactly the same protocol as trial, so CCode=700 is
+  //      expected and correct. The next real charge happens at the next billing cycle.
+  //
+  // CCode=700 is NOT valid for normal upgrade/re-activation paths (non-trial,
+  // non-recovery) where real money must be collected (CCode=0).
+  if (cCode === "700" && !isTrialActivation && !isRecovery) {
     console.error(
-      `[billing/success] CCode=700 on non-trial path` +
+      `[billing/success] CCode=700 on normal paid path (not trial, not recovery)` +
       ` subscriptionStatus=${subscription.status} order="${order}" userId=${userId}` +
-      ` — J5 auth-only cannot activate a paid subscription. Rejecting.`,
+      ` — J5 auth-only cannot activate a normal paid subscription. Rejecting.`,
     );
     throw new Error("INVALID_CCODE_700_ON_PAID_PATH");
   }
