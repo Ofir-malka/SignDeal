@@ -136,7 +136,6 @@ export default async function BillingSettingsPage() {
         plan:            true,
         status:          true,
         billingInterval: true,
-        billingProvider: true,
         billingFailures: true,
 
         trialEndsAt:      true,
@@ -195,11 +194,11 @@ export default async function BillingSettingsPage() {
       ? `${String(sub.cardExpMonth).padStart(2, "0")}/${sub.cardExpYear}`
       : null;
 
-  // Billing provider display — "hyp" → "HYP Pay"
-  const providerLabel =
-    sub.billingProvider === "hyp" ? "HYP Pay" :
-    sub.billingProvider            ? sub.billingProvider :
-                                     "—";
+  // Payment method display: "•••• 1234 · MM/YYYY" or fallback
+  const paymentMethodLabel =
+    sub.cardLast4
+      ? `•••• ${sub.cardLast4}${cardExpiry ? ` · ${cardExpiry}` : ""}`
+      : null;
 
   // Next renewal / trial end label
   const nextEventLabel =
@@ -261,8 +260,10 @@ export default async function BillingSettingsPage() {
                 {intervalLabel}
               </DetailRow>
 
-              <DetailRow label="ספק חיוב">
-                {providerLabel}
+              <DetailRow label="אמצעי תשלום">
+                {paymentMethodLabel ?? (
+                  <span className="text-gray-400 font-normal">לא נוסף אמצעי תשלום</span>
+                )}
               </DetailRow>
 
               {nextEventLabel && (
@@ -274,20 +275,6 @@ export default async function BillingSettingsPage() {
               {sub.status === "TRIALING" && sub.trialEndsAt && (
                 <DetailRow label="תאריך סיום ניסיון">
                   {formatDate(sub.trialEndsAt)}
-                </DetailRow>
-              )}
-
-              {/* Card on file */}
-              {sub.cardLast4 && (
-                <DetailRow label="כרטיס אשראי">
-                  <span className="flex items-center gap-2">
-                    <span className="font-mono tracking-widest text-gray-700">
-                      •••• {sub.cardLast4}
-                    </span>
-                    {cardExpiry && (
-                      <span className="text-xs text-gray-400">תוקף {cardExpiry}</span>
-                    )}
-                  </span>
                 </DetailRow>
               )}
 
