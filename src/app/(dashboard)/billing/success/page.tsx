@@ -562,25 +562,38 @@ async function activateCheckout(params: {
 
   const isTrialActivation = subscription.status === "INCOMPLETE";
 
-  // Recovery path: any non-trial activation coming from a degraded billing state.
-  // PAST_DUE or billingFailures > 0 (1–2 warning failures) both qualify.
-  // In this path we reset billingFailures to 0 but do NOT overwrite firstPaymentAt.
-  const isRecovery =
-    !isTrialActivation &&
-    (subscription.status === "PAST_DUE" || subscription.billingFailures > 0);
-
-  // CCode=700 (J5 auth-only / no charge) is valid for TWO paths:
-  //   1. Trial activation (INCOMPLETE → TRIALING): card-first J5 flow, no charge today.
-  //   2. Recovery (PAST_DUE / billing-warning → ACTIVE): the user is re-entering card
-  //      details to update their payment method. HYP re-runs J5 to authorise the card
-  //      and issues a new HKId — exactly the same protocol as trial, so CCode=700 is
-  //      expected and correct. The next real charge happens at the next billing cycle.
+  // ── Purpose detection ────────────────────────────────────────────────────
+  // checkout.purpose is set explicitly by each API route (Phase 4B+).
+  // Old checkouts (purpose = "checkout") fall through to the inference fallback
+  // so existing rows are handled correctly without a data migration.
   //
-  // CCode=700 is NOT valid for normal upgrade/re-activation paths (non-trial,
-  // non-recovery) where real money must be collected (CCode=0).
-  if (cCode === "700" && !isTrialActivation && !isRecovery) {
+  // "recovery"              → PAST_DUE / warning user re-entering card.
+  //                          Resets billingFailures, sets status ACTIVE.
+  // "payment_method_update" → Healthy ACTIVE/TRIALING user updating card.
+  //                          Updates card fields only; no billing-state changes.
+  // "checkout" / anything   → Normal new subscription / upgrade (default).
+  const isRecovery =
+    checkout.purpose === "recovery" ||
+    // Backward-compat: old "checkout" rows inferred from subscription state.
+    (checkout.purpose === "checkout" && !isTrialActivation &&
+     (subscription.status === "PAST_DUE" || subscription.billingFailures > 0));
+
+  const isPaymentMethodUpdate = checkout.purpose === "payment_method_update";
+
+  // ── CCode=700 guard ───────────────────────────────────────────────────────
+  // CCode=700 ("אישור ללא חיוב" — J5 auth-only) is expected on three paths:
+  //   1. Trial activation    — card authorised without charge; trial clock starts.
+  //   2. Recovery            — new card authorised; next billing cycle will charge.
+  //   3. Payment method update — new card authorised; billing schedule unchanged.
+  //
+  // For all three, HYP still creates a valid HKId that we store as cardToken.
+  // callGetToken(hypId) then retrieves the 19-digit chargeToken for future soft charges.
+  //
+  // CCode=700 is INVALID for normal upgrade / paid re-activation where real
+  // money must be collected immediately (CCode=0 required).
+  if (cCode === "700" && !isTrialActivation && !isRecovery && !isPaymentMethodUpdate) {
     console.error(
-      `[billing/success] CCode=700 on normal paid path (not trial, not recovery)` +
+      `[billing/success] CCode=700 on normal paid path (not trial, not recovery, not PMU)` +
       ` subscriptionStatus=${subscription.status} order="${order}" userId=${userId}` +
       ` — J5 auth-only cannot activate a normal paid subscription. Rejecting.`,
     );
@@ -602,7 +615,9 @@ async function activateCheckout(params: {
 
   if (isTrialActivation) {
     trialEndsAt = new Date(now.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000);
-  } else {
+  } else if (!isPaymentMethodUpdate) {
+    // Recovery and normal paid paths need a new currentPeriodEnd.
+    // PMU does not — the existing billing schedule is preserved unchanged.
     currentPeriodEnd = new Date(now);
     if (checkout.interval === "YEARLY") {
       currentPeriodEnd.setFullYear(currentPeriodEnd.getFullYear() + 1);
@@ -613,7 +628,7 @@ async function activateCheckout(params: {
 
   console.log(
     `[billing/success] ACTIVATING` +
-    ` path=${isTrialActivation ? "INCOMPLETE→TRIALING" : isRecovery ? "RECOVERY→ACTIVE" : "→ACTIVE"}` +
+    ` path=${isTrialActivation ? "INCOMPLETE→TRIALING" : isPaymentMethodUpdate ? "CARD_UPDATE_ONLY" : isRecovery ? "RECOVERY→ACTIVE" : "→ACTIVE"}` +
     ` cCode=${cCode}` +
     ` userId=${userId}` +
     ` order="${order}"` +
@@ -662,6 +677,27 @@ async function activateCheckout(params: {
           nextBillingAt:         trialEndsAt,
         },
       });
+    } else if (isPaymentMethodUpdate) {
+      // ACTIVE / TRIALING → same status (card-only update).
+      // Update card fields and provider token. Touch NOTHING else:
+      //   • status unchanged        — subscription stays ACTIVE / TRIALING
+      //   • billingFailures unchanged — caller is healthy; recovery handles resets
+      //   • firstPaymentAt unchanged — history preserved
+      //   • nextBillingAt unchanged  — billing schedule preserved
+      //   • currentPeriodStart/End unchanged
+      //   • plan / billingInterval unchanged
+      await tx.subscription.update({
+        where: { userId },
+        data:  {
+          billingProvider:       "hyp",
+          billingSubscriptionId: hkId || null,
+          cardToken:             hkId || null,
+          cardLast4,
+          cardExpMonth,
+          cardExpYear,
+          tokenCreatedAt:        now,
+        },
+      });
     } else {
       // TRIALING / ACTIVE → ACTIVE (normal paid activation), or
       // PAST_DUE / warning → ACTIVE (recovery: new card, restore access).
@@ -695,25 +731,31 @@ async function activateCheckout(params: {
     await tx.subscriptionEvent.create({
       data: {
         subscriptionId: subscription.id,
-        event:          isTrialActivation ? "trial_started"
-                      : isRecovery       ? "payment_recovered"
-                      :                    "payment_succeeded",
+        event:          isTrialActivation     ? "trial_started"
+                      : isPaymentMethodUpdate ? "payment_method_updated"
+                      : isRecovery           ? "payment_recovered"
+                      :                        "payment_succeeded",
         fromPlan:       subscription.plan,
-        toPlan:         checkout.plan,
+        toPlan:         isPaymentMethodUpdate ? subscription.plan : checkout.plan,
         fromStatus:     subscription.status,
-        toStatus:       isTrialActivation ? "TRIALING" : "ACTIVE",
+        toStatus:       isTrialActivation     ? "TRIALING"
+                      : isPaymentMethodUpdate ? subscription.status
+                      :                        "ACTIVE",
         source:         "hyp_verify",
         actorId:        null,
         metadata:       JSON.stringify({
           hypId,
-          cCode,          // "0" = paid charge; "700" = J5 auth-only (trial)
+          cCode,
           hkId:       hkId  || null,
           authNumber: aCode || null,
           order,
           cardLast4,
-          ...(isTrialActivation
-            ? { trialDays: TRIAL_DAYS, trialEndsAt: trialEndsAt!.toISOString() }
-            : { currentPeriodEnd: currentPeriodEnd!.toISOString() }
+          purpose:    checkout.purpose,
+          ...(isTrialActivation && trialEndsAt
+            ? { trialDays: TRIAL_DAYS, trialEndsAt: trialEndsAt.toISOString() }
+            : currentPeriodEnd
+            ? { currentPeriodEnd: currentPeriodEnd.toISOString() }
+            : {}
           ),
         }),
       },
@@ -722,7 +764,7 @@ async function activateCheckout(params: {
 
   console.log(
     `[billing/success] ACTIVATION_SUCCESS` +
-    ` path=${isTrialActivation ? "INCOMPLETE→TRIALING" : isRecovery ? "RECOVERY→ACTIVE" : "→ACTIVE"}` +
+    ` path=${isTrialActivation ? "INCOMPLETE→TRIALING" : isPaymentMethodUpdate ? "CARD_UPDATE_ONLY" : isRecovery ? "RECOVERY→ACTIVE" : "→ACTIVE"}` +
     ` userId=${userId}` +
     ` order="${order}"`,
   );

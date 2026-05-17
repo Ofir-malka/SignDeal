@@ -588,6 +588,17 @@ model BillingCheckout {
   interval BillingInterval
   status   BillingCheckoutStatus @default(PENDING)
 
+  // ── Checkout purpose (Phase 4B) ────────────────────────────────────────────
+  // Disambiguates the activation path in /billing/success so we don't have to
+  // infer intent from subscription state (which is ambiguous for PMU vs upgrade).
+  //
+  // "checkout"              — normal new subscription or upgrade (default; backward-compat)
+  // "recovery"              — PAST_DUE / billing-warning user re-entering card;
+  //                          activateCheckout resets billingFailures, sets ACTIVE
+  // "payment_method_update" — healthy subscriber updating card; activateCheckout
+  //                          updates card fields only, no billing-state changes
+  purpose  String  @default("checkout")
+
   // ── Populated on callback (Phase 3 Step 2+) ────────────────────────────────
   txId       String?  // HYP transaction ID
   hkId       String?  // HYP recurring agreement ID (from HK module)

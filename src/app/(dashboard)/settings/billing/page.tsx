@@ -370,6 +370,27 @@ export default async function BillingSettingsPage() {
               </div>
             )}
 
+            {/* Payment method update CTA — healthy ACTIVE/TRIALING with no failures */}
+            {(sub.status === "ACTIVE" || sub.status === "TRIALING") &&
+              sub.billingFailures === 0 && (
+              <div className="mx-6 mb-5 mt-2 border-t border-gray-50 pt-4 flex items-center justify-between">
+                <span className="text-sm text-gray-500">
+                  {sub.cardLast4 ? "אמצעי תשלום" : "אין אמצעי תשלום"}
+                </span>
+                <Link
+                  href="/settings/billing/payment-method"
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-700 transition-colors"
+                >
+                  {sub.cardLast4 ? "החלפת אמצעי תשלום" : "הוספת אמצעי תשלום"}
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+                    aria-hidden="true">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </Link>
+              </div>
+            )}
+
             {/* Billing warning strip — shown for ACTIVE/TRIALING with 1–2 failures */}
             {sub.status !== "PAST_DUE" && sub.billingFailures > 0 && (
               <div className="mx-6 mb-5 mt-2 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 flex items-start gap-3">

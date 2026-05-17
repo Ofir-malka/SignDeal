@@ -1,17 +1,22 @@
 /**
- * POST /api/billing/recover
+ * POST /api/billing/payment-method/update
  *
- * Creates a recovery checkout session for users whose billing has failed.
- * Eligible when: subscription status = PAST_DUE OR billingFailures >= 1.
+ * Creates a card-update checkout session for a healthy ACTIVE or TRIALING
+ * subscriber who wants to change their payment method without any billing
+ * disruption. This is different from the recovery flow:
  *
- * Reuses the existing plan + interval — recovery does not change the plan.
- * SuccessUrl is /billing/success (portal GoodURL constraint means we cannot
- * redirect to a custom URL; HYP strips all query params if GoodURL ≠ SuccessUrl).
+ *   Recovery  → PAST_DUE / billingFailures ≥ 1 → resets billingFailures, restores ACTIVE
+ *   PMU       → ACTIVE / TRIALING, no failures  → updates card fields only, no state changes
+ *
+ * HYP runs the same J5 auth-only flow as trial activation, issuing a new HKId
+ * and returning CCode=700. /billing/success detects purpose="payment_method_update"
+ * and updates card fields without touching status, billingFailures, firstPaymentAt,
+ * nextBillingAt, or the current billing period.
  *
  * Request body: (empty — plan and interval are read from the subscription row)
  *
  * Response (200): { checkoutUrl: string }
- * Response (400): not eligible / non-billable plan
+ * Response (400): PAST_DUE or INCOMPLETE (wrong flow) / non-billable plan
  * Response (401): unauthenticated
  * Response (404): no subscription or user found
  * Response (500): provider error
@@ -24,6 +29,9 @@ import { getBillingProvider } from "@/lib/billing";
 import type { BillablePlan, BillingInterval } from "@/lib/billing";
 
 const BILLABLE_PLANS: readonly BillablePlan[] = ["STANDARD", "GROWTH", "PRO"];
+
+/** Statuses that are eligible for self-serve card update. */
+const ELIGIBLE_STATUSES = new Set(["ACTIVE", "TRIALING"]);
 
 export async function POST(): Promise<NextResponse> {
   // ── Auth ──────────────────────────────────────────────────────────────────
@@ -47,13 +55,18 @@ export async function POST(): Promise<NextResponse> {
   }
 
   // ── Eligibility check ─────────────────────────────────────────────────────
-  // Allow recovery if PAST_DUE or has any billing failures (1+).
-  const isEligible =
-    subscription.status === "PAST_DUE" || subscription.billingFailures >= 1;
-
-  if (!isEligible) {
+  // PAST_DUE → use /api/billing/recover instead.
+  // INCOMPLETE → complete onboarding first.
+  // CANCELED / EXPIRED → not eligible for card update.
+  if (!ELIGIBLE_STATUSES.has(subscription.status)) {
+    if (subscription.status === "PAST_DUE") {
+      return NextResponse.json(
+        { error: "Account is past due. Use the recovery flow to restore access.", code: "USE_RECOVERY" },
+        { status: 400 },
+      );
+    }
     return NextResponse.json(
-      { error: "Subscription is not eligible for recovery" },
+      { error: `Subscription status "${subscription.status}" is not eligible for payment method update` },
       { status: 400 },
     );
   }
@@ -66,7 +79,7 @@ export async function POST(): Promise<NextResponse> {
     );
   }
 
-  // ── Fetch user email (needed for provider session creation) ───────────────
+  // ── Fetch user email ──────────────────────────────────────────────────────
   const user = await prisma.user.findUnique({
     where:  { id: userId },
     select: { email: true },
@@ -83,7 +96,7 @@ export async function POST(): Promise<NextResponse> {
   // (/billing/success). HYP strips all query params if they differ.
   const successUrl = `${base}/billing/success`;
   const errorUrl   = `${base}/billing/error`;
-  const cancelUrl  = `${base}/settings/billing/recover`; // back to recovery page on cancel
+  const cancelUrl  = `${base}/settings/billing/payment-method`; // back to PMU page on cancel
 
   // ── Create checkout session via active billing provider ───────────────────
   let provider;
@@ -91,14 +104,14 @@ export async function POST(): Promise<NextResponse> {
     provider = getBillingProvider();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[api/billing/recover] getBillingProvider failed:", msg);
+    console.error("[api/billing/payment-method/update] getBillingProvider failed:", msg);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 
   const result = await provider.createCheckoutSession({
     userId,
     userEmail: user.email,
-    plan:      subscription.plan     as BillablePlan,
+    plan:      subscription.plan            as BillablePlan,
     interval:  subscription.billingInterval as BillingInterval,
     successUrl,
     errorUrl,
@@ -106,13 +119,13 @@ export async function POST(): Promise<NextResponse> {
   });
 
   if (!result.ok) {
-    console.error("[api/billing/recover] provider error:", result.reason);
+    console.error("[api/billing/payment-method/update] provider error:", result.reason);
     return NextResponse.json({ error: result.reason }, { status: 500 });
   }
 
   // ── Create PENDING checkout record ────────────────────────────────────────
-  // The record enables idempotency and carries plan+interval into the success
-  // callback so activateCheckout knows what to activate.
+  // purpose="payment_method_update" tells activateCheckout to update card
+  // fields only without touching billing state.
   if (result.order) {
     try {
       await prisma.billingCheckout.create({
@@ -122,23 +135,22 @@ export async function POST(): Promise<NextResponse> {
           plan:      subscription.plan            as BillablePlan,
           interval:  subscription.billingInterval as BillingInterval,
           status:    "PENDING",
-          purpose:   "recovery",
+          purpose:   "payment_method_update",
           expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes
         },
       });
     } catch (err) {
       // Log but do NOT block the redirect — user experience > audit record.
-      console.error("[api/billing/recover] failed to create BillingCheckout:", err);
+      console.error("[api/billing/payment-method/update] failed to create BillingCheckout:", err);
     }
   }
 
   console.log(
-    `[api/billing/recover] session created` +
+    `[api/billing/payment-method/update] session created` +
     ` userId=${userId}` +
     ` plan=${subscription.plan}` +
     ` interval=${subscription.billingInterval}` +
-    ` status=${subscription.status}` +
-    ` billingFailures=${subscription.billingFailures}`,
+    ` status=${subscription.status}`,
   );
 
   return NextResponse.json({ checkoutUrl: result.checkoutUrl });
