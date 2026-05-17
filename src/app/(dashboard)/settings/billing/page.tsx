@@ -346,7 +346,33 @@ export default async function BillingSettingsPage() {
             )}
 
             {sub.status === "PAST_DUE" && (
-              <div className="mx-6 mb-5 mt-2 rounded-xl bg-amber-50 border border-amber-100 px-4 py-3 flex items-start gap-3">
+              <div className="mx-6 mb-5 mt-2 rounded-xl bg-red-50 border border-red-200 px-4 py-3 flex items-start gap-3">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                  stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  className="mt-0.5 shrink-0">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-red-800">הגישה מושעית — חיוב נכשל</p>
+                  <p className="text-sm text-red-700 mt-0.5 leading-relaxed">
+                    כל ניסיונות החיוב נכשלו.{" "}
+                    <Link
+                      href="/settings/billing/recover"
+                      className="underline font-semibold hover:text-red-900 transition-colors"
+                    >
+                      עדכן אמצעי תשלום
+                    </Link>
+                    {" "}להפעלת המנוי מחדש.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Billing warning strip — shown for ACTIVE/TRIALING with 1–2 failures */}
+            {sub.status !== "PAST_DUE" && sub.billingFailures > 0 && (
+              <div className="mx-6 mb-5 mt-2 rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 flex items-start gap-3">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
                   stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
                   className="mt-0.5 shrink-0">
@@ -354,13 +380,20 @@ export default async function BillingSettingsPage() {
                   <line x1="12" y1="9" x2="12" y2="13" />
                   <line x1="12" y1="17" x2="12.01" y2="17" />
                 </svg>
-                <p className="text-sm text-amber-800 leading-relaxed">
-                  קיימת בעיה בחיוב החשבון שלך. נסה שוב מאוחר יותר או{" "}
-                  <a href="mailto:support@signdeal.co.il" className="underline font-medium">
-                    צור קשר עם התמיכה
-                  </a>
-                  .
-                </p>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-amber-800">
+                    ניסיון חיוב נכשל ({sub.billingFailures} מתוך 3)
+                  </p>
+                  <p className="text-sm text-amber-700 mt-0.5 leading-relaxed">
+                    <Link
+                      href="/settings/billing/recover"
+                      className="underline font-semibold hover:text-amber-900 transition-colors"
+                    >
+                      עדכן אמצעי תשלום
+                    </Link>
+                    {" "}כדי למנוע השעיית הגישה.
+                  </p>
+                </div>
               </div>
             )}
 

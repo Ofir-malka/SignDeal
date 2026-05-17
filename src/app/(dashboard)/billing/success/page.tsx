@@ -540,7 +540,7 @@ async function activateCheckout(params: {
     prisma.billingCheckout.findUnique({ where: { order } }),
     prisma.subscription.findUnique({
       where:  { userId },
-      select: { id: true, status: true, plan: true },
+      select: { id: true, status: true, plan: true, billingFailures: true },
     }),
   ]);
 
@@ -561,6 +561,13 @@ async function activateCheckout(params: {
   if (!subscription) throw new Error("SUBSCRIPTION_NOT_FOUND");
 
   const isTrialActivation = subscription.status === "INCOMPLETE";
+
+  // Recovery path: any non-trial activation coming from a degraded billing state.
+  // PAST_DUE or billingFailures > 0 (1–2 warning failures) both qualify.
+  // In this path we reset billingFailures to 0 but do NOT overwrite firstPaymentAt.
+  const isRecovery =
+    !isTrialActivation &&
+    (subscription.status === "PAST_DUE" || subscription.billingFailures > 0);
 
   // CCode=700 (J5 auth-only / no charge) is valid ONLY for trial activation.
   // If this fires on a paid-subscription path, something is wrong — reject it.
@@ -600,7 +607,7 @@ async function activateCheckout(params: {
 
   console.log(
     `[billing/success] ACTIVATING` +
-    ` path=${isTrialActivation ? "INCOMPLETE→TRIALING" : "→ACTIVE"}` +
+    ` path=${isTrialActivation ? "INCOMPLETE→TRIALING" : isRecovery ? "RECOVERY→ACTIVE" : "→ACTIVE"}` +
     ` cCode=${cCode}` +
     ` userId=${userId}` +
     ` order="${order}"` +
@@ -650,7 +657,8 @@ async function activateCheckout(params: {
         },
       });
     } else {
-      // TRIALING / ACTIVE → ACTIVE: paid billing cycle begins.
+      // TRIALING / ACTIVE → ACTIVE (normal paid activation), or
+      // PAST_DUE / warning → ACTIVE (recovery: new card, restore access).
       await tx.subscription.update({
         where: { userId },
         data:  {
@@ -664,9 +672,15 @@ async function activateCheckout(params: {
           cardExpMonth,
           cardExpYear,
           tokenCreatedAt:        now,
-          firstPaymentAt:        now,
-          nextBillingAt:         currentPeriodEnd,
-          currentPeriodStart:    now,
+          // Recovery: reset failure counter and restore clean state.
+          // Normal: record the date of the very first real charge.
+          // firstPaymentAt is preserved on recovery (already set from first charge).
+          ...(isRecovery
+            ? { billingFailures: 0 }
+            : { firstPaymentAt: now }
+          ),
+          nextBillingAt:      currentPeriodEnd,
+          currentPeriodStart: now,
           currentPeriodEnd,
         },
       });
@@ -675,7 +689,9 @@ async function activateCheckout(params: {
     await tx.subscriptionEvent.create({
       data: {
         subscriptionId: subscription.id,
-        event:          isTrialActivation ? "trial_started" : "payment_succeeded",
+        event:          isTrialActivation ? "trial_started"
+                      : isRecovery       ? "payment_recovered"
+                      :                    "payment_succeeded",
         fromPlan:       subscription.plan,
         toPlan:         checkout.plan,
         fromStatus:     subscription.status,
@@ -700,7 +716,7 @@ async function activateCheckout(params: {
 
   console.log(
     `[billing/success] ACTIVATION_SUCCESS` +
-    ` path=${isTrialActivation ? "INCOMPLETE→TRIALING" : "→ACTIVE"}` +
+    ` path=${isTrialActivation ? "INCOMPLETE→TRIALING" : isRecovery ? "RECOVERY→ACTIVE" : "→ACTIVE"}` +
     ` userId=${userId}` +
     ` order="${order}"`,
   );
