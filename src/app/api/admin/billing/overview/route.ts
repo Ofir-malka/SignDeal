@@ -31,11 +31,20 @@ import { requireAdmin }  from "@/lib/require-admin";
 interface BillingKpis {
   activeSubscriptions:       number;
   trialingSubscriptions:     number;
-  pastDueSubscriptions:      number;
+  /**
+   * Escalated subscriptions — status = PAST_DUE OR billingFailures >= 3.
+   * Covers both the normal path (cron sets PAST_DUE after 3 failures) and any
+   * edge case where billingFailures reached 3 before status was written.
+   */
+  escalatedSubscriptions:    number;
   failedChargesLast30Days:   number;
   monthlyRevenueAgorot:      number;
   upcomingRenewalsNext7Days: number;
-  /** Subscriptions with 1–2 billing failures (isWarning, not yet PAST_DUE). */
+  /**
+   * Warning-state subscriptions — ACTIVE or TRIALING with billingFailures IN (1, 2).
+   * These users had 1–2 charge failures but are still recoverable (not yet suspended).
+   * Explicitly excludes billingFailures = 0 (healthy) and >= 3 (already escalated).
+   */
   billingWarningSubscriptions: number;
 }
 
@@ -118,9 +127,16 @@ export async function GET(_request: Request): Promise<NextResponse> {
         where: { status: "TRIALING" },
       }),
 
-      // 3. Past-due subscriptions
+      // 3. Escalated subscriptions: status = PAST_DUE OR billingFailures >= 3.
+      // The OR guard catches any subscription that reached 3 failures but whose
+      // status update lagged (e.g. partial cron crash between the two DB writes).
       prisma.subscription.count({
-        where: { status: "PAST_DUE" },
+        where: {
+          OR: [
+            { status: "PAST_DUE" },
+            { billingFailures: { gte: 3 } },
+          ],
+        },
       }),
 
       // 4. Failed charges in last 30 days
@@ -206,12 +222,13 @@ export async function GET(_request: Request): Promise<NextResponse> {
         },
       }),
 
-      // 9. Subscriptions in billing-warning state: 1–2 failures, not yet PAST_DUE.
-      // These have billingFailures >= 1 but status is still ACTIVE or TRIALING.
+      // 9. Warning-state subscriptions: ACTIVE or TRIALING with billingFailures IN (1, 2).
+      // lte: 2 explicitly excludes billingFailures = 3, which should be PAST_DUE
+      // but might not be if the cron status-write hasn't run yet.
       prisma.subscription.count({
         where: {
-          billingFailures: { gte: 1 },
           status:          { in: ["ACTIVE", "TRIALING"] },
+          billingFailures: { gte: 1, lte: 2 },
         },
       }),
     ]);
@@ -220,7 +237,7 @@ export async function GET(_request: Request): Promise<NextResponse> {
     const kpis: BillingKpis = {
       activeSubscriptions:         activeCount,
       trialingSubscriptions:       trialingCount,
-      pastDueSubscriptions:        pastDueCount,
+      escalatedSubscriptions:      pastDueCount,   // variable reused; query now covers PAST_DUE OR failures>=3
       failedChargesLast30Days:     failedCount,
       monthlyRevenueAgorot:        revenueAgg._sum.amountAgorot ?? 0,
       upcomingRenewalsNext7Days:   renewalsCount,

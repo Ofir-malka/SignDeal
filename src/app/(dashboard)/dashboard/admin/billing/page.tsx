@@ -30,11 +30,12 @@ import { StatsCard }            from "@/components/StatsCard";
 interface BillingKpis {
   activeSubscriptions:         number;
   trialingSubscriptions:       number;
-  pastDueSubscriptions:        number;
+  /** status = PAST_DUE OR billingFailures >= 3 */
+  escalatedSubscriptions:      number;
   failedChargesLast30Days:     number;
   monthlyRevenueAgorot:        number;
   upcomingRenewalsNext7Days:   number;
-  /** Subscriptions with 1–2 billing failures (not yet PAST_DUE). Phase 3E. */
+  /** ACTIVE or TRIALING with billingFailures IN (1, 2) */
   billingWarningSubscriptions: number;
 }
 
@@ -273,11 +274,11 @@ function KpiGrid({ kpis }: { kpis: BillingKpis }) {
         }
       />
       <StatsCard
-        title="מנויים בבעיה"
-        value={String(kpis.pastDueSubscriptions)}
-        subtitle="סטטוס PAST_DUE"
-        accentColor="amber"
-        trend={kpis.pastDueSubscriptions > 0 ? "down" : "neutral"}
+        title="מנויים מוקפאים"
+        value={String(kpis.escalatedSubscriptions)}
+        subtitle="PAST_DUE או 3+ כישלונות"
+        accentColor="orange"
+        trend={kpis.escalatedSubscriptions > 0 ? "down" : "neutral"}
         icon={
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
