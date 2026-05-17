@@ -17,6 +17,7 @@ import { FAQSection }          from "@/components/marketing/FAQSection";
 import { FinalCTA }            from "@/components/marketing/FinalCTA";
 import { MarketingFooter }     from "@/components/marketing/MarketingFooter";
 import { MobileStickyCTA }     from "@/components/marketing/MobileStickyCTA";
+import { HomeIntro }           from "@/components/marketing/HomeIntro";
 
 // ── Page constants ─────────────────────────────────────────────────────────────
 const SITE_URL    = "https://www.signdeal.co.il";
@@ -184,6 +185,9 @@ export default function HomePage() {
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
+
+      {/* Intro overlay — client component, zero SSR output, session-gated */}
+      <HomeIntro />
 
       <div className="min-h-screen bg-indigo-950 overflow-x-hidden">
         <NavBar />

@@ -166,3 +166,49 @@ label,
     scroll-behavior: auto !important;
   }
 }
+/* ── HomeIntro animation keyframes ──────────────────────────────────────────── */
+
+/* SVG signature line draws in (stroke-dashoffset → 0).
+   Path length ≈ 310 — keep dasharray in sync with the SVG element. */
+@keyframes sd-draw {
+  from { stroke-dashoffset: 310; }
+  to   { stroke-dashoffset: 0;   }
+}
+
+/* Gentle pulsing glow on the SVG line after it finishes drawing */
+@keyframes sd-glow-pulse {
+  0%, 100% { filter: drop-shadow(0 0 6px #a78bfa) drop-shadow(0 0 14px #7c3aed); }
+  50%       { filter: drop-shadow(0 0 10px #c4b5fd) drop-shadow(0 0 22px #8b5cf6); }
+}
+
+/* Text: blur-to-clear fade-in */
+@keyframes sd-fadein-blur {
+  from { opacity: 0; filter: blur(10px); transform: scale(0.96) translateY(4px); }
+  to   { opacity: 1; filter: blur(0);    transform: scale(1)    translateY(0);   }
+}
+
+/* Checkmark: scale pop-in */
+@keyframes sd-popin {
+  0%   { opacity: 0; transform: scale(0.3) rotate(-20deg); }
+  60%  { opacity: 1; transform: scale(1.2) rotate(6deg);   }
+  100% { opacity: 1; transform: scale(1)   rotate(0deg);   }
+}
+
+/* Shimmer sweep — bright segment racing along the drawn stroke after it completes */
+@keyframes sd-shimmer {
+  from { stroke-dashoffset:  360; stroke-opacity: 0.9; }
+  80%  { stroke-opacity: 0.7; }
+  to   { stroke-dashoffset: -360; stroke-opacity: 0;   }
+}
+
+/* Sparkle twinkle — for small dots along the signature path */
+@keyframes sd-twinkle {
+  0%, 100% { opacity: 0;    transform: scale(0.4); }
+  50%       { opacity: 0.85; transform: scale(1);   }
+}
+
+/* Radial glow behind the logo — slow breathing pulse */
+@keyframes sd-glow-breathe {
+  0%, 100% { opacity: 0.55; transform: scale(1);    }
+  50%       { opacity: 0.80; transform: scale(1.08); }
+}
