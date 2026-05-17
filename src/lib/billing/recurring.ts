@@ -17,6 +17,17 @@
  *     and returns without writing any DB rows or calling HYP.
  *     Useful for verifying the scan finds the correct subscriptions.
  *
+ * ── Recurring provider (controls what happens after both gates pass) ──────────
+ *
+ *   RECURRING_BILLING_PROVIDER=stub
+ *     Full DB flow executes (BillingCharge PENDING→SUCCEEDED, Subscription
+ *     TRIALING→ACTIVE, nextBillingAt advances, SubscriptionEvent written)
+ *     but no HYP action=soft network call is made. Logs SOFT_CHARGE_STUB_SUCCESS.
+ *     Use this for end-to-end DB testing before real money is involved.
+ *
+ *   RECURRING_BILLING_PROVIDER=hyp  (or unset — defaults to hyp)
+ *     Real action=soft call sent to HYP. Only safe with production credentials.
+ *
  * ── Eligibility criteria ─────────────────────────────────────────────────────
  *   billingProvider = "hyp"
  *   plan            IN (STANDARD, GROWTH, PRO)    ← AGENCY uses custom billing
@@ -43,10 +54,9 @@
  *   Raw HYP response bodies are never stored or logged (see callHypSoft).
  */
 
-import { prisma }        from "@/lib/prisma";
-import { PLAN_AMOUNTS, PLAN_LABELS, BILLABLE_PLANS, type BillablePlan }
-                         from "./amounts";
-import { callHypSoft }   from "./providers/hyp";
+import { prisma }                                                       from "@/lib/prisma";
+import { PLAN_AMOUNTS, PLAN_LABELS, BILLABLE_PLANS, type BillablePlan } from "./amounts";
+import { callHypSoft, type SoftChargeResult }                           from "./providers/hyp";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -82,6 +92,8 @@ export interface RecurringChargeResult {
   dryRunMode:         boolean;
   /** Whether ENABLE_REAL_RECURRING_CHARGES=true was active for this run. */
   realChargesEnabled: boolean;
+  /** Which recurring provider was active: "stub" (no HYP call) or "hyp" (real charge). */
+  recurringProvider:  "stub" | "hyp";
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -109,15 +121,23 @@ function computeRetryDate(now: Date, newFailureCount: number): Date | null {
 export async function processRecurringCharges(): Promise<RecurringChargeResult> {
   const now = new Date();
 
-  // ── Read safety gates ─────────────────────────────────────────────────────
+  // ── Read safety gates + provider selection ────────────────────────────────
   const realChargesEnabled = process.env.ENABLE_REAL_RECURRING_CHARGES === "true";
   const isDryRun           = process.env.BILLING_CHARGE_DRY_RUN === "true";
+
+  // RECURRING_BILLING_PROVIDER selects between stub (full DB flow, no HYP call)
+  // and hyp (real action=soft). Defaults to "hyp" when unset.
+  // Only relevant after both safety gates pass — if either gate blocks, the
+  // provider value is irrelevant and no charge executes regardless.
+  const rawProvider       = process.env.RECURRING_BILLING_PROVIDER?.trim().toLowerCase();
+  const recurringProvider = rawProvider === "stub" ? "stub" : "hyp";
 
   console.log(
     `[billing/recurring] SCAN_START` +
     ` at=${now.toISOString()}` +
     ` realChargesEnabled=${realChargesEnabled}` +
-    ` isDryRun=${isDryRun}`,
+    ` isDryRun=${isDryRun}` +
+    ` recurringProvider=${recurringProvider}`,
   );
 
   // ── Scan: due + chargeToken present ──────────────────────────────────────
@@ -311,15 +331,37 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
       ` periodEnd=${periodEnd.toISOString()}`,
     );
 
-    // ── Call HYP action=soft ───────────────────────────────────────────────
-    const result = await callHypSoft({
-      chargeToken:   tokenRow.chargeToken,    // never logged inside callHypSoft
-      amountShekels,
-      cardExpMonth:  sub.cardExpMonth,
-      cardExpYear:   sub.cardExpYear,
-      order:         charge.id,
-      info:          `${planLabel} · ${intervalLabel}`,
-    });
+    // ── Execute charge: stub or real HYP ──────────────────────────────────
+    let result: SoftChargeResult;
+
+    if (recurringProvider === "stub") {
+      // Stub path — full DB flow, no HYP network call.
+      // chargeToken is present (verified above) but intentionally not logged.
+      const fakeTransId = `stub-${charge.id}`;
+      console.log(
+        `[billing/recurring] SOFT_CHARGE_STUB_SUCCESS` +
+        ` chargeId=${charge.id}` +
+        ` subscriptionId=${sub.id}` +
+        ` userId=${sub.userId}` +
+        ` plan=${sub.plan}` +
+        ` amountShekels=${amountShekels}` +
+        ` fakeTransId=${fakeTransId}` +
+        ` — no HYP action=soft call made`,
+      );
+      result = { ok: true, cCode: "0", hypTransId: fakeTransId, authCode: "STUB" };
+
+    } else {
+      // Real HYP path — action=soft sent to pay.hyp.co.il.
+      // chargeToken passed directly; callHypSoft never logs its value.
+      result = await callHypSoft({
+        chargeToken:   tokenRow.chargeToken,    // never logged
+        amountShekels,
+        cardExpMonth:  sub.cardExpMonth,
+        cardExpYear:   sub.cardExpYear,
+        order:         charge.id,
+        info:          `${planLabel} · ${intervalLabel}`,
+      });
+    }
 
     // ── Success path ───────────────────────────────────────────────────────
     if (result.ok) {
@@ -461,7 +503,8 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
     ` dryRunLogged=${dryRunLogged}` +
     ` noToken=${noTokenCount}` +
     ` realChargesEnabled=${realChargesEnabled}` +
-    ` isDryRun=${isDryRun}`,
+    ` isDryRun=${isDryRun}` +
+    ` recurringProvider=${recurringProvider}`,
   );
 
   return {
@@ -473,5 +516,6 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
     dryRunLogged,
     dryRunMode:         isDryRun,
     realChargesEnabled,
+    recurringProvider,
   };
 }

@@ -57,7 +57,8 @@ export async function GET(request: Request) {
       ` skipped=${result.skipped}` +
       ` noToken=${result.noToken}` +
       ` dryRunMode=${result.dryRunMode}` +
-      ` realChargesEnabled=${result.realChargesEnabled}`,
+      ` realChargesEnabled=${result.realChargesEnabled}` +
+      ` recurringProvider=${result.recurringProvider}`,
     );
 
     return NextResponse.json({ ok: true, ...result });
