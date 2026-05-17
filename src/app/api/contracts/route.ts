@@ -378,27 +378,47 @@ export async function POST(request: Request) {
 
     const signatureToken = randomUUID();
 
-    const contract = await prisma.contract.create({
-      data: {
-        contractType,
-        dealType:      validatedDealType,
-        propertyAddress,
-        propertyCity,
-        propertyPrice: validatedPropertyPrice,
-        commission:    validatedCommission,
-        ...(validatedCommissionSale !== null ? { commissionSale: validatedCommissionSale } : {}),
-        userId:        user.id,
-        clientId:      client.id,
-        signatureToken,
-        status:                   "SENT",
-        sentAt:                   new Date(),
-        hideFullAddressFromClient: hideFullAddressFromClient === true,
-        language,
-        ...(propertyId         ? { propertyId }                        : {}),
-        ...(resolvedTemplateId ? { templateId: resolvedTemplateId }    : {}),
-        ...(generatedText      ? { generatedText }                     : {}),
-      },
-      include: { client: true, payment: true },
+    // ── Create contract + immutable usage event in one transaction ───────────
+    // ContractUsageEvent is the authoritative monthly usage ledger.
+    // Writing both atomically guarantees no contract can exist without a
+    // corresponding usage event (crash-safe) and no event exists without a
+    // contract (double-count safe).
+    const contract = await prisma.$transaction(async (tx) => {
+      const newContract = await tx.contract.create({
+        data: {
+          contractType,
+          dealType:      validatedDealType,
+          propertyAddress,
+          propertyCity,
+          propertyPrice: validatedPropertyPrice,
+          commission:    validatedCommission,
+          ...(validatedCommissionSale !== null ? { commissionSale: validatedCommissionSale } : {}),
+          userId:        user.id,
+          clientId:      client.id,
+          signatureToken,
+          status:                   "SENT",
+          sentAt:                   new Date(),
+          hideFullAddressFromClient: hideFullAddressFromClient === true,
+          language,
+          ...(propertyId         ? { propertyId }                        : {}),
+          ...(resolvedTemplateId ? { templateId: resolvedTemplateId }    : {}),
+          ...(generatedText      ? { generatedText }                     : {}),
+        },
+        include: { client: true, payment: true },
+      });
+
+      // Write immutable usage slot.  Plan comes from canCreateContract() above —
+      // no extra query needed.  Deleting this contract later will SET NULL on
+      // contractId but keep this row, so the monthly count is unaffected.
+      await tx.contractUsageEvent.create({
+        data: {
+          userId:     user.id,
+          contractId: newContract.id,
+          plan:       usageCheck.plan,
+        },
+      });
+
+      return newContract;
     });
 
     // Send signing-link SMS — awaited so Vercel doesn't kill the promise on response return.

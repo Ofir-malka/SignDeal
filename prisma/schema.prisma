@@ -73,13 +73,14 @@ model User {
   createdAt  DateTime    @default(now())
 
   // ── Relations ─────────────────────────────────────────────────────────────
-  contracts        Contract[]
-  activities       Activity[]
-  properties       Property[]
-  messages         Message[]
-  clients          Client[]
-  subscription     Subscription?     // 1-to-1; created at registration
-  billingCheckouts BillingCheckout[] // one row per checkout attempt
+  contracts           Contract[]
+  activities          Activity[]
+  properties          Property[]
+  messages            Message[]
+  clients             Client[]
+  subscription        Subscription?       // 1-to-1; created at registration
+  billingCheckouts    BillingCheckout[]   // one row per checkout attempt
+  contractUsageEvents ContractUsageEvent[] // immutable usage ledger (Phase 3E+)
 
   // ── Auth.js adapter relations ─────────────────────────────────────────────
   accounts   Account[]
@@ -177,6 +178,7 @@ model Contract {
   activities      Activity[]
   payment         Payment?
   messages        Message[]
+  usageEvent      ContractUsageEvent? // one immutable usage slot; survives contract deletion
 }
 
 // ── Payment ────────────────────────────────────────────────────────────────────
@@ -663,4 +665,48 @@ model BillingCharge {
   @@index([userId])          // look up all charges for a user
   @@index([status])          // "all FAILED charges", "all PENDING charges"
   @@index([createdAt])       // chronological queries + billing reports
+}
+
+// ── ContractUsageEvent ─────────────────────────────────────────────────────────
+//
+// Immutable usage ledger — one row per contract created.
+//
+// Problem solved: getMonthlyDocumentUsage() previously counted live Contract rows.
+// Deleting a contract reduced the count, letting users bypass monthly limits.
+// This table is the authoritative usage source — deletion-immune by design.
+//
+// Key properties:
+//   • Written atomically in the same $transaction as the Contract row.
+//   • contractId uses onDelete: SetNull — hard-deleting a contract nulls the FK
+//     but keeps this row; the monthly count is unaffected.
+//   • @unique on contractId prevents duplicate events per live contract.
+//     In Postgres, NULL ≠ NULL so multiple rows with contractId = null are legal.
+//   • userId uses onDelete: Cascade — if a user is deleted, their events go too.
+//   • plan is a plain String snapshot (not a PlanType enum FK) so plan renames
+//     or deprecated values never break historical records.
+//   • Never updated or deleted by application code (append-only).
+
+model ContractUsageEvent {
+  id         String    @id @default(cuid())
+
+  // Owner of this usage slot.
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Which contract consumed this slot.
+  // Nullable: SET NULL when the contract is hard-deleted (FK onDelete: SetNull).
+  // @unique: enforces one event per live contract; nulls are exempt in Postgres.
+  contractId String?   @unique
+  contract   Contract? @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  // Plan active at creation — audit snapshot for analytics.
+  // e.g. "STANDARD" | "GROWTH" | "PRO" | "AGENCY"
+  plan       String
+
+  // Billing window key — which calendar month this slot belongs to.
+  // Mirrors Contract.createdAt; written once at creation; never updated.
+  createdAt  DateTime  @default(now())
+
+  @@index([userId, createdAt])  // getMonthlyDocumentUsage: count per user per month
+  @@index([contractId])         // FK traversal index
 }
