@@ -18,16 +18,31 @@ function daysLeft(iso: string): number {
 
 // ── Banner variant logic ──────────────────────────────────────────────────────
 type BannerVariant =
-  | "expired"        // trial ended or subscription inactive
-  | "trial-ending"   // ≤ 3 days left in trial
-  | "at-limit"       // 0 docs remaining this month
-  | "near-limit";    // 1 doc remaining this month
+  | "billing-critical"  // PAST_DUE — 3+ charge failures; premium blocked
+  | "billing-warning"   // 1–2 charge failures; all features still accessible
+  | "expired"           // trial ended or subscription inactive (non-billing)
+  | "trial-ending"      // ≤ 3 days left in trial
+  | "at-limit"          // 0 docs remaining this month
+  | "near-limit";       // 1 doc remaining this month
 
 function getBannerVariant(data: UsageData): BannerVariant | null {
-  // AGENCY has no limit — never show a usage banner
-  if (data.monthlyDocLimit === null) return null;
+  // AGENCY has no limit — never show a usage banner.
+  // Still show billing banners if there are payment failures (edge case).
+  const isAgency = data.monthlyDocLimit === null;
 
-  // Subscription inactive (expired trial / CANCELED / PAST_DUE)
+  // ── Billing escalation checks (always take priority) ───────────────────────
+  // Check isPastDue before the generic isActive check, so PAST_DUE users see
+  // a "charge failed, update payment" message rather than a generic "expired".
+  if (data.isPastDue) return "billing-critical";
+
+  // Warning: 1 or 2 consecutive failures but not yet PAST_DUE.
+  // Only show when subscription is otherwise active (not trial-expired etc.).
+  if (data.isWarning && !data.isPastDue && data.isActive) return "billing-warning";
+
+  // AGENCY — no usage-based banners beyond billing (handled above)
+  if (isAgency) return null;
+
+  // Subscription inactive (expired trial / CANCELED — not already caught above)
   if (!data.isActive) return "expired";
 
   // Trial ending soon (≤ 3 days)
@@ -46,6 +61,33 @@ function getBannerVariant(data: UsageData): BannerVariant | null {
 // ── Variant content ────────────────────────────────────────────────────────────
 function getVariantCopy(data: UsageData, variant: BannerVariant) {
   switch (variant) {
+
+    case "billing-critical":
+      return {
+        icon:    "🚨",
+        title:   "החיוב נכשל — נדרש עדכון אמצעי תשלום",
+        body:    "לאחר 3 ניסיונות חיוב כושלים רצופים, המנוי שלך עבר למצב חסום. עדכן את פרטי התשלום כדי לחדש את השירות.",
+        cta:     "עדכן תשלום",
+        bg:      "bg-red-50 border-red-300",
+        titleCl: "text-red-900",
+        bodyCl:  "text-red-700",
+        btnCl:   "bg-red-600 hover:bg-red-700 text-white",
+      };
+
+    case "billing-warning": {
+      const failures = data.billingFailures ?? (data.failureLevel ?? 1);
+      const attemptsLeft = 3 - failures;
+      return {
+        icon:    "⚠️",
+        title:   `ניסיון חיוב נכשל (${failures} מתוך 3)`,
+        body:    `החיוב האחרון נדחה. ${attemptsLeft > 0 ? `נותרו ${attemptsLeft} ניסיונות נוספים לפני חסימת המנוי.` : ""} עדכן את פרטי התשלום כדי למנוע הפרעה.`,
+        cta:     "עדכן תשלום",
+        bg:      "bg-amber-50 border-amber-300",
+        titleCl: "text-amber-900",
+        bodyCl:  "text-amber-700",
+        btnCl:   "bg-amber-600 hover:bg-amber-700 text-white",
+      };
+    }
 
     case "expired":
       return {

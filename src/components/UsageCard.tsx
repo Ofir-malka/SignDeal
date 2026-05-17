@@ -22,6 +22,13 @@ export interface UsageData {
 
   allowed: boolean;
   reason?: "SUBSCRIPTION_INACTIVE" | "CONTRACT_LIMIT_REACHED" | "MONTHLY_LIMIT_REACHED";
+
+  // Billing escalation state (Phase 3E) — optional so old callers keep working
+  billingFailures?:       number;          // consecutive charge failures (0 = healthy)
+  isPastDue?:             boolean;         // status === "PAST_DUE"
+  isWarning?:             boolean;         // billingFailures >= 1
+  failureLevel?:          0 | 1 | 2 | 3;  // 0 = healthy, 3 = PAST_DUE
+  canUsePremiumFeatures?: boolean;         // false when PAST_DUE
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

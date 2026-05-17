@@ -71,7 +71,7 @@ const MAX_BILLING_FAILURES = 3;
  * Index 0 = after 1st failure, index 1 = after 2nd failure.
  * A 3rd failure (index 2) hits MAX_BILLING_FAILURES → PAST_DUE, no retry.
  */
-const RETRY_DELAY_DAYS: readonly number[] = [3, 7];
+const RETRY_DELAY_DAYS: readonly number[] = [3, 5];
 
 // ── Result shape ──────────────────────────────────────────────────────────────
 
@@ -451,10 +451,10 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
           data: {
             billingFailures: newFailures,
             status:          newStatus,
-            // Advance cursor to retry date; on final failure leave it so it
-            // won't be picked up again (status=PAST_DUE is already excluded
-            // after MAX_BILLING_FAILURES by the query's implicit future check).
-            ...(retryDate ? { nextBillingAt: retryDate } : {}),
+            // Advance cursor to retry date, or null on PAST_DUE.
+            // Setting nextBillingAt=null prevents the cron from picking up this
+            // subscription again (NULL does not satisfy { lte: now } in Prisma).
+            nextBillingAt:   retryDate ?? null,
           },
         });
 

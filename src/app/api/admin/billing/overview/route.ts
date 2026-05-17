@@ -29,12 +29,14 @@ import { requireAdmin }  from "@/lib/require-admin";
 // ── Response types ────────────────────────────────────────────────────────────
 
 interface BillingKpis {
-  activeSubscriptions:      number;
-  trialingSubscriptions:    number;
-  pastDueSubscriptions:     number;
-  failedChargesLast30Days:  number;
-  monthlyRevenueAgorot:     number;
+  activeSubscriptions:       number;
+  trialingSubscriptions:     number;
+  pastDueSubscriptions:      number;
+  failedChargesLast30Days:   number;
+  monthlyRevenueAgorot:      number;
   upcomingRenewalsNext7Days: number;
+  /** Subscriptions with 1–2 billing failures (isWarning, not yet PAST_DUE). */
+  billingWarningSubscriptions: number;
 }
 
 interface ChargeUser {
@@ -103,6 +105,7 @@ export async function GET(_request: Request): Promise<NextResponse> {
       renewalsCount,
       latestChargesRaw,
       failedChargesRaw,
+      billingWarningCount,
     ] = await Promise.all([
 
       // 1. Active subscriptions
@@ -202,16 +205,26 @@ export async function GET(_request: Request): Promise<NextResponse> {
           },
         },
       }),
+
+      // 9. Subscriptions in billing-warning state: 1–2 failures, not yet PAST_DUE.
+      // These have billingFailures >= 1 but status is still ACTIVE or TRIALING.
+      prisma.subscription.count({
+        where: {
+          billingFailures: { gte: 1 },
+          status:          { in: ["ACTIVE", "TRIALING"] },
+        },
+      }),
     ]);
 
     // ── Map KPIs ──────────────────────────────────────────────────────────────
     const kpis: BillingKpis = {
-      activeSubscriptions:       activeCount,
-      trialingSubscriptions:     trialingCount,
-      pastDueSubscriptions:      pastDueCount,
-      failedChargesLast30Days:   failedCount,
-      monthlyRevenueAgorot:      revenueAgg._sum.amountAgorot ?? 0,
-      upcomingRenewalsNext7Days: renewalsCount,
+      activeSubscriptions:         activeCount,
+      trialingSubscriptions:       trialingCount,
+      pastDueSubscriptions:        pastDueCount,
+      failedChargesLast30Days:     failedCount,
+      monthlyRevenueAgorot:        revenueAgg._sum.amountAgorot ?? 0,
+      upcomingRenewalsNext7Days:   renewalsCount,
+      billingWarningSubscriptions: billingWarningCount,
     };
 
     // ── Map latestCharges ─────────────────────────────────────────────────────

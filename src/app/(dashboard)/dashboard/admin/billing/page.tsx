@@ -28,12 +28,14 @@ import { StatsCard }            from "@/components/StatsCard";
 // ── Response types (mirrors /api/admin/billing/overview exactly) ──────────────
 
 interface BillingKpis {
-  activeSubscriptions:       number;
-  trialingSubscriptions:     number;
-  pastDueSubscriptions:      number;
-  failedChargesLast30Days:   number;
-  monthlyRevenueAgorot:      number;
-  upcomingRenewalsNext7Days: number;
+  activeSubscriptions:         number;
+  trialingSubscriptions:       number;
+  pastDueSubscriptions:        number;
+  failedChargesLast30Days:     number;
+  monthlyRevenueAgorot:        number;
+  upcomingRenewalsNext7Days:   number;
+  /** Subscriptions with 1–2 billing failures (not yet PAST_DUE). Phase 3E. */
+  billingWarningSubscriptions: number;
 }
 
 interface ChargeUser {
@@ -165,9 +167,9 @@ function SubStatusBadge({ status }: { status: string }) {
 function LoadingSkeleton() {
   return (
     <div className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 sm:py-8" aria-busy="true">
-      {/* KPI skeleton — 6 cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-        {Array.from({ length: 6 }).map((_, i) => (
+      {/* KPI skeleton — 7 cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4 mb-8">
+        {Array.from({ length: 7 }).map((_, i) => (
           <div key={i} className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 animate-pulse">
             <div className="flex items-start justify-between">
               <div className="flex-1">
@@ -241,7 +243,7 @@ function ErrorBanner({ message }: { message: string }) {
 
 function KpiGrid({ kpis }: { kpis: BillingKpis }) {
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4 mb-8">
       <StatsCard
         title="מנויים פעילים"
         value={String(kpis.activeSubscriptions)}
@@ -323,6 +325,20 @@ function KpiGrid({ kpis }: { kpis: BillingKpis }) {
             <line x1="16" y1="2" x2="16" y2="6" />
             <line x1="8" y1="2" x2="8" y2="6" />
             <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+        }
+      />
+      <StatsCard
+        title="אזהרות תשלום"
+        value={String(kpis.billingWarningSubscriptions)}
+        subtitle="1–2 כישלונות, לא PAST_DUE"
+        accentColor="orange"
+        trend={kpis.billingWarningSubscriptions > 0 ? "down" : "neutral"}
+        icon={
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
           </svg>
         }
       />

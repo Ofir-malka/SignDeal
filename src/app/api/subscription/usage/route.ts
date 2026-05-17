@@ -30,10 +30,12 @@
  *   reason?:          "SUBSCRIPTION_INACTIVE" | "MONTHLY_LIMIT_REACHED"
  * }
  */
-import { NextResponse }       from "next/server";
-import { requireUserId }      from "@/lib/require-user";
-import { canCreateContract }  from "@/lib/subscription";
-import type { PlanType }      from "@/lib/plans";
+import { NextResponse }            from "next/server";
+import { requireUserId }           from "@/lib/require-user";
+import { canCreateContract }       from "@/lib/subscription";
+import { getBillingAccessState }   from "@/lib/billing/access";
+import { prisma }                  from "@/lib/prisma";
+import type { PlanType }           from "@/lib/plans";
 
 // Hebrew display labels for each plan.
 // Stale JWT tokens may carry deprecated values; map those gracefully.
@@ -56,7 +58,21 @@ export async function GET() {
   if (authResult instanceof NextResponse) return authResult;
   const { userId } = authResult;
 
-  const check = await canCreateContract(userId);
+  // Run subscription usage check + billing escalation fields in parallel.
+  // canCreateContract makes its own subscription query; we need a second
+  // targeted fetch for billingFailures + status (not exposed by its return value).
+  const [check, subRaw] = await Promise.all([
+    canCreateContract(userId),
+    prisma.subscription.findUnique({
+      where:  { userId },
+      select: { status: true, billingFailures: true },
+    }),
+  ]);
+
+  // Derive billing access state. Fall back to healthy defaults if no row.
+  const billingState = getBillingAccessState(
+    subRaw ?? { status: "ACTIVE", billingFailures: 0 },
+  );
 
   return NextResponse.json({
     // Plan identity
@@ -80,5 +96,12 @@ export async function GET() {
     // Gate result
     allowed:          check.allowed,
     ...(check.reason ? { reason: check.reason } : {}),
+
+    // Billing escalation state (Phase 3E)
+    billingFailures:       subRaw?.billingFailures ?? 0,
+    isPastDue:             billingState.isPastDue,
+    isWarning:             billingState.isWarning,
+    failureLevel:          billingState.failureLevel,
+    canUsePremiumFeatures: billingState.canUsePremiumFeatures,
   });
 }
