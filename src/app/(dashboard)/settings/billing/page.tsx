@@ -1,26 +1,31 @@
 /**
- * /settings/billing
+ * /settings/billing — User Billing Settings (Phase 3E)
  *
- * Billing settings page — Phase 1.
+ * Shows the current user's subscription details and billing history.
+ * Read-only — no cancel, card update, upgrade, downgrade, or retry.
  *
- * Shows:
- *   1. Current subscription summary (plan, status, renewal / trial-end date).
- *   2. Upgrade panel with period toggle + plan cards → HYP checkout.
+ * Server component: all data is fetched at render time via Prisma.
+ * No client-side state, no loading spinner — the shell handles suspense.
  *
- * Server component: reads subscription from DB directly (no extra round-trip).
- * The interactive upgrade panel is delegated to BillingUpgradeSection (client).
+ * ── Security ──────────────────────────────────────────────────────────────────
+ * Every query is scoped to the current session userId.
+ * The following fields are intentionally excluded from every select:
+ *   Subscription.chargeToken  — 19-digit HYP charge token; never expose to browser
+ *   Subscription.cardToken    — HYP HKId recurring agreement ID; never expose
+ *   BillingCharge.hypRaw      — raw HYP response; may contain card-adjacent data
+ * All three are commented below at the exact point they were considered and rejected.
  */
 
-import type { Metadata }          from "next";
-import { redirect }               from "next/navigation";
-import Link                       from "next/link";
-import { auth }                   from "@/lib/auth";
-import { prisma }                 from "@/lib/prisma";
-import { DashboardShell }         from "@/components/DashboardShell";
-import { BillingUpgradeSection }  from "./BillingUpgradeSection";
+import type { Metadata }         from "next";
+import { redirect }              from "next/navigation";
+import Link                      from "next/link";
+import { auth }                  from "@/lib/auth";
+import { prisma }                from "@/lib/prisma";
+import { DashboardShell }        from "@/components/DashboardShell";
+import { BillingUpgradeSection } from "./BillingUpgradeSection";
 
 export const metadata: Metadata = {
-  title: "מנוי וחיוב | SignDeal",
+  title: "החיוב שלי | SignDeal",
 };
 
 // ── Display helpers ───────────────────────────────────────────────────────────
@@ -38,7 +43,7 @@ const INTERVAL_LABELS: Record<string, string> = {
 };
 
 const STATUS_LABELS: Record<string, string> = {
-  INCOMPLETE: "נדרש אמצעי תשלום",  // Phase 2A: card not yet provided
+  INCOMPLETE: "נדרש אמצעי תשלום",
   TRIALING:   "בניסיון חינם",
   ACTIVE:     "פעיל",
   PAST_DUE:   "חיוב נכשל",
@@ -55,23 +60,75 @@ const STATUS_COLORS: Record<string, string> = {
   EXPIRED:    "bg-red-50 text-red-700 border-red-200",
 };
 
+const CHARGE_STATUS_LABELS: Record<string, string> = {
+  SUCCEEDED: "הצליח",
+  FAILED:    "נכשל",
+  PENDING:   "ממתין",
+  SKIPPED:   "דולג",
+};
+
 function formatDate(date: Date): string {
   return new Intl.DateTimeFormat("he-IL", {
-    day:   "numeric",
-    month: "long",
-    year:  "numeric",
+    day: "numeric", month: "long", year: "numeric",
   }).format(date);
 }
 
-// ── Page ─────────────────────────────────────────────────────────────────────
+function formatDateShort(date: Date): string {
+  return new Intl.DateTimeFormat("he-IL", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+  }).format(date);
+}
+
+function agorotToShekel(agorot: number): string {
+  return `₪${(agorot / 100).toLocaleString("he-IL", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function ChargeBadge({ status }: { status: string }) {
+  const label = CHARGE_STATUS_LABELS[status] ?? status;
+
+  const cls =
+    status === "SUCCEEDED" ? "bg-emerald-50 text-emerald-700 border-emerald-200" :
+    status === "FAILED"    ? "bg-red-50 text-red-700 border-red-200"             :
+    status === "PENDING"   ? "bg-gray-100 text-gray-500 border-gray-200"         :
+                             "bg-gray-50  text-gray-400 border-gray-200";
+
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2 py-0.5 rounded-full border ${cls}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${
+        status === "SUCCEEDED" ? "bg-emerald-500" :
+        status === "FAILED"    ? "bg-red-500"     : "bg-gray-400"
+      }`} />
+      {label}
+    </span>
+  );
+}
+
+// ── Detail row used inside the subscription card ──────────────────────────────
+
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between py-3 border-b border-gray-50 last:border-b-0">
+      <span className="text-sm text-gray-500 shrink-0 w-40">{label}</span>
+      <span className="text-sm text-gray-900 font-medium text-right">{children}</span>
+    </div>
+  );
+}
+
+// ── Page ──────────────────────────────────────────────────────────────────────
 
 export default async function BillingSettingsPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const userId = session.user.id;
 
-  // Fetch latest subscription + last successful checkout (for card mask).
-  const [sub, lastCheckout] = await Promise.all([
+  // ── DB queries — scoped strictly to userId ─────────────────────────────────
+  const [sub, charges] = await Promise.all([
+
     prisma.subscription.findFirst({
       where:   { userId },
       orderBy: { createdAt: "desc" },
@@ -79,112 +136,207 @@ export default async function BillingSettingsPage() {
         plan:            true,
         status:          true,
         billingInterval: true,
+        billingProvider: true,
+        billingFailures: true,
+
+        trialEndsAt:      true,
+        nextBillingAt:    true,
         currentPeriodEnd: true,
-        trialEndsAt:     true,
+        firstPaymentAt:   true,
+        tokenCreatedAt:   true,
+
+        // Card display info — safe to show (last 4 only, no full PAN)
+        cardLast4:    true,
+        cardExpMonth: true,
+        cardExpYear:  true,
+        cardBrand:    true,
+
+        // ── Intentionally NOT selected ───────────────────────────────────────
+        // chargeToken — 19-digit HYP charge token; treat as sensitive credential
+        // cardToken   — HYP HKId recurring agreement ID; treat as sensitive
       },
     }),
-    prisma.billingCheckout.findFirst({
-      where:   { userId, status: "SUCCEEDED" },
-      orderBy: { resolvedAt: "desc" },
-      select:  { cardMask: true },
+
+    // Latest 10 BillingCharge rows for this user
+    prisma.billingCharge.findMany({
+      where:   { userId },
+      take:    10,
+      orderBy: { createdAt: "desc" },
+      select: {
+        id:          true,
+        status:      true,
+        amountAgorot: true,
+        hypCCode:    true,
+        hypAuthCode: true,
+        periodStart: true,
+        periodEnd:   true,
+        createdAt:   true,
+        // ── Intentionally NOT selected ─────────────────────────────────────
+        // hypRaw  — raw HYP response body; may contain card-adjacent values
+        // (field exists in schema but intentionally never populated or exposed)
+      },
     }),
+
   ]);
 
-  if (!sub) {
-    // Extremely unlikely for an authenticated user; redirect to dashboard.
-    redirect("/");
-  }
+  if (!sub) redirect("/");
+
+  // ── Derived display values ─────────────────────────────────────────────────
 
   const planLabel     = PLAN_LABELS[sub.plan]     ?? sub.plan;
   const statusLabel   = STATUS_LABELS[sub.status] ?? sub.status;
   const statusColor   = STATUS_COLORS[sub.status] ?? STATUS_COLORS.EXPIRED;
-  const intervalLabel = sub.billingInterval ? (INTERVAL_LABELS[sub.billingInterval] ?? sub.billingInterval) : null;
+  const intervalLabel = INTERVAL_LABELS[sub.billingInterval] ?? sub.billingInterval;
   const isActive      = sub.status === "ACTIVE";
 
-  // Determine the date to surface:
-  //   ACTIVE  → next renewal (currentPeriodEnd)
-  //   TRIALING → trial end date
-  //   otherwise → nothing meaningful to show
-  const dateLabel = isActive && sub.currentPeriodEnd
-    ? `חידוש הבא: ${formatDate(sub.currentPeriodEnd)}`
-    : sub.status === "TRIALING" && sub.trialEndsAt
-    ? `ניסיון מסתיים: ${formatDate(sub.trialEndsAt)}`
-    : null;
+  // Card expiry display: "MM/YYYY"
+  const cardExpiry =
+    sub.cardExpMonth && sub.cardExpYear
+      ? `${String(sub.cardExpMonth).padStart(2, "0")}/${sub.cardExpYear}`
+      : null;
 
-  // Show upgrade panel for all self-serve plans (not AGENCY).
+  // Billing provider display — "hyp" → "HYP Pay"
+  const providerLabel =
+    sub.billingProvider === "hyp" ? "HYP Pay" :
+    sub.billingProvider            ? sub.billingProvider :
+                                     "—";
+
+  // Next renewal / trial end label
+  const nextEventLabel =
+    isActive && sub.nextBillingAt
+      ? { label: "חידוש הבא", date: sub.nextBillingAt }
+      : sub.status === "TRIALING" && sub.trialEndsAt
+      ? { label: "סיום ניסיון", date: sub.trialEndsAt }
+      : null;
+
   const showUpgradePanel = sub.plan !== "AGENCY";
 
   return (
     <DashboardShell>
-      {/* Page header */}
-      <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between shrink-0">
+
+      {/* ── Page header ──────────────────────────────────────────────────── */}
+      <header className="bg-white border-b border-gray-200 px-4 sm:px-8 py-4 flex items-center justify-between shrink-0">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">מנוי וחיוב</h1>
-          <p className="text-sm text-gray-500 mt-0.5">ניהול המנוי, שדרוג מסלול ופרטי חיוב</p>
+          <h1 className="text-xl font-bold text-gray-900">החיוב שלי</h1>
+          <p className="text-sm text-gray-500 mt-0.5">פרטי מנוי, אמצעי תשלום והיסטוריית חיובים</p>
         </div>
       </header>
 
-      <main dir="rtl" className="flex-1 overflow-y-auto px-6 sm:px-8 py-8 space-y-8">
+      <main dir="rtl" className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
 
         {/* ── Current subscription card ───────────────────────────────────── */}
         <section>
-          <h2 className="text-base font-semibold text-gray-900 mb-4">מנוי נוכחי</h2>
+          <h2 className="text-base font-semibold text-gray-900 mb-4">פרטי מנוי</h2>
 
-          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
-            <div className="flex flex-wrap items-start gap-6 justify-between">
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
 
-              {/* Left: plan + status */}
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl font-black text-gray-900">{planLabel}</span>
-                  <span
-                    className={[
-                      "inline-flex items-center text-xs font-semibold px-2.5 py-0.5 rounded-full border",
-                      statusColor,
-                    ].join(" ")}
-                  >
-                    {statusLabel}
-                  </span>
-                </div>
-
-                <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm text-gray-500">
-                  {intervalLabel && (
-                    <span>חיוב {intervalLabel}</span>
-                  )}
-                  {dateLabel && (
-                    <span>{dateLabel}</span>
-                  )}
-                  {lastCheckout?.cardMask && (
-                    <span>כרטיס: ••••{lastCheckout.cardMask.slice(-4)}</span>
-                  )}
-                </div>
+            {/* Card top — plan name + status badge */}
+            <div className="px-6 py-5 flex flex-wrap items-center gap-3 border-b border-gray-100">
+              <span className="text-2xl font-black text-gray-900">{planLabel}</span>
+              <span className={`inline-flex items-center text-xs font-semibold px-2.5 py-0.5 rounded-full border ${statusColor}`}>
+                {statusLabel}
+              </span>
+              <div className="mr-auto">
+                <Link
+                  href="/pricing"
+                  className="inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-700 transition-colors"
+                >
+                  כל המסלולים
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </Link>
               </div>
+            </div>
 
-              {/* Right: pricing page link */}
-              <Link
-                href="/pricing"
-                className="shrink-0 inline-flex items-center gap-1.5 text-sm font-medium text-indigo-600 hover:text-indigo-700 transition-colors"
-              >
-                צפה בכל המסלולים
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                  stroke="currentColor" strokeWidth="2.5"
-                  strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <polyline points="9 18 15 12 9 6" />
-                </svg>
-              </Link>
+            {/* Detail rows */}
+            <div className="px-6 py-1">
+
+              <DetailRow label="מסלול">
+                {planLabel}
+              </DetailRow>
+
+              <DetailRow label="מחזור חיוב">
+                {intervalLabel}
+              </DetailRow>
+
+              <DetailRow label="ספק חיוב">
+                {providerLabel}
+              </DetailRow>
+
+              {nextEventLabel && (
+                <DetailRow label={nextEventLabel.label}>
+                  {formatDate(nextEventLabel.date)}
+                </DetailRow>
+              )}
+
+              {sub.status === "TRIALING" && sub.trialEndsAt && (
+                <DetailRow label="תאריך סיום ניסיון">
+                  {formatDate(sub.trialEndsAt)}
+                </DetailRow>
+              )}
+
+              {/* Card on file */}
+              {sub.cardLast4 && (
+                <DetailRow label="כרטיס אשראי">
+                  <span className="flex items-center gap-2">
+                    <span className="font-mono tracking-widest text-gray-700">
+                      •••• {sub.cardLast4}
+                    </span>
+                    {cardExpiry && (
+                      <span className="text-xs text-gray-400">תוקף {cardExpiry}</span>
+                    )}
+                  </span>
+                </DetailRow>
+              )}
+
+              {sub.cardBrand && (
+                <DetailRow label="סוג כרטיס">
+                  {sub.cardBrand}
+                </DetailRow>
+              )}
+
+              {/* Billing failures — only show when non-zero */}
+              {sub.billingFailures > 0 && (
+                <DetailRow label="כשלונות חיוב">
+                  <span className="inline-flex items-center gap-1.5 text-amber-700 font-semibold">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                      className="text-amber-500">
+                      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                      <line x1="12" y1="9" x2="12" y2="13" />
+                      <line x1="12" y1="17" x2="12.01" y2="17" />
+                    </svg>
+                    {sub.billingFailures} כשלון{sub.billingFailures > 1 ? "ות" : ""} ברצף
+                  </span>
+                </DetailRow>
+              )}
+
+              {sub.tokenCreatedAt && (
+                <DetailRow label="כרטיס נרשם ב">
+                  {formatDate(sub.tokenCreatedAt)}
+                </DetailRow>
+              )}
+
+              {sub.firstPaymentAt && (
+                <DetailRow label="תשלום ראשון">
+                  {formatDate(sub.firstPaymentAt)}
+                </DetailRow>
+              )}
 
             </div>
 
-            {/* Trial / expired CTA strip */}
+            {/* Trial ending / Expired CTA strip */}
             {sub.status === "TRIALING" && sub.trialEndsAt && (
-              <div className="mt-5 pt-5 border-t border-gray-100 flex items-center gap-3">
+              <div className="mx-6 mb-5 mt-2 rounded-xl bg-indigo-50 border border-indigo-100 px-4 py-3 flex items-start gap-3">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
                   stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                  aria-hidden="true">
+                  className="mt-0.5 shrink-0">
                   <circle cx="12" cy="12" r="10" />
                   <polyline points="12 6 12 12 16 14" />
                 </svg>
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-indigo-800 leading-relaxed">
                   תקופת הניסיון שלך מסתיימת ב-{formatDate(sub.trialEndsAt)}.{" "}
                   בחר מסלול כדי להמשיך ללא הפרעה.
                 </p>
@@ -192,23 +344,147 @@ export default async function BillingSettingsPage() {
             )}
 
             {(sub.status === "EXPIRED" || sub.status === "CANCELED") && (
-              <div className="mt-5 pt-5 border-t border-gray-100 flex items-center gap-3">
+              <div className="mx-6 mb-5 mt-2 rounded-xl bg-red-50 border border-red-100 px-4 py-3 flex items-start gap-3">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
                   stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-                  aria-hidden="true">
+                  className="mt-0.5 shrink-0">
                   <circle cx="12" cy="12" r="10" />
                   <line x1="12" y1="8" x2="12" y2="12" />
                   <line x1="12" y1="16" x2="12.01" y2="16" />
                 </svg>
-                <p className="text-sm text-gray-600">
+                <p className="text-sm text-red-800 leading-relaxed">
                   המנוי אינו פעיל. בחר מסלול כדי להפעיל מחדש את הגישה.
                 </p>
+              </div>
+            )}
+
+            {sub.status === "PAST_DUE" && (
+              <div className="mx-6 mb-5 mt-2 rounded-xl bg-amber-50 border border-amber-100 px-4 py-3 flex items-start gap-3">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                  stroke="#d97706" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  className="mt-0.5 shrink-0">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                  <line x1="12" y1="9" x2="12" y2="13" />
+                  <line x1="12" y1="17" x2="12.01" y2="17" />
+                </svg>
+                <p className="text-sm text-amber-800 leading-relaxed">
+                  קיימת בעיה בחיוב החשבון שלך. נסה שוב מאוחר יותר או{" "}
+                  <a href="mailto:support@signdeal.co.il" className="underline font-medium">
+                    צור קשר עם התמיכה
+                  </a>
+                  .
+                </p>
+              </div>
+            )}
+
+          </div>
+        </section>
+
+        {/* ── Billing history ─────────────────────────────────────────────── */}
+        <section>
+          <h2 className="text-base font-semibold text-gray-900 mb-4">היסטוריית חיובים</h2>
+
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+
+            {charges.length === 0 ? (
+              <div className="px-6 py-14 text-center">
+                <div className="w-12 h-12 rounded-full bg-gray-50 border border-gray-100 flex items-center justify-center mx-auto mb-3">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+                    stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"
+                    className="text-gray-400">
+                    <rect x="2" y="5" width="20" height="14" rx="2" />
+                    <line x1="2" y1="10" x2="22" y2="10" />
+                  </svg>
+                </div>
+                <p className="text-sm font-medium text-gray-700">אין חיובים עדיין</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  חיובים יופיעו כאן לאחר תשלום ראשון
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm" dir="rtl">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-100">
+                      <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-6 py-3.5">
+                        תאריך
+                      </th>
+                      <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3.5">
+                        סטטוס
+                      </th>
+                      <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3.5">
+                        סכום
+                      </th>
+                      <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3.5 hidden sm:table-cell">
+                        קוד HYP
+                      </th>
+                      <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3.5 hidden md:table-cell">
+                        אישור
+                      </th>
+                      <th className="text-right text-xs font-semibold text-gray-500 uppercase tracking-wide px-4 py-3.5 hidden lg:table-cell">
+                        תקופת חיוב
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {charges.map((charge) => (
+                      <tr key={charge.id} className="hover:bg-gray-50 transition-colors">
+
+                        {/* Date */}
+                        <td className="px-6 py-4">
+                          <span className="text-gray-700 tabular-nums">
+                            {formatDateShort(charge.createdAt)}
+                          </span>
+                        </td>
+
+                        {/* Status */}
+                        <td className="px-4 py-4">
+                          <ChargeBadge status={charge.status} />
+                        </td>
+
+                        {/* Amount */}
+                        <td className="px-4 py-4">
+                          <span className="font-semibold text-gray-900 tabular-nums">
+                            {agorotToShekel(charge.amountAgorot)}
+                          </span>
+                        </td>
+
+                        {/* CCode — hidden on mobile */}
+                        <td className="px-4 py-4 hidden sm:table-cell">
+                          <span className={`font-mono text-xs ${
+                            charge.hypCCode === "0" ? "text-emerald-600" :
+                            charge.hypCCode        ? "text-red-500"     : "text-gray-400"
+                          }`}>
+                            {charge.hypCCode ?? "—"}
+                          </span>
+                        </td>
+
+                        {/* AuthCode — hidden on small screens */}
+                        <td className="px-4 py-4 hidden md:table-cell">
+                          <span className="font-mono text-xs text-gray-400">
+                            {charge.hypAuthCode ?? "—"}
+                          </span>
+                        </td>
+
+                        {/* Period — hidden on small/medium screens */}
+                        <td className="px-4 py-4 hidden lg:table-cell">
+                          <span className="text-xs text-gray-500 tabular-nums">
+                            {formatDateShort(charge.periodStart)}
+                            {" – "}
+                            {formatDateShort(charge.periodEnd)}
+                          </span>
+                        </td>
+
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
         </section>
 
-        {/* ── Upgrade panel ──────────────────────────────────────────────────── */}
+        {/* ── Upgrade panel (existing feature — keep intact) ─────────────── */}
         {showUpgradePanel && (
           <section>
             <h2 className="text-base font-semibold text-gray-900 mb-4">
@@ -221,7 +497,7 @@ export default async function BillingSettingsPage() {
           </section>
         )}
 
-        {/* AGENCY — no self-serve upgrade available */}
+        {/* AGENCY — no self-serve */}
         {sub.plan === "AGENCY" && (
           <section>
             <div className="rounded-2xl border border-gray-200 bg-gray-50 px-6 py-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -242,7 +518,7 @@ export default async function BillingSettingsPage() {
         )}
 
         {/* Disclaimer */}
-        <p className="text-xs text-gray-400 leading-relaxed">
+        <p className="text-xs text-gray-400 leading-relaxed pb-4">
           המחירים לא כוללים מע״מ. חיוב שנתי מחויב בתשלום אחד מראש. ביטול אפשרי בכל עת — ראה{" "}
           <Link href="/legal/terms#cancellation" className="underline hover:text-gray-600">
             תנאי שימוש
