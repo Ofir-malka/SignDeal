@@ -646,9 +646,10 @@ model BillingCharge {
   periodEnd      DateTime            // new currentPeriodEnd after a successful charge
 
   // ── HYP response fields (populated by Phase 3C soft-charge) ───────────────
-  hypTransId     String?             // HYP transaction ID returned on success
-  hypCCode       String?             // raw CCode returned by HYP
-  hypRaw         String? @db.Text    // raw HYP response body (truncated for debugging)
+  hypTransId     String?             // HYP transaction ID (TransId) returned on success; may be null if HYP omits it
+  hypCCode       String?             // raw CCode returned by HYP (0 = success)
+  hypAuthCode    String?             // HYP authorization code (ACode) returned on success
+  hypRaw         String? @db.Text    // intentionally never populated — raw HYP response may contain card-adjacent values
 
   // ── Retry state ────────────────────────────────────────────────────────────
   attemptNumber  Int       @default(1)  // 1 = first attempt; incremented on each retry

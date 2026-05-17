@@ -369,9 +369,10 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
         await tx.billingCharge.update({
           where: { id: charge.id },
           data: {
-            status:     "SUCCEEDED",
-            hypCCode:   result.cCode,
-            hypTransId: result.hypTransId,
+            status:      "SUCCEEDED",
+            hypCCode:    result.cCode,
+            hypTransId:  result.hypTransId,   // may be null — HYP sometimes omits TransId
+            hypAuthCode: result.authCode,     // ACode from HYP; null if not returned
             // hypRaw intentionally not stored — may contain card-adjacent values
           },
         });
