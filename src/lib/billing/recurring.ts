@@ -2,41 +2,106 @@
  * @/lib/billing/recurring — recurring billing engine.
  *
  * Called by the Vercel cron at /api/cron/billing/charge (daily, 06:00 UTC).
- * Can also be triggered manually for testing.
+ * Can also be triggered manually via curl for testing.
  *
- * ── Phase 3B (current): DRY-RUN stub ─────────────────────────────────────────
- * Scans subscriptions that are due for billing and logs which ones WOULD be
- * charged. Makes no HYP calls and writes no BillingCharge rows.
+ * ── Safety gates (both must be satisfied for a real charge to execute) ────────
  *
- * ── Phase 3C (next): real action=soft charges ─────────────────────────────────
- * Replace the WOULD_CHARGE log block with callHypSoft(sub.chargeToken, …),
- * create a BillingCharge row for each attempt, and update Subscription fields:
- *   - On success: status → ACTIVE, nextBillingAt → periodEnd, billingFailures = 0
- *   - On failure: billingFailures++, nextBillingAt → retryDate
- *                 After MAX_FAILURES: status → PAST_DUE / EXPIRED
+ *   Gate 1 — ENABLE_REAL_RECURRING_CHARGES=true
+ *     Hard environment gate. Even with correct HYP credentials and a live
+ *     subscription, no action=soft call is made unless this var is "true".
+ *     When absent or any other value: logs REAL_CHARGES_DISABLED and skips.
+ *     Remove this env var to disable charging with zero code changes.
+ *
+ *   Gate 2 — BILLING_CHARGE_DRY_RUN != "true"
+ *     Soft dry-run mode. When "true": logs CHARGE_DRY_RUN per subscription
+ *     and returns without writing any DB rows or calling HYP.
+ *     Useful for verifying the scan finds the correct subscriptions.
  *
  * ── Eligibility criteria ─────────────────────────────────────────────────────
- *   status         IN (TRIALING, ACTIVE, PAST_DUE)
- *   nextBillingAt  <= now()
- *   chargeToken    IS NOT NULL        ← 19-digit token from Phase 3A getToken
+ *   billingProvider = "hyp"
+ *   plan            IN (STANDARD, GROWTH, PRO)    ← AGENCY uses custom billing
+ *   status          IN (TRIALING, ACTIVE, PAST_DUE)
+ *   nextBillingAt   <= now()
+ *   chargeToken     IS NOT NULL
  *
  * ── Idempotency ───────────────────────────────────────────────────────────────
- * Each successful charge advances nextBillingAt by one billing period, so
- * running the cron twice in the same window produces no double-charges.
- * (Phase 3C: use the BillingCharge row's periodStart as an additional guard.)
+ *   Primary:   successful charge advances nextBillingAt to the next period,
+ *              so a second cron run on the same day finds nextBillingAt > now.
+ *   Secondary: before creating a PENDING row, check for an existing
+ *              PENDING/SUCCEEDED BillingCharge with the same periodStart.
+ *              Guards against Vercel invoking the cron twice in one window.
+ *
+ * ── Crash safety ──────────────────────────────────────────────────────────────
+ *   BillingCharge is pre-created as PENDING before the HYP call.
+ *   If the process crashes between the HYP call and the DB update, the PENDING
+ *   row is the audit anchor. The idempotency check skips that subscription on
+ *   the next cron run (PENDING for same periodStart already exists).
+ *
+ * ── Security ──────────────────────────────────────────────────────────────────
+ *   chargeToken is fetched in a separate targeted query — never selected into
+ *   the broad scan result where it could appear in logged objects.
+ *   Raw HYP response bodies are never stored or logged (see callHypSoft).
  */
 
-import { prisma } from "@/lib/prisma";
+import { prisma }        from "@/lib/prisma";
+import { PLAN_AMOUNTS, PLAN_LABELS, BILLABLE_PLANS, type BillablePlan }
+                         from "./amounts";
+import { callHypSoft }   from "./providers/hyp";
 
-// ── Result shape returned to the cron route ───────────────────────────────────
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+/**
+ * Maximum consecutive charge failures before a subscription moves to PAST_DUE.
+ * After MAX_BILLING_FAILURES the cron stops retrying — no further auto-charge.
+ */
+const MAX_BILLING_FAILURES = 3;
+
+/**
+ * Retry delay in days per failure count.
+ * Index 0 = after 1st failure, index 1 = after 2nd failure.
+ * A 3rd failure (index 2) hits MAX_BILLING_FAILURES → PAST_DUE, no retry.
+ */
+const RETRY_DELAY_DAYS: readonly number[] = [3, 7];
+
+// ── Result shape ──────────────────────────────────────────────────────────────
 
 export interface RecurringChargeResult {
-  /** Total subscriptions where nextBillingAt <= now, regardless of chargeToken. */
-  eligible:    number;
-  /** Subset with a chargeToken — these WOULD be charged in Phase 3C. */
-  wouldCharge: number;
-  /** Subscriptions due but missing chargeToken — cannot charge; needs investigation. */
-  noToken:     number;
+  /** All subscriptions where nextBillingAt <= now (with or without chargeToken). */
+  eligible:           number;
+  /** Charge succeeded — HYP returned CCode=0. */
+  charged:            number;
+  /** Charge attempted — HYP returned non-zero CCode. */
+  failed:             number;
+  /** No charge attempted (idempotency skip, missing token/expiry, non-billable plan). */
+  skipped:            number;
+  /** Due but missing chargeToken — cannot charge; needs investigation. */
+  noToken:            number;
+  /** Subscriptions logged as CHARGE_DRY_RUN (only when BILLING_CHARGE_DRY_RUN=true). */
+  dryRunLogged:       number;
+  /** Whether BILLING_CHARGE_DRY_RUN=true was active for this run. */
+  dryRunMode:         boolean;
+  /** Whether ENABLE_REAL_RECURRING_CHARGES=true was active for this run. */
+  realChargesEnabled: boolean;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Advance a date by one billing period (month or year). */
+function computePeriodEnd(from: Date, interval: string): Date {
+  const d = new Date(from);
+  if (interval === "YEARLY") {
+    d.setFullYear(d.getFullYear() + 1);
+  } else {
+    d.setMonth(d.getMonth() + 1);
+  }
+  return d;
+}
+
+/** Retry date for failure N (1-indexed). Returns null when MAX_BILLING_FAILURES reached. */
+function computeRetryDate(now: Date, newFailureCount: number): Date | null {
+  if (newFailureCount >= MAX_BILLING_FAILURES) return null;
+  const delayDays = RETRY_DELAY_DAYS[newFailureCount - 1] ?? RETRY_DELAY_DAYS.at(-1)!;
+  return new Date(now.getTime() + delayDays * 24 * 60 * 60 * 1000);
 }
 
 // ── Main function ─────────────────────────────────────────────────────────────
@@ -44,17 +109,25 @@ export interface RecurringChargeResult {
 export async function processRecurringCharges(): Promise<RecurringChargeResult> {
   const now = new Date();
 
+  // ── Read safety gates ─────────────────────────────────────────────────────
+  const realChargesEnabled = process.env.ENABLE_REAL_RECURRING_CHARGES === "true";
+  const isDryRun           = process.env.BILLING_CHARGE_DRY_RUN === "true";
+
   console.log(
     `[billing/recurring] SCAN_START` +
-    ` at=${now.toISOString()}`,
+    ` at=${now.toISOString()}` +
+    ` realChargesEnabled=${realChargesEnabled}` +
+    ` isDryRun=${isDryRun}`,
   );
 
-  // ── Query 1: due + has chargeToken (ready for Phase 3C) ─────────────────────
+  // ── Scan: due + chargeToken present ──────────────────────────────────────
   const dueWithToken = await prisma.subscription.findMany({
     where: {
-      status:        { in: ["TRIALING", "ACTIVE", "PAST_DUE"] },
-      nextBillingAt: { lte: now },
-      chargeToken:   { not: null },
+      billingProvider: "hyp",
+      plan:            { in: ["STANDARD", "GROWTH", "PRO"] },
+      status:          { in: ["TRIALING", "ACTIVE", "PAST_DUE"] },
+      nextBillingAt:   { lte: now },
+      chargeToken:     { not: null },
     },
     select: {
       id:              true,
@@ -66,16 +139,19 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
       billingFailures: true,
       cardExpMonth:    true,
       cardExpYear:     true,
-      // chargeToken intentionally NOT selected — never log it
+      firstPaymentAt:  true,
+      // chargeToken intentionally NOT selected — fetched per-subscription below
     },
   });
 
-  // ── Query 2: due but no chargeToken (cannot charge — needs investigation) ────
+  // ── Scan: due but no chargeToken ──────────────────────────────────────────
   const noTokenCount = await prisma.subscription.count({
     where: {
-      status:        { in: ["TRIALING", "ACTIVE", "PAST_DUE"] },
-      nextBillingAt: { lte: now },
-      chargeToken:   null,
+      billingProvider: "hyp",
+      plan:            { in: ["STANDARD", "GROWTH", "PRO"] },
+      status:          { in: ["TRIALING", "ACTIVE", "PAST_DUE"] },
+      nextBillingAt:   { lte: now },
+      chargeToken:     null,
     },
   });
 
@@ -84,47 +160,318 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
   console.log(
     `[billing/recurring] SCAN_RESULT` +
     ` eligible=${eligible}` +
-    ` wouldCharge=${dueWithToken.length}` +
+    ` withToken=${dueWithToken.length}` +
     ` noToken=${noTokenCount}`,
   );
 
-  // ── Dry-run: log each subscription that WOULD be charged ─────────────────────
-  // Phase 3C replaces this block with real action=soft calls.
-  for (const sub of dueWithToken) {
-    console.log(
-      `[billing/recurring] WOULD_CHARGE` +
-      ` subscriptionId=${sub.id}` +
-      ` userId=${sub.userId}` +
-      ` plan=${sub.plan}` +
-      ` interval=${sub.billingInterval}` +
-      ` status=${sub.status}` +
-      ` nextBillingAt=${sub.nextBillingAt?.toISOString() ?? "(null)"}` +
-      ` billingFailures=${sub.billingFailures}` +
-      ` cardExpMonth=${sub.cardExpMonth ?? "(none)"}` +
-      ` cardExpYear=${sub.cardExpYear ?? "(none)"}` +
-      ` — Phase 3C will execute action=soft charge here`,
-    );
-  }
-
-  // ── Warn about subscriptions due but missing chargeToken ─────────────────────
   if (noTokenCount > 0) {
     console.warn(
       `[billing/recurring] NO_TOKEN_WARNING` +
       ` count=${noTokenCount}` +
-      ` — subscriptions are due for billing but have no chargeToken.` +
-      ` Check Phase 3A getToken results for these users.`,
+      ` — subscriptions are due but missing chargeToken.` +
+      ` Investigate Phase 3A getToken results for these users.`,
     );
   }
 
+  // ── Per-subscription charge loop ──────────────────────────────────────────
+
+  let charged     = 0;
+  let failed      = 0;
+  let skipped     = 0;
+  let dryRunLogged = 0;
+
+  for (const sub of dueWithToken) {
+    const periodStart = sub.nextBillingAt!;
+    const periodEnd   = computePeriodEnd(periodStart, sub.billingInterval);
+
+    // ── Resolve amount ──────────────────────────────────────────────────────
+    if (!BILLABLE_PLANS.has(sub.plan)) {
+      console.warn(
+        `[billing/recurring] SKIP_NON_BILLABLE_PLAN` +
+        ` subscriptionId=${sub.id} plan=${sub.plan}`,
+      );
+      skipped++;
+      continue;
+    }
+    const planKey       = sub.plan as BillablePlan;
+    const amounts       = PLAN_AMOUNTS[planKey];
+    const amountAgorot  = sub.billingInterval === "YEARLY" ? amounts.yearly : amounts.monthly;
+    const amountShekels = amountAgorot / 100;
+
+    // ── Gate 2: DRY_RUN ────────────────────────────────────────────────────
+    if (isDryRun) {
+      console.log(
+        `[billing/recurring] CHARGE_DRY_RUN` +
+        ` subscriptionId=${sub.id}` +
+        ` userId=${sub.userId}` +
+        ` plan=${sub.plan}` +
+        ` interval=${sub.billingInterval}` +
+        ` amountShekels=${amountShekels}` +
+        ` status=${sub.status}` +
+        ` nextBillingAt=${periodStart.toISOString()}` +
+        ` billingFailures=${sub.billingFailures}` +
+        ` cardExpMonth=${sub.cardExpMonth ?? "(none)"}` +
+        ` cardExpYear=${sub.cardExpYear ?? "(none)"}`,
+      );
+      dryRunLogged++;
+      continue;
+    }
+
+    // ── Gate 1: ENABLE_REAL_RECURRING_CHARGES ─────────────────────────────
+    // This gate is checked AFTER DRY_RUN so dry-run still works when the
+    // real-charge flag is off — useful for scan verification in staging.
+    if (!realChargesEnabled) {
+      console.log(
+        `[billing/recurring] REAL_CHARGES_DISABLED` +
+        ` subscriptionId=${sub.id}` +
+        ` userId=${sub.userId}` +
+        ` — set ENABLE_REAL_RECURRING_CHARGES=true to enable real charges`,
+      );
+      skipped++;
+      continue;
+    }
+
+    // ── Idempotency check ──────────────────────────────────────────────────
+    const existing = await prisma.billingCharge.findFirst({
+      where: {
+        subscriptionId: sub.id,
+        periodStart,
+        status: { in: ["PENDING", "SUCCEEDED"] },
+      },
+      select: { id: true, status: true },
+    });
+    if (existing) {
+      console.log(
+        `[billing/recurring] IDEMPOTENCY_SKIP` +
+        ` subscriptionId=${sub.id}` +
+        ` existingChargeId=${existing.id}` +
+        ` existingStatus=${existing.status}` +
+        ` periodStart=${periodStart.toISOString()}`,
+      );
+      skipped++;
+      continue;
+    }
+
+    // ── Fetch chargeToken (targeted query — not logged) ────────────────────
+    const tokenRow = await prisma.subscription.findUnique({
+      where:  { id: sub.id },
+      select: { chargeToken: true },
+    });
+    if (!tokenRow?.chargeToken) {
+      console.warn(
+        `[billing/recurring] SKIP_TOKEN_GONE` +
+        ` subscriptionId=${sub.id}` +
+        ` — chargeToken was present at scan but missing at charge time`,
+      );
+      skipped++;
+      continue;
+    }
+    if (!sub.cardExpMonth || !sub.cardExpYear) {
+      console.warn(
+        `[billing/recurring] SKIP_MISSING_EXPIRY` +
+        ` subscriptionId=${sub.id}` +
+        ` cardExpMonth=${sub.cardExpMonth ?? "(null)"}` +
+        ` cardExpYear=${sub.cardExpYear ?? "(null)"}`,
+      );
+      skipped++;
+      continue;
+    }
+
+    // ── Pre-create PENDING BillingCharge ───────────────────────────────────
+    // Created before the HYP call so a crash between the call and the DB
+    // update still leaves an audit record.
+    const charge = await prisma.billingCharge.create({
+      data: {
+        subscriptionId: sub.id,
+        userId:         sub.userId,
+        status:         "PENDING",
+        amountAgorot,
+        plan:           sub.plan,
+        interval:       sub.billingInterval,
+        periodStart,
+        periodEnd,
+        attemptNumber:  sub.billingFailures + 1,
+      },
+      select: { id: true },
+    });
+
+    const planLabel     = PLAN_LABELS[planKey];
+    const intervalLabel = sub.billingInterval === "YEARLY" ? "שנתי" : "חודשי";
+
+    console.log(
+      `[billing/recurring] CHARGE_ATTEMPT` +
+      ` chargeId=${charge.id}` +
+      ` subscriptionId=${sub.id}` +
+      ` userId=${sub.userId}` +
+      ` plan=${sub.plan}` +
+      ` interval=${sub.billingInterval}` +
+      ` amountShekels=${amountShekels}` +
+      ` attemptNumber=${sub.billingFailures + 1}` +
+      ` periodStart=${periodStart.toISOString()}` +
+      ` periodEnd=${periodEnd.toISOString()}`,
+    );
+
+    // ── Call HYP action=soft ───────────────────────────────────────────────
+    const result = await callHypSoft({
+      chargeToken:   tokenRow.chargeToken,    // never logged inside callHypSoft
+      amountShekels,
+      cardExpMonth:  sub.cardExpMonth,
+      cardExpYear:   sub.cardExpYear,
+      order:         charge.id,
+      info:          `${planLabel} · ${intervalLabel}`,
+    });
+
+    // ── Success path ───────────────────────────────────────────────────────
+    if (result.ok) {
+      await prisma.$transaction(async (tx) => {
+        await tx.billingCharge.update({
+          where: { id: charge.id },
+          data: {
+            status:     "SUCCEEDED",
+            hypCCode:   result.cCode,
+            hypTransId: result.hypTransId,
+            // hypRaw intentionally not stored — may contain card-adjacent values
+          },
+        });
+
+        await tx.subscription.update({
+          where: { id: sub.id },
+          data: {
+            status:             "ACTIVE",
+            nextBillingAt:      periodEnd,
+            currentPeriodStart: periodStart,
+            currentPeriodEnd:   periodEnd,
+            billingFailures:    0,
+            // firstPaymentAt: set to now only on the very first charge
+            firstPaymentAt:     sub.firstPaymentAt ?? now,
+          },
+        });
+
+        await tx.subscriptionEvent.create({
+          data: {
+            subscriptionId: sub.id,
+            event:          "payment_succeeded",
+            fromPlan:       sub.plan,
+            toPlan:         sub.plan,
+            fromStatus:     sub.status,
+            toStatus:       "ACTIVE",
+            source:         "cron",
+            actorId:        null,
+            metadata: JSON.stringify({
+              chargeId:    charge.id,
+              hypTransId:  result.hypTransId,
+              amountAgorot,
+              plan:        sub.plan,
+              interval:    sub.billingInterval,
+              periodStart: periodStart.toISOString(),
+              periodEnd:   periodEnd.toISOString(),
+            }),
+          },
+        });
+      });
+
+      console.log(
+        `[billing/recurring] CHARGE_SUCCEEDED` +
+        ` chargeId=${charge.id}` +
+        ` subscriptionId=${sub.id}` +
+        ` userId=${sub.userId}` +
+        ` cCode="${result.cCode}"` +
+        ` hasTransId=${Boolean(result.hypTransId)}` +
+        ` amountShekels=${amountShekels}` +
+        ` nextBillingAt=${periodEnd.toISOString()}`,
+      );
+      charged++;
+
+    // ── Failure path ───────────────────────────────────────────────────────
+    } else {
+      const newFailures    = sub.billingFailures + 1;
+      const isMaxFailures  = newFailures >= MAX_BILLING_FAILURES;
+      const retryDate      = computeRetryDate(now, newFailures);
+      const newStatus      = isMaxFailures
+        ? ("PAST_DUE" as const)
+        : sub.status;
+
+      await prisma.$transaction(async (tx) => {
+        await tx.billingCharge.update({
+          where: { id: charge.id },
+          data: {
+            status:      "FAILED",
+            hypCCode:    result.cCode,
+            hypTransId:  result.hypTransId,
+            nextRetryAt: retryDate,
+            // hypRaw intentionally not stored
+          },
+        });
+
+        await tx.subscription.update({
+          where: { id: sub.id },
+          data: {
+            billingFailures: newFailures,
+            status:          newStatus,
+            // Advance cursor to retry date; on final failure leave it so it
+            // won't be picked up again (status=PAST_DUE is already excluded
+            // after MAX_BILLING_FAILURES by the query's implicit future check).
+            ...(retryDate ? { nextBillingAt: retryDate } : {}),
+          },
+        });
+
+        await tx.subscriptionEvent.create({
+          data: {
+            subscriptionId: sub.id,
+            event:          "payment_failed",
+            fromPlan:       sub.plan,
+            toPlan:         sub.plan,
+            fromStatus:     sub.status,
+            toStatus:       newStatus,
+            source:         "cron",
+            actorId:        null,
+            metadata: JSON.stringify({
+              chargeId:      charge.id,
+              hypCCode:      result.cCode,
+              attemptNumber: newFailures,
+              isMaxFailures,
+              retryDate:     retryDate?.toISOString() ?? null,
+            }),
+          },
+        });
+      });
+
+      console.warn(
+        `[billing/recurring] CHARGE_FAILED` +
+        ` chargeId=${charge.id}` +
+        ` subscriptionId=${sub.id}` +
+        ` userId=${sub.userId}` +
+        ` cCode="${result.cCode}"` +
+        ` newFailures=${newFailures}` +
+        ` newStatus=${newStatus}` +
+        ` retryDate=${retryDate?.toISOString() ?? "(none — PAST_DUE)"}`,
+      );
+      failed++;
+    }
+  }
+
+  // ── Summary ───────────────────────────────────────────────────────────────
+
   console.log(
     `[billing/recurring] SCAN_COMPLETE` +
-    ` wouldCharge=${dueWithToken.length}` +
-    ` noToken=${noTokenCount}`,
+    ` eligible=${eligible}` +
+    ` charged=${charged}` +
+    ` failed=${failed}` +
+    ` skipped=${skipped}` +
+    ` dryRunLogged=${dryRunLogged}` +
+    ` noToken=${noTokenCount}` +
+    ` realChargesEnabled=${realChargesEnabled}` +
+    ` isDryRun=${isDryRun}`,
   );
 
   return {
     eligible,
-    wouldCharge: dueWithToken.length,
-    noToken:     noTokenCount,
+    charged,
+    failed,
+    skipped,
+    noToken:            noTokenCount,
+    dryRunLogged,
+    dryRunMode:         isDryRun,
+    realChargesEnabled,
   };
 }

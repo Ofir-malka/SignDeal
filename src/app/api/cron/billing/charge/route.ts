@@ -52,8 +52,12 @@ export async function GET(request: Request) {
     console.log(
       `[cron/billing/charge] COMPLETE` +
       ` eligible=${result.eligible}` +
-      ` wouldCharge=${result.wouldCharge}` +
-      ` noToken=${result.noToken}`,
+      ` charged=${result.charged}` +
+      ` failed=${result.failed}` +
+      ` skipped=${result.skipped}` +
+      ` noToken=${result.noToken}` +
+      ` dryRunMode=${result.dryRunMode}` +
+      ` realChargesEnabled=${result.realChargesEnabled}`,
     );
 
     return NextResponse.json({ ok: true, ...result });

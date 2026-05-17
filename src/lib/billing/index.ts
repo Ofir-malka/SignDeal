@@ -15,7 +15,10 @@ import { HypBillingProvider }  from "./providers/hyp";
 
 // ── Shared types ──────────────────────────────────────────────────────────────
 
-export type BillablePlan     = "STANDARD" | "GROWTH" | "PRO";
+// BillablePlan lives in amounts.ts — imported here so CheckoutParams can use it,
+// and re-exported for backward compatibility with callers that import from "@/lib/billing".
+import type { BillablePlan } from "./amounts";
+export type { BillablePlan };
 export type BillingInterval  = "MONTHLY"  | "YEARLY";
 
 export interface CheckoutParams {

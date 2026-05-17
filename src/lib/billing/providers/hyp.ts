@@ -35,29 +35,11 @@
 
 import crypto from "crypto";
 import type { BillingProvider, CheckoutParams, CheckoutResult } from "../index";
+import { PLAN_AMOUNTS, PLAN_LABELS }                            from "../amounts";
 
 // ── Endpoint ──────────────────────────────────────────────────────────────────
 
 const HYP_PAY_URL = "https://pay.hyp.co.il/p/";
-
-// ── Plan amounts in agorot (100 agorot = ₪1) ─────────────────────────────────
-// Kept in sync with src/lib/plans.ts PLAN_PRICES.
-// Separate copy here to keep billing/ self-contained (avoids cross-lib coupling).
-
-const PLAN_AMOUNTS: Record<"STANDARD" | "GROWTH" | "PRO", { monthly: number; yearly: number }> = {
-  STANDARD: { monthly:  3_900, yearly:  34_800 }, // ₪39/mo  · ₪348/yr
-  GROWTH:   { monthly:  4_900, yearly:  46_800 }, // ₪49/mo  · ₪468/yr
-  PRO:      { monthly: 11_000, yearly: 118_800 }, // ₪110/mo · ₪1,188/yr
-};
-
-// ── Plan labels (shown on HYP payment page via Info param) ───────────────────
-// GROWTH uses the masculine form "מתקדם" (מסלול is masculine in Hebrew).
-
-const PLAN_LABELS: Record<"STANDARD" | "GROWTH" | "PRO", string> = {
-  STANDARD: "מסלול סטנדרט",
-  GROWTH:   "מסלול מתקדם",
-  PRO:      "מסלול פרו",
-};
 
 // ── Card field parser ─────────────────────────────────────────────────────────
 // Exported here so both /billing/success and /api/billing/hyp-notify can share
@@ -285,6 +267,123 @@ export async function callGetToken(hypId: string): Promise<GetTokenResult> {
   );
 
   return { ok: true, token, tokef, cCode, cardExpMonth, cardExpYear };
+}
+
+// ── action=soft: server-initiated recurring charge (Phase 3C) ─────────────────
+//
+// Charges a stored card token without user interaction.
+// Called by the recurring billing engine in src/lib/billing/recurring.ts.
+//
+// Required HYP params:
+//   action=soft   CC=<19-digit token>  Token=True
+//   Amount=<ILS>  Tmonth=<MM>         Tyear=<YYYY>
+//   Masof  PassP  Coin=1  Tash=1  Order=<BillingCharge.id>  Info
+//
+// Security:
+//   - chargeToken is NEVER logged — log hasChargeToken boolean only.
+//   - Raw HYP response is NEVER stored or logged — it may contain
+//     card-adjacent data. Only CCode, TransId, and ACode are extracted.
+
+export interface SoftChargeResult {
+  ok:         boolean;
+  cCode:      string;
+  hypTransId: string | null;
+  authCode:   string | null;
+}
+
+export async function callHypSoft(params: {
+  chargeToken:   string;   // 19-digit token — NEVER log
+  amountShekels: number;   // whole ILS (agorot ÷ 100)
+  cardExpMonth:  number;   // 1–12
+  cardExpYear:   number;   // 4-digit
+  order:         string;   // BillingCharge.id — HYP idempotency anchor
+  info:          string;   // description shown on HYP receipt
+}): Promise<SoftChargeResult> {
+  const masof = process.env.HYP_MASOF?.trim() ?? "";
+  const passp = process.env.HYP_PASSP?.trim() ?? "";
+
+  // ── 1. SOFT_CHARGE_REQUEST ──────────────────────────────────────────────────
+  // Log everything except the token value itself.
+  console.log(
+    `[billing/hyp] SOFT_CHARGE_REQUEST` +
+    ` order=${params.order}` +
+    ` amountShekels=${params.amountShekels}` +
+    ` cardExpMonth=${params.cardExpMonth}` +
+    ` cardExpYear=${params.cardExpYear}` +
+    ` hasChargeToken=true` +
+    ` hasMasof=${Boolean(masof)}` +
+    ` hasPassP=${Boolean(passp)}`,
+  );
+
+  const qp = new URLSearchParams({
+    action:  "soft",
+    Masof:   masof,
+    PassP:   passp,
+    Amount:  String(params.amountShekels),
+    CC:      params.chargeToken,   // 19-digit token — not logged
+    Tmonth:  params.cardExpMonth.toString().padStart(2, "0"),
+    Tyear:   String(params.cardExpYear),
+    Token:   "True",               // tells HYP: CC is a stored token, not a PAN
+    Coin:    "1",                  // 1 = ILS
+    Tash:    "1",                  // 1 instalment — full charge now
+    Order:   params.order,
+    Info:    params.info,
+    UTF8:    "True",
+    UTF8out: "True",
+  });
+
+  let cCode      = "999";
+  let hypTransId: string | null = null;
+  let authCode:   string | null = null;
+
+  try {
+    const resp = await fetch(`${HYP_PAY_URL}?${qp.toString()}`, {
+      method: "GET",
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    const raw = await resp.text().catch(() => "");
+
+    // ── 2. Parse response — NEVER store or log raw body ──────────────────────
+    // The raw response may contain card-adjacent values. Extract only the
+    // three fields we need; discard everything else.
+    try {
+      const parsed = new URLSearchParams(raw.trim());
+      cCode      = parsed.get("CCode")   ?? "999";
+      hypTransId = parsed.get("TransId") ?? null;
+      authCode   = parsed.get("ACode")   ?? null;
+    } catch {
+      const m = raw.match(/CCode=(\d+)/);
+      cCode = m?.[1] ?? "999";
+    }
+  } catch (err) {
+    console.warn(
+      `[billing/hyp] SOFT_CHARGE_NETWORK_ERROR` +
+      ` order=${params.order}:`,
+      err instanceof Error ? err.message : err,
+    );
+    return { ok: false, cCode: "999", hypTransId: null, authCode: null };
+  }
+
+  // ── 3. SOFT_CHARGE_RESULT ───────────────────────────────────────────────────
+  console.log(
+    `[billing/hyp] SOFT_CHARGE_RESULT` +
+    ` order=${params.order}` +
+    ` cCode="${cCode}"` +
+    ` hasTransId=${Boolean(hypTransId)}` +
+    ` hasAuthCode=${Boolean(authCode)}`,
+  );
+
+  if (cCode !== "0") {
+    console.warn(
+      `[billing/hyp] SOFT_CHARGE_FAILED` +
+      ` order=${params.order}` +
+      ` cCode="${cCode}"`,
+    );
+    return { ok: false, cCode, hypTransId, authCode };
+  }
+
+  return { ok: true, cCode, hypTransId, authCode };
 }
 
 // ── Provider class ────────────────────────────────────────────────────────────
