@@ -85,6 +85,10 @@ model User {
   subscription        Subscription?       // 1-to-1; created at registration
   billingCheckouts    BillingCheckout[]   // one row per checkout attempt
   contractUsageEvents ContractUsageEvent[] // immutable usage ledger (Phase 3E+)
+  // Stripe Connect broker account (Phase A — client-to-broker brokerage payments).
+  // Null until the broker completes Stripe Connect onboarding (Phase B).
+  // Completely separate from HYP subscription billing.
+  stripeAccount       BrokerStripeAccount?
 
   // ── Auth.js adapter relations ─────────────────────────────────────────────
   accounts   Account[]
@@ -103,6 +107,53 @@ model Client {
   createdAt DateTime   @default(now())
   contracts Contract[]
   messages  Message[]
+}
+
+// ── BrokerStripeAccount ────────────────────────────────────────────────────────
+//
+// One row per broker who has started or completed Stripe Connect onboarding.
+// 1-to-1 with User; created when the broker first clicks "Connect with Stripe".
+//
+// ⚠ This is NOT related to HYP billing (SaaS subscription).
+// HYP fields live on Subscription. These fields govern client-to-broker
+// brokerage fee collection via Stripe Connect.
+//
+// Lifecycle:
+//   Row absent       — broker has not started Stripe Connect onboarding
+//   PENDING          — account created on Stripe; onboarding link sent
+//   IN_PROGRESS      — broker opened the link but did not complete all steps
+//   COMPLETE         — chargesEnabled + payoutsEnabled = true; ready for payments
+//   RESTRICTED       — Stripe flagged or requires additional information
+//
+// chargesEnabled must be true before the payment-request route allows Stripe
+// payment links to be created for a broker's contracts.
+
+model BrokerStripeAccount {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // ── Stripe-issued identifiers ──────────────────────────────────────────────
+  // stripeAccountId is the Connect account ID (acct_...) returned by
+  // stripe.accounts.create(). Unique across the platform — one acct_ per broker.
+  stripeAccountId String @unique  // "acct_..."
+
+  // ── Onboarding state ───────────────────────────────────────────────────────
+  // Synced from Stripe account.capabilities / requirements via webhook or
+  // GET /api/stripe/connect/status poll (Phase B).
+  onboardingStatus StripeOnboardingStatus @default(PENDING)
+  chargesEnabled   Boolean                @default(false)  // account.charges_enabled
+  payoutsEnabled   Boolean                @default(false)  // account.payouts_enabled
+  detailsSubmitted Boolean                @default(false)  // account.details_submitted
+
+  // ── Account metadata ───────────────────────────────────────────────────────
+  country  String @default("IL")   // ISO 3166-1 alpha-2 — all brokers are Israeli
+  currency String @default("ils")  // ISO 4217 — Israeli Shekel
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([onboardingStatus])  // Phase B: "find all brokers pending onboarding"
 }
 
 // ── ContractTemplate ───────────────────────────────────────────────────────────
@@ -209,6 +260,19 @@ model Payment {
   platformFeePercent Float @default(0)  // e.g. 0.5 = 0.5%; used to compute platformFee
   // feeMode is persisted via feePaidBy (BROKER | CLIENT | SPLIT)
 
+  // ── Stripe Connect fields (Phase A — null for Rapyd payments) ─────────────
+  // providerPaymentId doubles as the Stripe PaymentIntent ID (pi_...) when
+  // provider = "stripe". These fields are only populated for Stripe payments.
+  //
+  // stripeTransferId      — set when Stripe fires the transfer.created webhook,
+  //                         confirming the broker's Connected Account was funded.
+  //                         Format: "tr_..."
+  // applicationFeeAmount  — the actual platform fee collected by Stripe in agorot
+  //                         (= Stripe's application_fee_amount).  May differ from
+  //                         the computed platformFee if rounding or Stripe caps apply.
+  stripeTransferId     String?  // "tr_..." — null until transfer confirmed
+  applicationFeeAmount Int?     // agorot; null for Rapyd or pre-Phase-D payments
+
   createdAt         DateTime      @default(now())
   messages          Message[]
 }
@@ -253,6 +317,23 @@ enum FeePaidBy {
   BROKER   // מתווך נושא בעלויות
   CLIENT   // לקוח משלם עמלת נוחות
   SPLIT    // חלוקה מותאמת אישית
+}
+
+// ── Stripe Connect enums ───────────────────────────────────────────────────────
+// Separate from HYP billing enums — these govern client-to-broker payments only.
+
+enum StripeOnboardingStatus {
+  PENDING      // account created on Stripe; onboarding link not yet completed
+  IN_PROGRESS  // broker opened the onboarding link but did not finish
+  COMPLETE     // chargesEnabled + payoutsEnabled = true; ready to receive payments
+  RESTRICTED   // Stripe flagged the account or requires additional verification
+}
+
+enum WebhookEventStatus {
+  RECEIVED   // event stored; processing in progress
+  PROCESSED  // event handled successfully; no further action needed
+  IGNORED    // duplicate or event type not handled; idempotency guard triggered
+  FAILED     // processing threw an error; see error column for details
 }
 
 enum PropertyType {
@@ -724,4 +805,54 @@ model ContractUsageEvent {
 
   @@index([userId, createdAt])  // getMonthlyDocumentUsage: count per user per month
   @@index([contractId])         // FK traversal index
+}
+
+// ── WebhookEvent ───────────────────────────────────────────────────────────────
+//
+// Append-only log of inbound webhook events from payment providers.
+// Serves as the authoritative idempotency store for all webhook processing.
+//
+// ⚠ This is for CLIENT-TO-BROKER payment webhooks (Stripe, Rapyd).
+// HYP billing webhooks (SaaS subscription) are NOT stored here — HYP
+// uses the BillingCheckout.status and BillingCharge rows for idempotency.
+//
+// Idempotency key: (provider, eventId) — a composite unique index.
+// Before processing any webhook event, attempt to INSERT this row.
+// If the INSERT fails with a unique-constraint violation, the event is a
+// duplicate → return 200 immediately without reprocessing.
+//
+// Design decisions:
+//   • payload is Json (JSONB in Postgres) — stores the full raw event body
+//     for audit, debugging, and potential event replay.
+//   • status transitions: RECEIVED → PROCESSED | IGNORED | FAILED
+//   • error column holds the caught exception message when status = FAILED.
+//   • No FK to Payment — the event may arrive before the Payment row exists
+//     (race condition on first webhook for a new checkout session).
+
+model WebhookEvent {
+  id          String             @id @default(cuid())
+
+  // ── Provider + event identity ──────────────────────────────────────────────
+  provider    String             // "stripe" | "rapyd"
+  eventId     String             // provider's own event ID:
+                                 //   Stripe: evt_... (from stripe-signature header)
+                                 //   Rapyd:  event.id from the webhook body
+  eventType   String             // e.g. "payment_intent.succeeded",
+                                 //       "PAYMENT_COMPLETED" (Rapyd)
+
+  // ── Raw payload ───────────────────────────────────────────────────────────
+  payload     Json               // full webhook body; JSONB in Postgres
+
+  // ── Processing state ──────────────────────────────────────────────────────
+  processedAt DateTime           @default(now())
+  status      WebhookEventStatus @default(RECEIVED)
+  error       String?            // caught exception message when status = FAILED
+
+  // ── Composite idempotency key ──────────────────────────────────────────────
+  @@unique([provider, eventId])    // duplicate events → INSERT fails → skip processing
+
+  // ── Indexes ────────────────────────────────────────────────────────────────
+  @@index([provider])              // "all Stripe events", "all Rapyd events"
+  @@index([status])                // "all FAILED events" for admin debugging
+  @@index([processedAt])           // chronological queries + retention cleanup
 }
