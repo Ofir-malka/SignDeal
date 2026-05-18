@@ -216,15 +216,11 @@ export function HeroSection() {
             with a baked-in delay.  AnimateIn is kept for below-fold sections.
             Reduced-motion: global @media block collapses duration to 0.01ms.
           */}
-          <h1
-            className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.15]
-                       bg-gradient-to-l from-white via-white to-violet-300
-                       bg-clip-text text-transparent"
-          >
+          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.15]">
             {/* Line 1 — fires at 80ms (just after badge anchors at t=0) */}
             <span className="block overflow-hidden pb-[0.06em]">
               <span
-                className="block"
+                className="block bg-gradient-to-l from-white via-white to-violet-300 bg-clip-text text-transparent"
                 style={{
                   animation:
                     "hero-line-reveal 0.85s cubic-bezier(0.22,1,0.36,1) 0.08s both",
@@ -236,7 +232,7 @@ export function HeroSection() {
             {/* Line 2 — fires at 240ms (160ms stagger after line 1) */}
             <span className="block overflow-hidden pb-[0.06em]">
               <span
-                className="block"
+                className="block bg-gradient-to-l from-white via-white to-violet-300 bg-clip-text text-transparent"
                 style={{
                   animation:
                     "hero-line-reveal 0.85s cubic-bezier(0.22,1,0.36,1) 0.24s both",
