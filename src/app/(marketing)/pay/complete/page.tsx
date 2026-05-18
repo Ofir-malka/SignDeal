@@ -1,17 +1,20 @@
 /**
  * /pay/complete — public payment-completion page.
  *
- * Rapyd redirects the client here after the hosted checkout finishes.
+ * Both Rapyd and Stripe redirect the client here after the hosted checkout finishes.
  * No auth required — this is the client-facing confirmation screen.
  *
  * Query params:
- *   contractId — our Contract DB id (used to look up real payment status)
- *   status     — "success" | "cancel"  (Rapyd redirect hint; DB is authoritative)
+ *   contractId  — our Contract DB id (used to look up real payment status)
+ *   status      — "success" | "cancel"  (Rapyd redirect hint; DB is authoritative)
+ *   session_id  — Stripe Checkout Session ID (present on Stripe success_url only).
+ *                 Its presence signals a Stripe success redirect, equivalent to
+ *                 status="success" for the isProcessing race-condition guard.
  *
  * Security: We verify the actual payment status from the DB rather than
- * trusting the URL param. The status param can be forged by navigating manually.
- * The DB is updated by the Rapyd webhook (async), so a "success" redirect that
- * arrives before the webhook shows a "processing" state instead.
+ * trusting the URL param. Both params can be forged by navigating manually.
+ * The DB is updated by the webhook (async), so a success redirect that arrives
+ * before the webhook shows a "processing" state instead of a false failure.
  */
 
 // Force dynamic so searchParams and DB reads are always fresh.
@@ -33,11 +36,11 @@ function Logo() {
 }
 
 type Props = {
-  searchParams: Promise<{ contractId?: string; status?: string }>;
+  searchParams: Promise<{ contractId?: string; status?: string; session_id?: string }>;
 };
 
 export default async function PayCompletePage({ searchParams }: Props) {
-  const { contractId, status } = await searchParams;
+  const { contractId, status, session_id } = await searchParams;
 
   // ── Verify actual payment status from DB ──────────────────────────────────
   // The URL param comes from Rapyd's redirect URL and can be forged.
@@ -65,13 +68,18 @@ export default async function PayCompletePage({ searchParams }: Props) {
   }
 
   // Decision matrix:
-  //  DB = PAID                                    → success
-  //  URL = "cancel" and DB ≠ PAID                 → cancel
-  //  record EXISTS in DB, not PAID, URL = "success"→ processing (webhook race)
-  //  no record in DB (fake/invalid contractId)    → neutral fallback
-  const isSuccess    = dbPaymentStatus === "PAID";
-  const isProcessing = !isSuccess && paymentFound && status === "success";
-  const isCancel     = status === "cancel" && !isSuccess;
+  //  DB = PAID                                       → success
+  //  URL = "cancel" and DB ≠ PAID                    → cancel
+  //  record EXISTS in DB, not PAID, URL = "success"  → processing (Rapyd webhook race)
+  //  record EXISTS in DB, not PAID, session_id set   → processing (Stripe webhook race)
+  //  no record in DB (fake/invalid contractId)       → neutral fallback
+  //
+  // session_id is present only on Stripe success_url redirects.  Its presence is
+  // equivalent to status="success" as a "the client paid" hint — DB is authoritative.
+  const isStripeReturn = !!session_id;
+  const isSuccess      = dbPaymentStatus === "PAID";
+  const isProcessing   = !isSuccess && paymentFound && (status === "success" || isStripeReturn);
+  const isCancel       = status === "cancel" && !isSuccess;
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4" dir="rtl">

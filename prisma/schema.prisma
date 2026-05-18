@@ -153,7 +153,74 @@ model BrokerStripeAccount {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // Phase D: payout lifecycle events for this broker's Express account
+  payoutEvents  StripePayoutEvent[]
+
   @@index([onboardingStatus])  // Phase B: "find all brokers pending onboarding"
+}
+
+// ── StripePayoutEvent ──────────────────────────────────────────────────────────
+//
+// One row per Stripe Payout (po_...) on a broker's Express account.
+// Populated by the Connect webhook (payout.created → payout.paid/failed/canceled).
+//
+// ⚠ This is for CLIENT-TO-BROKER brokerage payouts ONLY.
+//   HYP SaaS subscription billing is completely separate.
+//
+// Why a separate table:
+//   A single payout batches many transfers (= many Payments).
+//   Storing payout state on every Payment row would mean a single payout.failed
+//   event requires updating N rows atomically — fragile and denormalized.
+//   Instead: one StripePayoutEvent row per payout, Payment.payoutId FK links them.
+//
+// Lifecycle:
+//   payout.created   → status="pending"
+//   payout.paid      → status="paid", arrivalDate set
+//                      + reconciliation: Payment.payoutId → this row's payoutId
+//   payout.failed    → status="failed", failureCode + failureMessage set
+//   payout.canceled  → status="canceled"
+//
+// status values match Stripe's payout.status strings exactly:
+//   "pending" | "in_transit" | "paid" | "failed" | "canceled"
+
+model StripePayoutEvent {
+  id     String @id @default(cuid())
+
+  // Which broker's Express account generated this payout.
+  // FK to BrokerStripeAccount.stripeAccountId (the acct_... Connect account ID).
+  stripeAccountId String
+  brokerAccount   BrokerStripeAccount @relation(fields: [stripeAccountId], references: [stripeAccountId], onDelete: Cascade)
+
+  // Stripe's payout identifier — unique across the platform.
+  payoutId  String @unique  // "po_..."
+
+  // ── Lifecycle ────────────────────────────────────────────────────────────────
+  status    String   // "pending" | "in_transit" | "paid" | "failed" | "canceled"
+
+  // ── Amount ───────────────────────────────────────────────────────────────────
+  amount    Int      // total payout amount in agorot (Stripe sends smallest currency unit)
+  currency  String   @default("ils")
+
+  // ── Settlement ────────────────────────────────────────────────────────────────
+  // Populated when status → "paid".  Stripe arrival_date is a Unix timestamp;
+  // the webhook handler converts: new Date(payout.arrival_date * 1000).
+  arrivalDate DateTime?
+
+  // ── Failure details ───────────────────────────────────────────────────────────
+  // Populated when status → "failed".  Both null for non-failed payouts.
+  failureCode    String?  // Stripe failure_code, e.g. "account_closed", "invalid_account_number"
+  failureMessage String?  // Human-readable failure reason from Stripe
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Payments reconciled into this payout (via balance transaction reconciliation
+  // on payout.paid).  Null until reconciliation links them.
+  payments  Payment[]
+
+  @@index([stripeAccountId])   // fast "all payouts for this broker"
+  @@index([status])            // "all failed payouts", "all pending payouts"
+  @@index([arrivalDate])       // chronological + upcoming-payout queries
 }
 
 // ── ContractTemplate ───────────────────────────────────────────────────────────
@@ -273,8 +340,35 @@ model Payment {
   stripeTransferId     String?  // "tr_..." — null until transfer confirmed
   applicationFeeAmount Int?     // agorot; null for Rapyd or pre-Phase-D payments
 
+  // ── Stripe Checkout Session fields (Phase C — null for Rapyd payments) ────
+  // stripeCheckoutSessionId — set when the Stripe Checkout Session is created.
+  //   Used to: look up the Payment in webhook events, check for open sessions
+  //   (idempotency), and match the session_id query param on /pay/complete.
+  //   Format: "cs_..."
+  // stripePaymentIntentId   — set when checkout.session.completed webhook fires.
+  //   Used to: reconcile transfers, reference charges, future refund flow.
+  //   Format: "pi_..."
+  stripeCheckoutSessionId  String?  // "cs_..." — null until Checkout Session created
+  stripePaymentIntentId    String?  // "pi_..." — null until checkout.session.completed
+
+  // ── Stripe Transfer + Payout tracking (Phase D — null for Rapyd payments) ──
+  // transferStatus — lifecycle of the Stripe Transfer (tr_...) that funds the broker.
+  //   "paid"     — transfer landed in the broker's Stripe Express balance.
+  //   "reversed" — transfer was reversed (Phase E handles accounting/refund).
+  //   null       — Rapyd payment, or Stripe payment before transfer.created fires.
+  //
+  // payoutId — FK to StripePayoutEvent.payoutId.  Populated on payout.paid when
+  //   we reconcile Stripe balance transactions to find which Payment was swept
+  //   into that payout.  Null until reconciliation runs.
+  transferStatus  String?             // "paid" | "reversed"
+  payoutId        String?             // "po_..." — null until reconciled
+  payoutEvent     StripePayoutEvent?  @relation(fields: [payoutId], references: [payoutId], onDelete: SetNull)
+
   createdAt         DateTime      @default(now())
   messages          Message[]
+
+  @@index([stripeCheckoutSessionId])  // Phase C: fast webhook + idempotency lookup
+  @@index([payoutId])                 // Phase D: payout → payments reconciliation
 }
 
 // ── Activity log ───────────────────────────────────────────────────────────────
