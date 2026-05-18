@@ -62,10 +62,14 @@ model User {
   logoUrl       String?            // optional; upload not implemented yet
 
   // ── Auth.js fields ────────────────────────────────────────────────────────
-  passwordHash    String?    // bcrypt hash; null for OAuth-only accounts
-  emailVerified   DateTime?
-  image           String?    // avatar URL from Google / Apple
-  profileComplete Boolean    @default(false) // true once phone+license+idNumber filled
+  passwordHash      String?    // bcrypt hash; null for OAuth-only accounts
+  emailVerified     DateTime?
+  image             String?    // avatar URL from Google / Apple
+  profileComplete   Boolean    @default(false) // true once phone+license+idNumber filled
+  // Set to now() whenever the user successfully resets their password.
+  // Any JWT issued before this timestamp is treated as stale and invalidated.
+  // null = password has never been reset (no invalidation needed).
+  passwordChangedAt DateTime?
 
   // ── SaaS role & plan ──────────────────────────────────────────────────────
   role            UserRole   @default(BROKER)

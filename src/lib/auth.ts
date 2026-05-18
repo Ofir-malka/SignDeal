@@ -66,6 +66,48 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         // Store as ISO string — JWT values must be JSON-serialisable.
         token.trialEndsAt        =
           subscription?.trialEndsAt?.toISOString() ?? null;
+
+        // ── Session-invalidation guard stamp ──────────────────────────────────
+        // Store the user's latest passwordChangedAt as Unix ms in the JWT.
+        // The stale-session guard below compares DB value against this on every
+        // subsequent auth() call (not the edge middleware — that reads token only).
+        // Credentials sign-in: value comes from the authorize() query above.
+        // OAuth sign-in:        user object has no passwordChangedAt → 0 is correct
+        //                       (OAuth users can't use the reset flow in this app).
+        token.passwordChangedAt =
+          (user as { passwordChangedAt?: Date | null }).passwordChangedAt
+            ?.getTime() ?? 0;
+      }
+
+      // ── Stale-session guard (P0 — password-reset session invalidation) ──────
+      // On every Node.js auth() call that is NOT the initial sign-in, check
+      // whether the user has reset their password after this JWT was issued.
+      // If so, return null to invalidate the session — Auth.js will clear the
+      // cookie and redirect the user to /login on the next page load.
+      //
+      // This does NOT fire on the Edge middleware (proxy.ts uses authConfig which
+      // has no DB access).  It fires on server-component auth() calls and on
+      // every requireUserId() call in API routes — the right places to enforce it.
+      //
+      // Cost: one indexed primary-key lookup per auth() invocation.  Acceptable
+      // for a small SaaS; swap to Redis token versioning if needed at scale.
+      if (!user?.id && typeof token.id === "string") {
+        const dbUser = await prisma.user.findUnique({
+          where:  { id: token.id },
+          select: { passwordChangedAt: true },
+        });
+        const dbPcAt    = dbUser?.passwordChangedAt?.getTime() ?? 0;
+        const tokenPcAt = typeof token.passwordChangedAt === "number"
+          ? token.passwordChangedAt
+          : 0;
+        if (dbPcAt > 0 && dbPcAt > tokenPcAt) {
+          console.log(
+            `[auth/jwt] stale session invalidated after password reset — userId=${token.id}`,
+          );
+          // Returning null signals Auth.js to treat this as an unauthenticated
+          // request; the session cookie will be cleared on the next response.
+          return null;
+        }
       }
 
       // ── Session update trigger (e.g. after onboarding completes) ─────────────
@@ -267,14 +309,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         const user = await prisma.user.findUnique({
           where:  { email: String(credentials.email) },
           select: {
-            id:              true,
-            email:           true,
-            fullName:        true,
-            passwordHash:    true,
-            profileComplete: true,
-            role:            true,
-            image:           true,
-            emailVerified:   true,
+            id:                true,
+            email:             true,
+            fullName:          true,
+            passwordHash:      true,
+            profileComplete:   true,
+            role:              true,
+            image:             true,
+            emailVerified:     true,
+            passwordChangedAt: true, // needed to stamp into JWT for session-invalidation guard
           },
         });
 

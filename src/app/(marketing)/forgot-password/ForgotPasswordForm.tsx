@@ -19,14 +19,20 @@ export function ForgotPasswordForm() {
     setLoading(true);
 
     try {
-      // Fire-and-forget from the UI perspective — the server always returns 200.
-      // We never tell the user whether the email exists.
-      await fetch("/api/auth/forgot-password", {
+      // Fire-and-forget from the UI perspective — the server always returns 200
+      // for known/unknown emails (anti-enumeration).  The only exception is 429
+      // (rate limit) which is IP-based and safe to surface without leaking info.
+      const res = await fetch("/api/auth/forgot-password", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ email: email.trim().toLowerCase() }),
       });
-      // Always show the generic success state, regardless of status code.
+      if (res.status === 429) {
+        setError("שלחנו כבר בקשה לאחרונה. המתן מספר דקות ונסה שנית.");
+        return;
+      }
+      // All other statuses (200, non-429 errors) show the generic success state —
+      // this prevents leaking whether the email is registered in the system.
       setSubmitted(true);
     } catch {
       // Network error — inform the user without leaking email existence

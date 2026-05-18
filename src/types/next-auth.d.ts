@@ -51,5 +51,11 @@ declare module "next-auth/jwt" {
     plan?:               string;
     subscriptionStatus?: string;
     trialEndsAt?:        string | null;
+    // ── Session-invalidation guard (P0) ──────────────────────────────────────
+    // Unix timestamp (ms) of the user's last password reset, stamped at sign-in.
+    // The jwt callback in auth.ts compares this against the DB value on every
+    // auth() call; if the DB timestamp is newer the token is invalidated.
+    // 0 = no password reset has ever occurred (OAuth users or pre-feature tokens).
+    passwordChangedAt?: number;
   }
 }

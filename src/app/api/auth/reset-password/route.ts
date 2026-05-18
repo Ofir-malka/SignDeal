@@ -104,11 +104,14 @@ export async function POST(request: Request) {
   const passwordHash = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
 
   // ── Atomic update: set new password + delete token in one transaction ────
+  // passwordChangedAt is set to NOW() in the same transaction so that any JWT
+  // issued before this moment is treated as stale by the auth.ts jwt callback
+  // (P0 — session invalidation after password reset).
   try {
     await prisma.$transaction([
       prisma.user.update({
         where: { id: user.id },
-        data:  { passwordHash },
+        data:  { passwordHash, passwordChangedAt: new Date() },
       }),
       prisma.passwordResetToken.delete({
         where: { token: hashedToken },
