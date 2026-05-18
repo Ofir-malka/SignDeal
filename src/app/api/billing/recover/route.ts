@@ -111,8 +111,14 @@ export async function POST(): Promise<NextResponse> {
   }
 
   // ── Create PENDING checkout record ────────────────────────────────────────
-  // The record enables idempotency and carries plan+interval into the success
-  // callback so activateCheckout knows what to activate.
+  // purpose="recovery" is REQUIRED: it tells activateCheckout to reset
+  // billingFailures and set status ACTIVE, without overwriting firstPaymentAt.
+  // Without this record in the DB, activation is impossible — the user would
+  // complete HYP card entry and get a cryptic "verification failed" screen.
+  // Fail hard here instead.
+  //
+  // Common failure cause: migration 20260517210000_billing_checkout_purpose not
+  // yet deployed to production (purpose column missing from BillingCheckout table).
   if (result.order) {
     try {
       await prisma.billingCheckout.create({
@@ -127,8 +133,21 @@ export async function POST(): Promise<NextResponse> {
         },
       });
     } catch (err) {
-      // Log but do NOT block the redirect — user experience > audit record.
-      console.error("[api/billing/recover] failed to create BillingCheckout:", err);
+      const errName = err instanceof Error ? err.constructor.name : "Unknown";
+      const errMsg  = err instanceof Error ? err.message         : String(err);
+      console.error(
+        `[api/billing/recover] BillingCheckout create FAILED` +
+        ` — userId=${userId} order=${result.order} purpose=recovery` +
+        ` errName=${errName} errMsg=${errMsg.slice(0, 500)}` +
+        ` — verify migration 20260517210000_billing_checkout_purpose is deployed`,
+      );
+      // Return 500 — do NOT redirect to HYP. Without a checkout row,
+      // activateCheckout will throw CHECKOUT_NOT_FOUND and the user's
+      // card entry session is wasted.
+      return NextResponse.json(
+        { error: "שגיאת מסד נתונים. נסה שנית." },
+        { status: 500 },
+      );
     }
   }
 
