@@ -303,7 +303,183 @@ function UpgradeActivationSuccess({
   );
 }
 
-// ── Flow D: Payment declined by HYP ──────────────────────────────────────────
+// ── Flow D: Recovery success (purpose = "recovery") ──────────────────────────
+//
+// Shown when a PAST_DUE or billing-warning user re-entered their card and HYP
+// authorised it (CCode=700 or CCode=0).  Access has been restored.
+// Emphasis: "הגישה שוחזרה" — NOT "subscription activated" (misleading for a user
+// who never lost their subscription, only their billing).
+
+function RecoverySuccess({
+  plan,
+  interval,
+  nextBillingAt,
+  cardLast4,
+  noChargeToday,
+}: {
+  plan:          string;
+  interval:      string;
+  nextBillingAt: Date | null;
+  cardLast4?:    string | null;
+  noChargeToday: boolean;
+}) {
+  const planLabel     = PLAN_LABELS[plan]         ?? plan;
+  const intervalLabel = INTERVAL_LABELS[interval] ?? interval;
+
+  return (
+    <>
+      {/* Header — indigo, not emerald: access restored, not a new purchase */}
+      <div className="bg-indigo-600 px-6 py-5 text-white">
+        <div className="flex items-center gap-3 justify-end">
+          <div>
+            <h1 className="text-xl font-bold">הגישה שוחזרה!</h1>
+            <p className="text-sm text-indigo-200 mt-0.5">
+              הכרטיס אומת. הגישה לכל תכונות המנוי חודשה.
+            </p>
+          </div>
+          <span className="text-4xl" aria-hidden="true">🔓</span>
+        </div>
+      </div>
+
+      <div className="px-6 py-6 flex flex-col gap-5">
+
+        {/* "No charge today" — only shown when CCode=700 (J5 auth-only) */}
+        {noChargeToday && (
+          <div className="rounded-xl bg-indigo-50 border border-indigo-200 px-4 py-3 flex items-center gap-3">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+              stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+              aria-hidden="true">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            <p className="text-sm text-indigo-800 font-medium">לא בוצע חיוב עכשיו</p>
+          </div>
+        )}
+
+        {/* Summary */}
+        <div className="rounded-xl bg-indigo-50 border border-indigo-200 px-4 py-4 flex flex-col gap-2">
+          <SummaryRow label="מסלול" value={planLabel} />
+          <SummaryRow label="חיוב"  value={intervalLabel} />
+          {nextBillingAt && (
+            <SummaryRow label="חידוש הבא" value={formatHeDate(nextBillingAt)} />
+          )}
+          {cardLast4 && (
+            <SummaryRow label="כרטיס חדש" value={`••••${cardLast4}`} />
+          )}
+        </div>
+
+        {/* Reassurance note */}
+        <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 space-y-1.5 text-xs text-gray-500">
+          <p>✓ הגישה לכל תכונות המסלול חודשה מיידית.</p>
+          <p>✓ הכרטיס החדש ישמש לחיובים העתידיים.</p>
+          <p>✓ מונה כישלונות החיוב אופס.</p>
+        </div>
+
+        <DashboardLink
+          className="w-full text-center text-sm font-bold py-3.5 rounded-xl
+                     bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+        >
+          עבור ללוח הבקרה →
+        </DashboardLink>
+
+        <p className="text-center text-xs text-gray-400">
+          שאלות?{" "}
+          <a href="mailto:support@signdeal.co.il" className="text-indigo-500 hover:underline">
+            support@signdeal.co.il
+          </a>
+        </p>
+      </div>
+    </>
+  );
+}
+
+// ── Flow E: Payment method update success (purpose = "payment_method_update") ──
+//
+// Shown when a healthy ACTIVE/TRIALING user updated their stored card.
+// CCode=700 (J5 auth-only): the card was authorised but NO money was charged.
+// The billing schedule, status, and billingFailures are all unchanged.
+//
+// The UI must NOT say "subscription activated" or imply a charge was made.
+
+function PaymentMethodUpdateSuccess({
+  plan,
+  interval,
+  nextBillingAt,
+  cardLast4,
+}: {
+  plan:          string;
+  interval:      string;
+  nextBillingAt: Date | null;
+  cardLast4?:    string | null;
+}) {
+  const planLabel     = PLAN_LABELS[plan]         ?? plan;
+  const intervalLabel = INTERVAL_LABELS[interval] ?? interval;
+
+  return (
+    <>
+      {/* Header — neutral gray-800: administrative update, no purchase made */}
+      <div className="bg-gray-800 px-6 py-5 text-white">
+        <div className="flex items-center gap-3 justify-end">
+          <div>
+            <h1 className="text-xl font-bold">אמצעי התשלום עודכן!</h1>
+            <p className="text-sm text-gray-300 mt-0.5">
+              לא בוצע חיוב עכשיו. הכרטיס החדש ישמש לחיוב הבא.
+            </p>
+          </div>
+          <span className="text-4xl" aria-hidden="true">💳</span>
+        </div>
+      </div>
+
+      <div className="px-6 py-6 flex flex-col gap-5">
+
+        {/* "No charge today" — always shown; PMU is always CCode=700 */}
+        <div className="rounded-xl bg-indigo-50 border border-indigo-200 px-4 py-3 flex items-center gap-3">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+            stroke="#6366f1" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+            aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          </svg>
+          <p className="text-sm text-indigo-800 font-medium">לא בוצע חיוב עכשיו</p>
+        </div>
+
+        {/* Card + billing summary */}
+        <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-4 flex flex-col gap-2">
+          {cardLast4 && (
+            <SummaryRow label="כרטיס חדש"  value={`••••${cardLast4}`} />
+          )}
+          <SummaryRow label="מסלול"        value={planLabel} />
+          <SummaryRow label="מחזור חיוב"   value={intervalLabel} />
+          {nextBillingAt && (
+            <SummaryRow label="חיוב הבא"   value={formatHeDate(nextBillingAt)} />
+          )}
+        </div>
+
+        {/* Reassurance note */}
+        <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 space-y-1.5 text-xs text-gray-500">
+          <p>✓ הכרטיס החדש ישמש לכל החיובים הבאים.</p>
+          <p>✓ מועד החיוב הבא, הסטטוס ותאריכי המנוי לא השתנו.</p>
+          <p>✓ ניתן לצפות בפרטי המנוי בהגדרות → חיוב.</p>
+        </div>
+
+        <Link
+          href="/settings/billing"
+          className="w-full text-center text-sm font-bold py-3.5 rounded-xl
+                     bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+        >
+          עבור להגדרות חיוב →
+        </Link>
+
+        <p className="text-center text-xs text-gray-400">
+          שאלות?{" "}
+          <a href="mailto:support@signdeal.co.il" className="text-indigo-500 hover:underline">
+            support@signdeal.co.il
+          </a>
+        </p>
+      </div>
+    </>
+  );
+}
+
+// ── Flow F: Payment declined by HYP ──────────────────────────────────────────
 
 function PaymentDeclined({ cCode }: { cCode: string }) {
   return (
@@ -898,6 +1074,12 @@ export default async function BillingSuccessPage({
   //
   // For case (a), check if the subscription is already active (from a previous
   // successful visit) and render success if so.
+  //
+  // NOTE: This fallback path has NO access to BillingCheckout.purpose because
+  // there is no Order to look up.  It renders generic success UI based on
+  // subscription status alone.  This is intentional — the no-Order path is a
+  // rare edge case (direct navigation or GoodURL misconfiguration) and does not
+  // need purpose-aware differentiation.
   if (!order) {
     const sub = await prisma.subscription.findUnique({
       where:  { userId },
@@ -964,7 +1146,11 @@ export default async function BillingSuccessPage({
   // Check if already activated before calling VERIFY (page refresh optimisation).
   const existingCheckout = await prisma.billingCheckout.findUnique({
     where:  { order },
-    select: { status: true, userId: true },
+    // purpose is fetched here so the render site can pick the right success
+    // component without a second DB round-trip.  It is available for both
+    // the first-visit path (status=PENDING, activated during this request)
+    // and the idempotent refresh path (status already SUCCEEDED).
+    select: { status: true, userId: true, purpose: true },
   });
 
   // Security: reject if order belongs to a different user.
@@ -1055,6 +1241,7 @@ export default async function BillingSuccessPage({
       billingInterval:  true,
       trialEndsAt:      true,
       currentPeriodEnd: true,
+      nextBillingAt:    true,   // needed by RecoverySuccess + PaymentMethodUpdateSuccess
       cardLast4:        true,
     },
   });
@@ -1068,13 +1255,19 @@ export default async function BillingSuccessPage({
 
   const { status, plan, billingInterval } = subscription;
 
+  // Purpose drives which success component to render for ACTIVE subscriptions.
+  // existingCheckout is always non-null here (we would have errored above if null).
+  // Default to "checkout" for old rows that predate the purpose column.
+  const purpose = existingCheckout?.purpose ?? "checkout";
+
   console.log(
     `[billing/success] rendering` +
     ` userId=${userId.slice(0, 8)}…` +
-    ` status=${status} plan=${plan} interval=${billingInterval}`,
+    ` status=${status} plan=${plan} interval=${billingInterval}` +
+    ` purpose=${purpose}`,
   );
 
-  // Flow B: TRIALING — first-time trial activation.
+  // ── Flow B: TRIALING — first-time trial activation ───────────────────────
   if (status === "TRIALING" && subscription.trialEndsAt) {
     return (
       <PageShell>
@@ -1090,20 +1283,55 @@ export default async function BillingSuccessPage({
     );
   }
 
-  // Flow C: ACTIVE — upgrade or re-activation.
-  if (status === "ACTIVE" && subscription.currentPeriodEnd) {
-    return (
-      <PageShell>
-        <UpgradeActivationSuccess
-          plan={plan}
-          interval={billingInterval}
-          currentPeriodEnd={subscription.currentPeriodEnd}
-          cardLast4={subscription.cardLast4}
-          txId={hypId  || null}
-          authNumber={aCode || null}
-        />
-      </PageShell>
-    );
+  // ── Flow C: ACTIVE — purpose-aware rendering ─────────────────────────────
+  if (status === "ACTIVE") {
+
+    // Flow D (reordered): Payment method update — card changed, nothing else.
+    // No subscription activation, no charge.  Must NOT say "מנוי הופעל".
+    if (purpose === "payment_method_update") {
+      return (
+        <PageShell>
+          <PaymentMethodUpdateSuccess
+            plan={plan}
+            interval={billingInterval}
+            nextBillingAt={subscription.nextBillingAt ?? null}
+            cardLast4={subscription.cardLast4}
+          />
+        </PageShell>
+      );
+    }
+
+    // Flow E (reordered): Recovery — access restored after billing failure.
+    // The subscription was already theirs; access was just re-enabled.
+    if (purpose === "recovery") {
+      return (
+        <PageShell>
+          <RecoverySuccess
+            plan={plan}
+            interval={billingInterval}
+            nextBillingAt={subscription.nextBillingAt ?? null}
+            cardLast4={subscription.cardLast4}
+            noChargeToday={cCode === "700"}
+          />
+        </PageShell>
+      );
+    }
+
+    // Flow F: Normal checkout / upgrade — real charge was made.
+    if (subscription.currentPeriodEnd) {
+      return (
+        <PageShell>
+          <UpgradeActivationSuccess
+            plan={plan}
+            interval={billingInterval}
+            currentPeriodEnd={subscription.currentPeriodEnd}
+            cardLast4={subscription.cardLast4}
+            txId={hypId  || null}
+            authNumber={aCode || null}
+          />
+        </PageShell>
+      );
+    }
   }
 
   // Fallback: unexpected status after activation — should not normally reach here.
