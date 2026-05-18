@@ -1,301 +1,461 @@
 "use client";
 
 /**
- * HomeIntro — full-screen intro overlay for the marketing homepage.
+ * HomeIntro — ultra-premium intro animation overlay.
  *
- * ── Isolation guarantee ────────────────────────────────────────────────────────
- * • Returns null on first server render (visible starts false) → zero SSR output.
- * • useEffect runs only in the browser; sessionStorage prevents repeat shows.
- * • Homepage DOM is always present underneath — SEO is unaffected.
- * • No external packages; animations are pure CSS @keyframes (globals.css).
+ * Design language: minimal, cinematic, high-trust fintech / legal-tech.
+ * Inspired by Stripe, Linear, Arc motion design — restrained and precise.
  *
- * ── prefers-reduced-motion ─────────────────────────────────────────────────────
- * • JS: matchMedia check → skip overlay entirely if enabled.
- * • CSS: globals.css collapses all animation-durations to 0.01ms (belt+suspenders).
+ * ── Animation timeline ────────────────────────────────────────────────────────
+ *   0.00s  Overlay mounts; ambient radial glow fades in
+ *   0.00s  Secure path begins drawing from top-right (RTL-aware)
+ *   0.90s  Line completes; arrival dot appears at terminus (center)
+ *   0.52s  Logo begins blur-to-clear reveal (overlaps with line draw)
+ *   0.96s  Soft emerald checkmark pops in
+ *   1.14s  Confirmation text "מאומת" fades up
+ *   1.90s  Exit begins — overlay dissolves into hero (matching gradient)
+ *   2.60s  Component unmounts (AnimatePresence exit: 700ms)
  *
- * ── Animation timeline (~2 s total) ───────────────────────────────────────────
- *   0 ms        Overlay appears; radial glow breathes in
- *   0–620 ms    SVG signature draws right-to-left (sd-draw)
- *   300–720 ms  "SignDeal" wordmark fades in, blur → clear (sd-fadein-blur)
- *   520–900 ms  Tagline appears
- *   600 ms      Skip button fades in
- *   700–900 ms  Sparkle dots twinkle on (staggered sd-twinkle, 7 dots)
- *   700–1300 ms Shimmer sweep races along drawn stroke (sd-shimmer)
- *   750–1030 ms Checkmark pops in
- *   900 ms+     Stroke pulses gently (sd-glow-pulse)
- *   2 000 ms    Phase → "leaving"; overlay fades + slides up
- *   2 500 ms    Component unmounts
+ * ── Architecture ─────────────────────────────────────────────────────────────
+ *   • null on server — zero SSR output; homepage SEO unaffected
+ *   • sessionStorage prevents replay within the same browser session
+ *   • useReducedMotion: skips overlay entirely if preference is set
+ *   • AnimatePresence owns the exit animation before unmount
+ *   • All animations: transform + opacity + filter only (GPU-composited)
+ *   • SVG pathLength is animated by Framer Motion (auto computes dasharray)
+ *   • Background gradient exactly matches HeroSection → seamless dissolve
  *
- * ── SVG path ──────────────────────────────────────────────────────────────────
- * viewBox 0 0 300 60.  Path starts at x=275 (right), flows left.
- * stroke-dasharray / stroke-dashoffset = 310 (measured path length).
+ * ── Imports ───────────────────────────────────────────────────────────────────
+ *   motion/react (v12) — AnimatePresence, motion, useReducedMotion, Variants
  */
 
 import { useEffect, useState } from "react";
+import {
+  AnimatePresence,
+  motion,
+  useReducedMotion,
+  type Variants,
+} from "motion/react";
 
-type Phase = "visible" | "leaving";
+// ── Constants ─────────────────────────────────────────────────────────────────
 
 const SESSION_KEY = "sd-intro-seen";
 
-// Fixed sparkle positions along the signature path curve.
-// Each [cx, cy, delay] — delays are staggered so they fire after the draw finishes.
-const SPARKLES: [number, number, number][] = [
-  [248, 20, 710],   // near start peak
-  [213, 54, 760],   // first valley
-  [175, 24, 810],   // second peak
-  [148, 52, 860],   // second valley
-  [108, 30, 780],   // third hill
-  [ 75, 40, 840],   // late middle
-  [ 30, 22, 900],   // near tail
-];
+// Auto-dismiss: how long the intro stays visible before the exit begins.
+// Exit animation itself takes 700ms (see overlayExitVariants below).
+const VISIBLE_DURATION_MS = 1_900;
 
+// ── Easing presets ────────────────────────────────────────────────────────────
+// Cubic-bezier curves that match the Stripe / Linear motion language.
+
+/** Smooth deceleration — fast in, slow stop. Used for most reveals. */
+const EASE_OUT_QUINT  = [0.22, 1, 0.36, 1] as const;
+
+/** Gentle spring overshoot — for the checkmark "pop". */
+const EASE_SPRING     = [0.34, 1.56, 0.64, 1] as const;
+
+/** Cinematic ease-out for the overlay exit scale. */
+const EASE_EXIT       = [0.4, 0, 1, 1] as const;
+
+// ── Framer Motion variants ────────────────────────────────────────────────────
+
+/**
+ * The full-screen overlay.
+ * initial: already visible (opacity: 1, no transform) — no entrance animation.
+ * exit:    slight scale-up (expands "into" the page) + fade to reveal hero.
+ *          The matching gradient makes this dissolve truly seamless.
+ */
+const overlayVariants: Variants = {
+  initial: { opacity: 1, scale: 1 },
+  exit: {
+    opacity: 0,
+    scale: 1.012,
+    transition: { duration: 0.7, ease: EASE_EXIT },
+  },
+};
+
+/**
+ * "SignDeal" wordmark.
+ * Starts blurred + invisible + slightly below center.
+ * Delays 520ms so the line is well into its draw before the logo appears.
+ */
+const logoVariants: Variants = {
+  hidden:  { opacity: 0, y: 10, filter: "blur(12px)" },
+  visible: {
+    opacity: 1,
+    y: 0,
+    filter: "blur(0px)",
+    transition: { duration: 0.55, ease: EASE_OUT_QUINT, delay: 0.52 },
+  },
+};
+
+/**
+ * Soft emerald checkmark badge.
+ * Spring-like scale pop — springs from invisible to full size.
+ * intentionally NOT a hard snap: the spring overshoot reads as "alive".
+ */
+const checkVariants: Variants = {
+  hidden:  { opacity: 0, scale: 0.25, rotate: -12 },
+  visible: {
+    opacity: 1,
+    scale: 1,
+    rotate: 0,
+    transition: { duration: 0.38, ease: EASE_SPRING, delay: 0.96 },
+  },
+};
+
+/**
+ * Hebrew confirmation line "מאומת".
+ * Floats up 5px while fading in. Very subtle — must not compete with logo.
+ */
+const confirmTextVariants: Variants = {
+  hidden:  { opacity: 0, y: 5 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.42, ease: EASE_OUT_QUINT, delay: 1.14 },
+  },
+};
+
+/** Skip button — plain fade-in, no motion. */
+const skipVariants: Variants = {
+  hidden:  { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { duration: 0.3, ease: "easeOut", delay: 0.55 },
+  },
+};
+
+// ── Root component (exported) ─────────────────────────────────────────────────
+
+/**
+ * Mounts once per session.
+ * Returns null on SSR and on subsequent visits (sessionStorage gate).
+ */
 export function HomeIntro() {
-  const [visible, setVisible] = useState(false);
-  const [phase,   setPhase]   = useState<Phase>("visible");
+  const [show,        setShow]      = useState(false);
+  const prefersReduced              = useReducedMotion();
 
   useEffect(() => {
+    // Respect user's motion preference — skip overlay entirely.
+    if (prefersReduced) return;
+    // Session gate — only show once per browser session.
     if (sessionStorage.getItem(SESSION_KEY)) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      sessionStorage.setItem(SESSION_KEY, "1");
-      return;
-    }
     sessionStorage.setItem(SESSION_KEY, "1");
-    setVisible(true);
+    setShow(true);
 
-    const leaveTimer   = window.setTimeout(() => setPhase("leaving"), 2_000);
-    const unmountTimer = window.setTimeout(() => setVisible(false),   2_500);
-    return () => {
-      window.clearTimeout(leaveTimer);
-      window.clearTimeout(unmountTimer);
-    };
-  }, []);
-
-  function dismiss() {
-    setPhase("leaving");
-    window.setTimeout(() => setVisible(false), 500);
-  }
-
-  if (!visible) return null;
-
-  const isLeaving = phase === "leaving";
+    const timer = window.setTimeout(() => setShow(false), VISIBLE_DURATION_MS);
+    return () => window.clearTimeout(timer);
+  }, [prefersReduced]);
 
   return (
-    <div
+    <AnimatePresence>
+      {show && <IntroOverlay onDismiss={() => setShow(false)} />}
+    </AnimatePresence>
+  );
+}
+
+// ── Inner overlay (rendered only while `show === true`) ───────────────────────
+
+function IntroOverlay({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <motion.div
       aria-hidden="true"
-      className={[
-        "fixed inset-0 z-[9999] flex items-center justify-center overflow-hidden",
-        "bg-gradient-to-br from-indigo-950 via-purple-950 to-indigo-900",
-        "transition-all duration-500 ease-in-out",
-        isLeaving
-          ? "opacity-0 -translate-y-3 pointer-events-none"
-          : "opacity-100 translate-y-0",
-      ].join(" ")}
+      variants={overlayVariants}
+      initial="initial"
+      exit="exit"
+      // Gradient exactly matches HeroSection base background → seamless dissolve.
+      className="fixed inset-0 z-[9999] flex items-center justify-center overflow-hidden
+                 bg-gradient-to-br from-indigo-950 via-indigo-900 to-indigo-800"
     >
-      {/* ── Radial ambient glow — sits behind all content ─────────────────── */}
+      {/* ── Layer 1: Grid texture ─────────────────────────────────────────── */}
+      {/*
+        Same grid as HeroSection (backgroundSize 48px, opacity ~0.025).
+        Edge-masked so it fades at viewport borders for depth.
+      */}
       <div
-        className="absolute inset-0 pointer-events-none"
+        aria-hidden="true"
+        className="absolute inset-0 pointer-events-none select-none"
         style={{
-          background:
-            "radial-gradient(ellipse 55% 40% at 50% 50%, rgba(139,92,246,0.18) 0%, rgba(109,40,217,0.08) 45%, transparent 70%)",
-          animation: "sd-glow-breathe 2.4s ease-in-out infinite",
+          backgroundImage:
+            "linear-gradient(to right,  rgba(255,255,255,0.03) 1px, transparent 1px)," +
+            "linear-gradient(to bottom, rgba(255,255,255,0.03) 1px, transparent 1px)",
+          backgroundSize: "48px 48px",
+          WebkitMaskImage: "radial-gradient(ellipse 72% 60% at 50% 50%, black 15%, transparent 90%)",
+          maskImage:       "radial-gradient(ellipse 72% 60% at 50% 50%, black 15%, transparent 90%)",
         }}
       />
 
-      {/* ── Centre stage ──────────────────────────────────────────────────── */}
-      <div className="relative flex flex-col items-center gap-6 select-none">
+      {/* ── Layer 2: Cinematic noise ──────────────────────────────────────── */}
+      {/*
+        SVG feTurbulence at fractalNoise / baseFrequency 0.85 gives a
+        fine-grained film-grain texture.  At opacity 0.022 it is barely
+        perceptible but adds the subtle tactility of premium product design.
+      */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          opacity: 0.022,
+          backgroundImage:
+            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E" +
+            "%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' " +
+            "baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E" +
+            "%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")",
+        }}
+      />
 
-        {/* ── SVG: signature + shimmer + sparkles ─────────────────────────── */}
-        <svg
-          viewBox="0 0 300 60"
-          xmlns="http://www.w3.org/2000/svg"
-          className="w-72 sm:w-96 h-auto overflow-visible"
-          aria-hidden="true"
-        >
-          <defs>
-            {/* Neon glow filter for the main stroke */}
-            <filter id="sd-glow" x="-20%" y="-80%" width="140%" height="260%">
-              <feGaussianBlur stdDeviation="4" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
+      {/* ── Layer 3: Ambient radial glow ─────────────────────────────────── */}
+      {/*
+        Positioned at 50% 50%.  Fades in slowly (1.2s) so it doesn't flash on.
+        Matches the hero's central violet glow for visual continuity.
+      */}
+      <motion.div
+        aria-hidden="true"
+        className="absolute inset-0 pointer-events-none"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 1.2, ease: "easeOut" }}
+        style={{
+          background:
+            "radial-gradient(ellipse 56% 44% at 50% 52%, " +
+            "rgba(99,102,241,0.20) 0%, " +
+            "rgba(79,70,229,0.09) 40%, " +
+            "transparent 70%)",
+        }}
+      />
 
-            {/* Glow filter for shimmer + sparkles */}
-            <filter id="sd-glow-sm" x="-40%" y="-120%" width="180%" height="340%">
-              <feGaussianBlur stdDeviation="2" result="blur" />
-              <feMerge>
-                <feMergeNode in="blur" />
-                <feMergeNode in="SourceGraphic" />
-              </feMerge>
-            </filter>
+      {/* ── Centre stage ─────────────────────────────────────────────────── */}
+      <div className="relative flex flex-col items-center gap-7 select-none px-6">
 
-            {/* Gradient along the stroke — light violet → deep violet, RTL paint */}
-            <linearGradient id="sd-stroke-grad" x1="100%" y1="0" x2="0%" y2="0">
-              <stop offset="0%"   stopColor="#ddd6fe" />  {/* violet-200 */}
-              <stop offset="40%"  stopColor="#a78bfa" />  {/* violet-400 */}
-              <stop offset="100%" stopColor="#6d28d9" />  {/* violet-700 */}
-            </linearGradient>
+        {/* ── Secure path SVG ────────────────────────────────────────────── */}
+        {/*
+          viewBox: 0 0 560 70
+          Path: M 540,16 C 460,16 390,62 280,38
+            • Starts at (540,16) — upper-right corner (RTL: reading start)
+            • Single smooth Bezier arc to (280,38) — geometric center
+            • Begins horizontal (premium restraint) then curves down to center
+            • Feels like "data traveling through a secure channel"
+            NOT like a handwritten signature (no oscillation, no wavy loops)
 
-            {/* Shimmer gradient — pure white core with soft edges */}
-            <linearGradient id="sd-shimmer-grad" x1="100%" y1="0" x2="0%" y2="0">
-              <stop offset="0%"   stopColor="white" stopOpacity="0"   />
-              <stop offset="45%"  stopColor="white" stopOpacity="0.9" />
-              <stop offset="55%"  stopColor="white" stopOpacity="0.9" />
-              <stop offset="100%" stopColor="white" stopOpacity="0"   />
-            </linearGradient>
-          </defs>
+          Two layers:
+            1. Halo path — blurred / wide / low opacity (soft luminance)
+            2. Precision line — 1px sharp, high contrast (the actual path)
+        */}
+        <div className="w-[min(560px,88vw)] h-[70px]">
+          <svg
+            viewBox="0 0 560 70"
+            xmlns="http://www.w3.org/2000/svg"
+            className="w-full h-full overflow-visible"
+            aria-hidden="true"
+            role="presentation"
+          >
+            <defs>
+              {/* Soft glow — not neon, just warm luminance around the line */}
+              <filter id="sd2-glow" x="-20%" y="-100%" width="140%" height="300%">
+                <feGaussianBlur stdDeviation="2.8" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
 
-          {/* ── Main signature path ──────────────────────────────────────── */}
-          <path
-            d="M 275,38 C 255,16 232,60 205,38 C 185,22 168,54 148,38 C 128,23 110,52 88,40 L 65,36 C 50,32 35,28 18,24"
-            fill="none"
-            stroke="url(#sd-stroke-grad)"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            filter="url(#sd-glow)"
-            style={{
-              strokeDasharray:  310,
-              strokeDashoffset: 310,
-              animation:
-                "sd-draw 620ms cubic-bezier(0.4, 0, 0.2, 1) forwards," +
-                "sd-glow-pulse 2s ease-in-out 0.95s infinite",
-            }}
-          />
+              {/* Wider halo for the background glow path */}
+              <filter id="sd2-halo" x="-20%" y="-120%" width="140%" height="340%">
+                <feGaussianBlur stdDeviation="7" />
+              </filter>
 
-          {/* ── Shimmer sweep — bright segment chases the drawn line ─────── */}
-          <path
-            d="M 275,38 C 255,16 232,60 205,38 C 185,22 168,54 148,38 C 128,23 110,52 88,40 L 65,36 C 50,32 35,28 18,24"
-            fill="none"
-            stroke="url(#sd-shimmer-grad)"
-            strokeWidth="3.5"
-            strokeLinecap="round"
-            filter="url(#sd-glow-sm)"
-            style={{
-              strokeDasharray:  "55 255",
-              strokeDashoffset: 360,
-              animation:
-                "sd-shimmer 620ms cubic-bezier(0.4, 0, 0.6, 1) 700ms forwards",
-            }}
-          />
+              {/* Dot glow (arrival point) */}
+              <filter id="sd2-dot-glow" x="-200%" y="-200%" width="500%" height="500%">
+                <feGaussianBlur stdDeviation="4" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
 
-          {/* ── Sparkle dots — twinkling along the path after draw ───────── */}
-          {SPARKLES.map(([cx, cy, delayMs], i) => (
-            <circle
-              key={i}
-              cx={cx}
-              cy={cy}
-              r="1.6"
-              fill="#e9d5ff"   /* violet-200 */
-              filter="url(#sd-glow-sm)"
-              style={{
-                opacity: 0,
-                animation:
-                  `sd-twinkle 900ms ease-in-out ${delayMs}ms forwards`,
+            {/* Path constant — both layers share the same d attribute */}
+            {/* Start: top-right (540,16).  End: geometric center (280,38). */}
+            {/* Single cubic Bezier — starts horizontal, then graceful arc.  */}
+
+            {/* Layer A: Halo (blurred, behind) — soft luminance envelope */}
+            <motion.path
+              d="M 540,16 C 460,16 390,62 280,38"
+              fill="none"
+              stroke="#6366f1"
+              strokeWidth="6"
+              strokeLinecap="round"
+              filter="url(#sd2-halo)"
+              style={{ opacity: 0.22 }}
+              initial={{ pathLength: 0 }}
+              animate={{ pathLength: 1 }}
+              transition={{
+                duration: 0.98,
+                ease:     EASE_OUT_QUINT,
+                delay:    0.04,
               }}
             />
-          ))}
-        </svg>
 
-        {/* ── "SignDeal" wordmark ────────────────────────────────────────── */}
+            {/* Layer B: Precision line — 1px, sharp, indigo-400 */}
+            <motion.path
+              d="M 540,16 C 460,16 390,62 280,38"
+              fill="none"
+              stroke="#818cf8"
+              strokeWidth="1"
+              strokeLinecap="round"
+              filter="url(#sd2-glow)"
+              initial={{ pathLength: 0, opacity: 0 }}
+              animate={{ pathLength: 1, opacity: 0.88 }}
+              transition={{
+                pathLength: { duration: 0.98, ease: EASE_OUT_QUINT },
+                opacity:    { duration: 0.15, ease: "easeOut" },
+              }}
+            />
+
+            {/* Origin dot — appears immediately at the start point (540,16) */}
+            <motion.circle
+              cx={540}
+              cy={16}
+              r={2}
+              fill="#a5b4fc"
+              filter="url(#sd2-glow)"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.5 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+            />
+
+            {/* Arrival dot — appears at terminus (280,38) when line completes */}
+            {/* This is the "verification confirmed" signal before the logo. */}
+            <motion.circle
+              cx={280}
+              cy={38}
+              r={3}
+              fill="#818cf8"
+              filter="url(#sd2-dot-glow)"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.65 }}
+              transition={{ duration: 0.35, ease: EASE_OUT_QUINT, delay: 0.90 }}
+            />
+          </svg>
+        </div>
+
+        {/* ── SignDeal wordmark ───────────────────────────────────────────── */}
         {/*
-          dir="ltr" is essential: the brand name is English and must read
-          left-to-right regardless of the document's RTL context.
-          Without it, flex reverses the span order and shows "Deal Sign".
+          dir="ltr": "SignDeal" is an English brand name — must render LTR
+          even inside the RTL document, otherwise flex reverses "Deal Sign".
+          The logo appears as the line reaches center (delay 0.52s).
+          blur(12px) → blur(0px) gives the "coming into focus" reveal.
         */}
-        <div
+        <motion.div
+          variants={logoVariants}
+          initial="hidden"
+          animate="visible"
           dir="ltr"
-          style={{
-            opacity: 0,
-            animation:
-              "sd-fadein-blur 440ms cubic-bezier(0.4, 0, 0.2, 1) 300ms forwards",
-          }}
-          className="flex items-center gap-1.5"
+          className="flex items-center gap-2"
         >
-          {/* "Sign" — crisp white, strong text-shadow glow */}
+          {/* "Sign" — crisp white with very soft violet text-shadow */}
           <span
             className="text-4xl sm:text-5xl font-black tracking-tight leading-none text-white"
             style={{
               textShadow:
-                "0 0 20px rgba(196,181,253,0.55)," +
-                "0 0 40px rgba(139,92,246,0.30)," +
-                "0 1px 0 rgba(255,255,255,0.08)",
+                "0 0 28px rgba(165,180,252,0.35)," +
+                "0 0 56px rgba(99,102,241,0.18)," +
+                "0 1px 0  rgba(255,255,255,0.05)",
             }}
           >
             Sign
           </span>
 
-          {/* "Deal" — gradient violet */}
+          {/* "Deal" — indigo gradient, slightly luminous */}
           <span
             className="text-4xl sm:text-5xl font-black tracking-tight leading-none"
             style={{
               background:
-                "linear-gradient(135deg, #ddd6fe 0%, #a78bfa 55%, #7c3aed 100%)",
+                "linear-gradient(135deg, #e0e7ff 0%, #a5b4fc 48%, #818cf8 100%)",
               WebkitBackgroundClip: "text",
               WebkitTextFillColor: "transparent",
-              backgroundClip: "text",
-              filter: "drop-shadow(0 0 12px rgba(139,92,246,0.5))",
+              backgroundClip:      "text",
+              filter:              "drop-shadow(0 0 10px rgba(99,102,241,0.35))",
             }}
           >
             Deal
           </span>
 
-          {/* Checkmark badge */}
-          <span
-            style={{
-              opacity: 0,
-              animation:
-                "sd-popin 300ms cubic-bezier(0.34, 1.56, 0.64, 1) 780ms forwards",
-            }}
-            className="flex items-center justify-center w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-violet-500/20 border border-violet-400/40 self-center ml-0.5"
+          {/* Soft emerald checkmark — NOT neon green */}
+          {/*
+            Color rationale: emerald-300 (#6ee7b7) at low opacity on a
+            dark emerald-900/50 background reads as "muted confirmation",
+            not as a neon accent.  The box-shadow is very subtle — adds
+            depth without glow/flash.
+          */}
+          <motion.span
+            variants={checkVariants}
+            initial="hidden"
+            animate="visible"
+            className="flex items-center justify-center
+                       w-7 h-7 sm:w-8 sm:h-8 rounded-full
+                       bg-emerald-950/60 border border-emerald-700/35
+                       self-center ml-1"
+            style={{ boxShadow: "0 0 14px rgba(16,185,129,0.10)" }}
           >
             <svg
-              width="14" height="14"
+              width="13"
+              height="13"
               viewBox="0 0 24 24"
               fill="none"
-              stroke="#ddd6fe"
+              stroke="#6ee7b7"
               strokeWidth="2.8"
               strokeLinecap="round"
               strokeLinejoin="round"
+              aria-hidden="true"
             >
               <polyline points="20 6 9 17 4 12" />
             </svg>
-          </span>
-        </div>
+          </motion.span>
+        </motion.div>
 
-        {/* Tagline */}
-        <p
+        {/* ── Confirmation text ───────────────────────────────────────────── */}
+        {/*
+          "מאומת" = "verified" in Hebrew.
+          Tiny, extremely low opacity — purely atmospheric, not informational.
+          tracking-[0.25em] spreads it out for elegance; in Hebrew this is fine
+          as the letters are distinct and spacing reads well even RTL.
+        */}
+        <motion.p
+          variants={confirmTextVariants}
+          initial="hidden"
+          animate="visible"
           dir="rtl"
-          style={{
-            opacity: 0,
-            animation: "sd-fadein-blur 380ms ease-out 540ms forwards",
-          }}
-          className="text-sm text-violet-300/65 tracking-wide"
+          className="text-[10px] text-indigo-300/35 font-medium"
+          style={{ letterSpacing: "0.22em" }}
         >
-          חוזי תיווך דיגיטליים לסוכני נדל״ן
-        </p>
+          מ א ו מ ת
+        </motion.p>
       </div>
 
       {/* ── Skip button ─────────────────────────────────────────────────────── */}
-      <button
+      {/*
+        Physically at bottom-left (in RTL layout this is the "end" corner —
+        unobtrusive but reachable).
+        Very low contrast so it doesn't distract; brightens on hover.
+      */}
+      <motion.button
         type="button"
-        onClick={dismiss}
-        style={{
-          opacity: 0,
-          animation: "sd-fadein-blur 300ms ease-out 620ms forwards",
-        }}
-        className={[
-          "absolute bottom-8 left-8",
-          "text-xs text-violet-300/45 hover:text-violet-200/80",
-          "px-3 py-1.5 rounded-full border border-violet-500/20 hover:border-violet-400/40",
-          "transition-colors duration-200 cursor-pointer",
-          "focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-400/60",
-        ].join(" ")}
+        onClick={onDismiss}
+        variants={skipVariants}
+        initial="hidden"
+        animate="visible"
+        className="absolute bottom-8 left-8
+                   text-xs text-indigo-300/30 hover:text-indigo-200/60
+                   px-3 py-1.5 rounded-full
+                   border border-indigo-500/12 hover:border-indigo-400/28
+                   transition-colors duration-200 cursor-pointer
+                   focus:outline-none focus-visible:ring-1 focus-visible:ring-indigo-400/40"
         aria-label="דלג על האנימציה"
       >
         דלג ›
-      </button>
-    </div>
+      </motion.button>
+    </motion.div>
   );
 }

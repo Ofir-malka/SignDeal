@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { AnimateIn } from "@/components/marketing/ui/AnimateIn";
 import { GlassCard }  from "@/components/marketing/ui/GlassCard";
+import { MockTilt }   from "@/components/marketing/ui/MockTilt";
 
 /**
  * Hero section — public marketing homepage.
@@ -113,7 +114,7 @@ export function HeroSection() {
         }}
       />
 
-      {/* Central violet radial glow — slow opacity breathe.
+      {/* Central violet radial glow — upgraded to /20 for richer depth.
            overflow-hidden on the wrapper ensures the 700 px inner glow is
            double-clipped here before reaching the section boundary.        */}
       <div
@@ -122,7 +123,7 @@ export function HeroSection() {
       >
         {/* max-sm:animate-none: stop the infinite animation on mobile —
              it forces continuous GPU compositing/repaint every ~1s.    */}
-        <div className="w-[700px] h-[700px] bg-violet-600/15 rounded-full blur-3xl
+        <div className="w-[700px] h-[700px] bg-violet-600/20 rounded-full blur-3xl
                         max-sm:animate-none animate-[hero-glow-breathe_9s_ease-in-out_infinite]" />
       </div>
 
@@ -135,14 +136,45 @@ export function HeroSection() {
       <div
         aria-hidden="true"
         className="max-sm:hidden absolute -top-24 right-0 w-[480px] h-[480px]
-                   bg-violet-500/[0.07] rounded-full blur-3xl pointer-events-none select-none"
+                   bg-violet-500/[0.09] rounded-full blur-3xl pointer-events-none select-none"
         style={{ animation: "hero-glow-breathe 12s 3.5s ease-in-out infinite" }}
       />
 
-      {/* Bottom section blend */}
+      {/* Ambient glow behind the mock card — left side (physical) in RTL layout.
+           In dir=rtl flex-row, the mock card renders on the left side of the
+           viewport (it's the second DOM child, which in RTL flows left).
+           This glow adds soft depth beneath the floating card.
+           max-sm:hidden to avoid extra compositing layer on mobile.          */}
       <div
         aria-hidden="true"
-        className="absolute bottom-0 left-0 right-0 h-40
+        className="max-sm:hidden absolute pointer-events-none select-none
+                   top-[18%] left-[6%] w-[380px] h-[420px]
+                   rounded-full blur-[90px]"
+        style={{
+          background:
+            "radial-gradient(ellipse at center, " +
+            "rgba(99,102,241,0.10) 0%, " +
+            "rgba(79,70,229,0.05) 45%, " +
+            "transparent 75%)",
+        }}
+      />
+
+      {/* Very subtle bottom-center depth gradient — adds cinematic vignette.
+           Separates the hero from the section below without a harsh edge.  */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-x-0 bottom-0 h-[220px] pointer-events-none select-none"
+        style={{
+          background:
+            "linear-gradient(to bottom, transparent 0%, rgba(15,12,41,0.55) 100%)",
+        }}
+      />
+
+      {/* Bottom section blend — kept alongside the depth gradient above.
+           bg-gradient-to-b to-indigo-950 provides the hard floor anchor.  */}
+      <div
+        aria-hidden="true"
+        className="absolute bottom-0 left-0 right-0 h-32
                    bg-gradient-to-b from-transparent to-indigo-950
                    pointer-events-none select-none"
       />
@@ -165,36 +197,80 @@ export function HeroSection() {
             </div>
           </AnimateIn>
 
-          {/* H1 — benefit-first headline; keywords for SEO */}
-          <AnimateIn delay={100}>
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.15]">
+          {/*
+            H1 — per-line mask-up reveal.
+
+            Each line sits in an `overflow-hidden block` span that acts as a
+            reveal mask.  The inner `block` span starts at translateY(112%) —
+            below the clip boundary — and slides to translateY(0) via the
+            `hero-line-reveal` CSS keyframe defined in globals.css.
+
+            animation-fill-mode: both (shorthand "both"):
+              backwards → text stays hidden during the delay (no pop-in)
+              forwards  → text holds position after the animation ends
+
+            Gradient is on the h1 itself; background-clip:text propagates
+            through transparent child spans in all modern browsers.
+
+            No AnimateIn wrapper here — this is an above-the-fold element
+            with a baked-in delay.  AnimateIn is kept for below-fold sections.
+            Reduced-motion: global @media block collapses duration to 0.01ms.
+          */}
+          <h1
+            className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.15]
+                       bg-gradient-to-l from-white via-white to-violet-300
+                       bg-clip-text text-transparent"
+          >
+            {/* Line 1 — fires at 80ms (just after badge anchors at t=0) */}
+            <span className="block overflow-hidden pb-[0.06em]">
               <span
-                className="bg-gradient-to-l from-white via-white to-violet-300
-                           bg-clip-text text-transparent"
+                className="block"
+                style={{
+                  animation:
+                    "hero-line-reveal 0.85s cubic-bezier(0.22,1,0.36,1) 0.08s both",
+                }}
               >
                 חוזי תיווך דיגיטליים,
-                <br />
+              </span>
+            </span>
+            {/* Line 2 — fires at 240ms (160ms stagger after line 1) */}
+            <span className="block overflow-hidden pb-[0.06em]">
+              <span
+                className="block"
+                style={{
+                  animation:
+                    "hero-line-reveal 0.85s cubic-bezier(0.22,1,0.36,1) 0.24s both",
+                }}
+              >
                 חתימה וגבייה — בלחיצה אחת.
               </span>
-            </h1>
-          </AnimateIn>
+            </span>
+          </h1>
 
-          {/* Subheadline */}
-          <AnimateIn delay={200}>
+          {/* Subheadline — appears after line 2 has started its reveal (t≈420ms) */}
+          <AnimateIn delay={420}>
             <p className="text-lg sm:text-xl text-indigo-200/80 leading-relaxed max-w-lg tracking-normal">
               SignDeal בונה את החוזה, שולח לחתימה ב-SMS, ומאפשר ללקוח
               לשלם את העמלה ישירות מהנייד — בלי ניירת, בלי מרדף.
             </p>
           </AnimateIn>
 
-          {/* CTAs */}
-          <AnimateIn delay={300}>
+          {/* CTAs — after subheadline has started (t≈560ms) */}
+          <AnimateIn delay={560}>
             <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
 
-              {/* Primary — stronger weight + ring */}
+              {/*
+                Primary CTA — shimmer sweep on hover.
+                Classes added: relative overflow-hidden hero-cta-shimmer
+                  • relative: positions the shimmer layer absolutely inside
+                  • overflow-hidden: clips the sweep to rounded-xl bounds
+                  • hero-cta-shimmer: CSS hook that triggers the child-span animation
+                The shimmer span is purely decorative (aria-hidden).
+              */}
               <Link
                 href="/register"
-                className="w-full sm:w-auto inline-flex items-center justify-center gap-2
+                className="relative overflow-hidden hero-cta-shimmer
+                           w-full sm:w-auto inline-flex items-center justify-center gap-2
                            bg-white text-indigo-700 font-black text-sm
                            px-7 py-4 rounded-xl
                            ring-1 ring-white/30
@@ -203,6 +279,9 @@ export function HeroSection() {
                            active:scale-[0.97]
                            transition-all duration-200 ease-out shadow-xl shadow-black/25"
               >
+                {/* Shimmer sweep layer — white diagonal band triggered by CSS :hover */}
+                <span aria-hidden="true" className="hero-cta-shimmer-layer" />
+
                 התחל חינם — ללא כרטיס אשראי
                 <svg
                   width="13" height="13" viewBox="0 0 24 24"
@@ -240,47 +319,58 @@ export function HeroSection() {
             </div>
           </AnimateIn>
 
-          {/* Stats strip — pill container with dividers.
-               Mobile: `flex w-full` → equal-width columns (3 × ~33%) so the
-               strip never exceeds the viewport width. At `text-xs px-2` each
-               item comfortably fits in the 114 px it gets on a 390 px screen.
-               Desktop: `sm:inline-flex sm:w-auto` restores the natural pill. */}
-          <AnimateIn delay={400}>
-            <div
-              dir="rtl"
-              className="flex w-full sm:inline-flex sm:w-auto items-stretch rounded-2xl
-                         bg-white/[0.04] border border-white/[0.09]
-                         overflow-hidden"
-            >
-              {HERO_STATS.map(({ label, icon, iconAnim }, i) => (
-                <span
-                  key={label}
-                  className={[
-                    // flex-1 on mobile gives each item 1/3 of the strip width.
-                    // sm:flex-none restores the natural content-width on desktop.
-                    "flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-2 sm:px-4 py-2.5",
-                    "transition-colors duration-200 hover:bg-white/[0.05]",
-                    i > 0 ? "border-r border-white/[0.09]" : "",
-                  ].join(" ")}
-                >
-                  {/* Icon wrapper carries the desktop micro-animation.
-                       will-change-transform removed — reduces unnecessary
-                       compositing layers on mobile.                       */}
-                  <span
-                    className={`text-violet-400 flex-shrink-0 inline-flex ${iconAnim}`}
-                    aria-hidden="true"
-                  >
-                    {icon}
-                  </span>
-                  {/* text-xs on mobile (fits in ~114px column), sm:text-sm on desktop */}
-                  <span className="text-xs sm:text-sm font-medium text-indigo-200/80 whitespace-nowrap">{label}</span>
-                </span>
-              ))}
-            </div>
-          </AnimateIn>
+          {/* Stats strip — per-item staggered entrance via hero-chip-in CSS animation.
+               The AnimateIn wrapper is removed here: each <span> manages its own
+               entrance individually so items stagger in sequence.
 
-          {/* Micro trust-copy */}
-          <AnimateIn delay={500}>
+               hero-chip-in class (globals.css) only activates under:
+                 @media (min-width: 768px) and (prefers-reduced-motion: no-preference)
+               → On mobile (< 768px): class has no effect, items are immediately visible.
+               → Reduced motion: class has no effect, items are immediately visible.
+               → Desktop: animation-fill-mode: both hides items until their delay fires.
+
+               animationDelay is set via inline style because Tailwind can't express
+               per-item computed delays at static-scan time.
+
+               Orchestration:
+                 item 0: 680ms   (after CTAs start at 560ms, 120ms gap)
+                 item 1: 770ms   (90ms stagger)
+                 item 2: 860ms   (90ms stagger)                                          */}
+          <div
+            dir="rtl"
+            className="flex w-full sm:inline-flex sm:w-auto items-stretch rounded-2xl
+                       bg-white/[0.04] border border-white/[0.09]
+                       overflow-hidden"
+          >
+            {HERO_STATS.map(({ label, icon, iconAnim }, i) => (
+              <span
+                key={label}
+                className={[
+                  "flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-2 sm:px-4 py-2.5",
+                  // Stronger hover: /0.08 instead of /0.05 — more visible acknowledgement
+                  "transition-colors duration-200 hover:bg-white/[0.08]",
+                  // hero-chip-in: staggered entrance on desktop (see globals.css)
+                  "hero-chip-in",
+                  i > 0 ? "border-r border-white/[0.09]" : "",
+                ].join(" ")}
+                // animationDelay overrides the 0s default set by the .hero-chip-in rule.
+                // On mobile the @media guard means this style has no animation to delay.
+                style={{ animationDelay: `${680 + i * 90}ms` }}
+              >
+                {/* Icon wrapper carries the desktop micro-animation. */}
+                <span
+                  className={`text-violet-400 flex-shrink-0 inline-flex ${iconAnim}`}
+                  aria-hidden="true"
+                >
+                  {icon}
+                </span>
+                <span className="text-xs sm:text-sm font-medium text-indigo-200/80 whitespace-nowrap">{label}</span>
+              </span>
+            ))}
+          </div>
+
+          {/* Micro trust-copy — after all chips have entered (t≈800ms) */}
+          <AnimateIn delay={800}>
             <p className="text-xs text-indigo-300/45">
               ללא כרטיס אשראי · ביטול בכל עת · תמיכה בעברית
             </p>
@@ -328,9 +418,16 @@ export function HeroSection() {
           {/* Mock — float animation wraps only the frame, not the chips.
                from="bottom" (was "left") — eliminates the translateX(-32px)
                initial transform that caused iOS Safari to compute extra
-               horizontal paint region during the hydration frame.           */}
-          <AnimateIn delay={250} from="bottom">
-            <DashboardMock />
+               horizontal paint region during the hydration frame.
+               MockTilt: adds a subtle 3D perspective tilt on mouse hover.
+               Fine-pointer + reduced-motion gated inside MockTilt.          */}
+          {/* Mock enters independently on the right column at t=320ms.
+               Visually separate from the text assembly — right column assembles
+               on its own track while the left builds top-down.               */}
+          <AnimateIn delay={320} from="bottom">
+            <MockTilt>
+              <DashboardMock />
+            </MockTilt>
           </AnimateIn>
         </div>
 
@@ -387,8 +484,12 @@ function DashboardMock() {
                  max-sm:will-change-auto will-change-transform"
     >
       {/* Depth glows — outside overflow-hidden frame so they bleed correctly */}
-      <div className="absolute -inset-8 rounded-[2.5rem] bg-violet-600/[0.11] blur-3xl pointer-events-none" />
-      <div className="absolute -inset-2 rounded-3xl bg-indigo-500/[0.07] blur-xl pointer-events-none" />
+      {/* Outer halo — broad, soft purple cloud for cinematic depth */}
+      <div className="absolute -inset-10 rounded-[3rem] bg-violet-600/[0.13] blur-3xl pointer-events-none" />
+      {/* Mid glow — tighter, indigo-tinted, adds colour separation vs outer halo */}
+      <div className="absolute -inset-3 rounded-[1.8rem] bg-indigo-500/[0.09] blur-2xl pointer-events-none" />
+      {/* Rim light — very tight, very faint — simulates a surface catching light */}
+      <div className="absolute -inset-px rounded-2xl bg-white/[0.02] pointer-events-none" />
 
       {/* ── Browser / app frame — subtle border/glow brightens on hover ── */}
       <div

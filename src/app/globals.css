@@ -166,49 +166,99 @@ label,
     scroll-behavior: auto !important;
   }
 }
-/* ── HomeIntro animation keyframes ──────────────────────────────────────────── */
+/* ── HomeIntro ────────────────────────────────────────────────────────────────
+   The HomeIntro component now uses Framer Motion (motion/react) for all
+   animation orchestration.  No CSS keyframes are needed for it.
+   The old sd-draw / sd-glow-pulse / sd-fadein-blur / sd-popin / sd-shimmer /
+   sd-twinkle / sd-glow-breathe keyframes have been removed.
+   ─────────────────────────────────────────────────────────────────────────── */
 
-/* SVG signature line draws in (stroke-dashoffset → 0).
-   Path length ≈ 310 — keep dasharray in sync with the SVG element. */
-@keyframes sd-draw {
-  from { stroke-dashoffset: 310; }
-  to   { stroke-dashoffset: 0;   }
+/* ── Hero headline: per-line mask-up reveal ──────────────────────────────────
+   Each headline line sits in an overflow:hidden wrapper span.
+   The inner span starts below the clip boundary (translateY 110%) and slides
+   up to natural position.  This creates the "text emerging from beneath"
+   cinematic reveal without any JavaScript or IntersectionObserver.
+
+   animation-fill-mode: both (shorthand "both") means:
+     backwards → applies the `from` state during the delay (text stays hidden)
+     forwards  → holds the `to` state after the animation ends
+   The global reduced-motion media query collapses this to 0.01ms (instant).
+   ─────────────────────────────────────────────────────────────────────────── */
+@keyframes hero-line-reveal {
+  /* "architectural reveal": line slides up AND comes into focus simultaneously.
+     opacity 0.35 → 1 : text materialises rather than just appearing
+     blur   8px  → 0  : adds cinematic depth — resolves to sharp as it enters view
+     translateY 112%→0: the clip mask hides the start position; blur is safe
+                         because the text is below the overflow boundary at from-state,
+                         so any upward glow bleed is clipped before it's visible.   */
+  from {
+    transform: translateY(112%);
+    opacity: 0.35;
+    filter: blur(8px);
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+    filter: blur(0px);
+  }
 }
 
-/* Gentle pulsing glow on the SVG line after it finishes drawing */
-@keyframes sd-glow-pulse {
-  0%, 100% { filter: drop-shadow(0 0 6px #a78bfa) drop-shadow(0 0 14px #7c3aed); }
-  50%       { filter: drop-shadow(0 0 10px #c4b5fd) drop-shadow(0 0 22px #8b5cf6); }
+/* ── Hero trust chips: per-item stagger entrance ─────────────────────────────
+   Applied via class="hero-chip-in" + inline style animationDelay on each span.
+
+   @media guards:
+     min-width 768px             — skip on mobile. Without this guard,
+                                   animation-fill-mode:both would hide the items
+                                   (opacity 0 during delay) on narrow viewports
+                                   where AnimateIn is already skipped.
+     prefers-reduced-motion:no-preference — respect accessibility preference.
+   The global reduced-motion block collapses all durations to 0.01ms as backup.
+   ─────────────────────────────────────────────────────────────────────────── */
+@keyframes hero-chip-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0);   }
 }
 
-/* Text: blur-to-clear fade-in */
-@keyframes sd-fadein-blur {
-  from { opacity: 0; filter: blur(10px); transform: scale(0.96) translateY(4px); }
-  to   { opacity: 1; filter: blur(0);    transform: scale(1)    translateY(0);   }
+@media (min-width: 768px) and (prefers-reduced-motion: no-preference) {
+  .hero-chip-in {
+    /* Duration + easing only; animationDelay comes from the inline style per-item. */
+    animation: hero-chip-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
 }
 
-/* Checkmark: scale pop-in */
-@keyframes sd-popin {
-  0%   { opacity: 0; transform: scale(0.3) rotate(-20deg); }
-  60%  { opacity: 1; transform: scale(1.2) rotate(6deg);   }
-  100% { opacity: 1; transform: scale(1)   rotate(0deg);   }
+/* ── Hero primary CTA: hover shimmer sweep ───────────────────────────────────
+   A bright diagonal band sweeps across the button on hover — once per hover.
+   Applied via .hero-cta-shimmer-layer child span + parent .hero-cta-shimmer.
+
+   The parent must be:  relative overflow-hidden hero-cta-shimmer
+   The child must be:   <span aria-hidden="true" class="hero-cta-shimmer-layer" />
+
+   animation-fill-mode: forwards holds translateX(180%) after the sweep ends
+   so the layer stays off-screen right (no reverse-snap flicker while hovering).
+   On mouseleave the :hover rule is removed and the element reverts to its base
+   transform (translateX(-120%)) instantly — clean reset for next hover.
+   ─────────────────────────────────────────────────────────────────────────── */
+@keyframes hero-cta-shimmer {
+  from { transform: translateX(-120%) skewX(-14deg); }
+  to   { transform: translateX( 180%) skewX(-14deg); }
 }
 
-/* Shimmer sweep — bright segment racing along the drawn stroke after it completes */
-@keyframes sd-shimmer {
-  from { stroke-dashoffset:  360; stroke-opacity: 0.9; }
-  80%  { stroke-opacity: 0.7; }
-  to   { stroke-dashoffset: -360; stroke-opacity: 0;   }
+.hero-cta-shimmer-layer {
+  pointer-events: none;
+  position:       absolute;
+  inset:          0;
+  /* Narrow white band with soft feathered edges */
+  background: linear-gradient(
+    105deg,
+    transparent           32%,
+    rgba(255,255,255,0.48) 50%,
+    transparent           68%
+  );
+  /* Start hidden to the left */
+  transform: translateX(-120%) skewX(-14deg);
 }
 
-/* Sparkle twinkle — for small dots along the signature path */
-@keyframes sd-twinkle {
-  0%, 100% { opacity: 0;    transform: scale(0.4); }
-  50%       { opacity: 0.85; transform: scale(1);   }
-}
-
-/* Radial glow behind the logo — slow breathing pulse */
-@keyframes sd-glow-breathe {
-  0%, 100% { opacity: 0.55; transform: scale(1);    }
-  50%       { opacity: 0.80; transform: scale(1.08); }
+/* Play the sweep once on hover; hold the off-screen-right end state */
+.hero-cta-shimmer:hover .hero-cta-shimmer-layer {
+  animation: hero-cta-shimmer 0.50s ease-out forwards;
 }
