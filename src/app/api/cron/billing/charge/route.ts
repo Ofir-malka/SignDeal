@@ -28,14 +28,23 @@
  */
 
 import { NextResponse }             from "next/server";
+import { timingSafeEqual }          from "crypto";
 import { processRecurringCharges }  from "@/lib/billing/recurring";
 
 export async function GET(request: Request) {
-  // ── Auth: require Bearer CRON_SECRET ─────────────────────────────────────
-  const cronSecret = process.env.CRON_SECRET?.trim();
-  const authHeader  = request.headers.get("authorization");
+  // ── Auth: require Bearer CRON_SECRET (timing-safe comparison) ───────────
+  // timingSafeEqual requires equal-length buffers — length pre-check is safe
+  // since it only reveals the length of the expected value, not its content.
+  const cronSecret  = process.env.CRON_SECRET?.trim();
+  const authHeader  = request.headers.get("authorization") ?? "";
+  const expected    = `Bearer ${cronSecret ?? ""}`;
 
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+  const authorized =
+    !!cronSecret &&
+    authHeader.length === expected.length &&
+    timingSafeEqual(Buffer.from(authHeader), Buffer.from(expected));
+
+  if (!authorized) {
     console.warn(
       `[cron/billing/charge] UNAUTHORIZED` +
       ` hasSecret=${Boolean(cronSecret)}` +

@@ -294,6 +294,19 @@ export class RapydPaymentProvider implements PaymentProvider {
     // On Vercel, NODE_ENV is always "production", so sandbox deployments must set
     // RAPYD_SKIP_SIGNATURE_VERIFICATION=true explicitly in Vercel project env vars.
     // NEVER set that var in your live/production Vercel environment.
+    // Hard block: RAPYD_SKIP_SIGNATURE_VERIFICATION must never be set in production.
+    // If it is, throw immediately so the webhook returns 500 — which is loud and
+    // immediately visible in logs, rather than silently accepting forged webhooks.
+    if (
+      process.env.RAPYD_SKIP_SIGNATURE_VERIFICATION === "true" &&
+      process.env.NODE_ENV === "production"
+    ) {
+      throw new Error(
+        "[RapydPaymentProvider] RAPYD_SKIP_SIGNATURE_VERIFICATION=true is not allowed " +
+        "in production. Remove this env var from Vercel environment variables immediately.",
+      );
+    }
+
     const skipVerification =
       process.env.RAPYD_SKIP_SIGNATURE_VERIFICATION === "true" ||
       process.env.NODE_ENV !== "production";

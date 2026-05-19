@@ -39,7 +39,7 @@
  *   stripe listen --forward-to localhost:3000/api/stripe/connect/webhook
  *
  * ⚠ This is for Stripe Connect (client-to-broker payments) only.
- *   HYP billing webhooks are at /api/billing/hyp-notify — do NOT mix them.
+ *   HYP SaaS billing webhooks go through /billing/success (browser redirect), not a webhook.
  */
 
 import { NextResponse }                          from "next/server";
@@ -92,7 +92,46 @@ export async function POST(request: Request): Promise<NextResponse> {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
+  // ── Idempotency guard — write WebhookEvent row ───────────────────────────
+  // @@unique([provider, eventId]) ensures duplicate Stripe deliveries are no-ops.
+  // Mirrors the same pattern used in /api/stripe/payment/webhook.
+  let webhookEventCreated = true;
+  try {
+    await prisma.webhookEvent.create({
+      data: {
+        provider:  "stripe_connect",
+        eventId:   event.id,
+        eventType: event.type,
+        payload:   JSON.parse(rawBody) as object,
+        status:    "RECEIVED",
+      },
+    });
+  } catch (err: unknown) {
+    // P2002 = Prisma unique constraint violation → duplicate event delivery
+    const isUniqueViolation =
+      typeof err === "object" &&
+      err !== null &&
+      "code" in err &&
+      (err as { code: unknown }).code === "P2002";
+
+    if (isUniqueViolation) {
+      console.log(
+        `[api/stripe/connect/webhook] duplicate event id="${event.id}"` +
+        ` type="${event.type}" — returning 200 without reprocessing`,
+      );
+      return NextResponse.json({ received: true });
+    }
+
+    // Other DB error: log but continue — event processing may still succeed.
+    webhookEventCreated = false;
+    console.error(
+      `[api/stripe/connect/webhook] WebhookEvent.create failed for event="${event.id}":`,
+      err,
+    );
+  }
+
   // ── Dispatch on event type ────────────────────────────────────────────────
+  let processingError: string | null = null;
   try {
     if (event.type === "account.updated") {
       await handleAccountUpdated(event.data.object as Stripe.Account);
@@ -123,11 +162,31 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    processingError = msg;
     console.error(
       `[api/stripe/connect/webhook] handler error event="${event.type}" id="${event.id}": ${msg}`,
     );
     // Return 200 so Stripe does not retry — processing errors are logged for manual review.
     // A retry would likely produce the same error (e.g. Prisma connection failure).
+  }
+
+  // ── Update WebhookEvent status ────────────────────────────────────────────
+  if (webhookEventCreated) {
+    try {
+      await prisma.webhookEvent.updateMany({
+        where: { provider: "stripe_connect", eventId: event.id },
+        data:  {
+          status: processingError ? "FAILED"    : "PROCESSED",
+          error:  processingError ?? undefined,
+        },
+      });
+    } catch (err) {
+      // Non-fatal — status update failing does not affect the event outcome.
+      console.error(
+        `[api/stripe/connect/webhook] WebhookEvent.update failed for event="${event.id}":`,
+        err,
+      );
+    }
   }
 
   return NextResponse.json({ received: true });

@@ -50,12 +50,12 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { signatureStatus, dealClosed, signedAt, dealClosedAt, clientEmail, clientIdNumber, signatureData, signatureHash } = body;
-
-    // Validate signature data size before processing
-    if (signatureData !== undefined && typeof signatureData === "string" && signatureData.length > 500_000) {
-      return NextResponse.json({ error: "Signature data too large" }, { status: 400 });
-    }
+    // signatureData and signatureHash are intentionally NOT destructured here.
+    // They may only be written by the client-facing signing endpoint
+    // (/api/contracts/sign/[token]), which validates the signing token and
+    // explicitly blocks the contract owner from calling it.
+    // Accepting them here would allow a broker to forge a signature image.
+    const { signatureStatus, dealClosed, signedAt, dealClosedAt, clientEmail, clientIdNumber } = body;
 
     // ── Validate enum + date fields before touching the DB ───────────────────
     const SIGNATURE_STATUSES = [
@@ -78,6 +78,7 @@ export async function PATCH(
     // Capture audit trail when broker manually marks contract as signed.
     // signatureIp/userAgent record the broker's browser — clearly distinguishable
     // from a client-side signing event (which goes through /sign/[token]).
+    // signatureData/signatureHash are never accepted here — see comment above.
     if (signatureStatus === "SIGNED") {
       const ip =
         request.headers.get("x-forwarded-for")?.split(",")[0].trim()
@@ -87,8 +88,6 @@ export async function PATCH(
 
       data.signatureIp = ip;
       data.userAgent   = ua;
-      if (typeof signatureData === "string") data.signatureData = signatureData;
-      if (typeof signatureHash === "string") data.signatureHash = signatureHash;
     }
 
     const clientData: Record<string, string> = {};

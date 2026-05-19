@@ -41,8 +41,7 @@ export async function POST(request: Request) {
     sigPrefix:      headers["signature"] ? `${headers["signature"].slice(0, 8)}…` : "(missing)",
     allHeaderKeys:  Object.keys(headers).sort().join(", "),
     bodyLength:     rawBody.length,
-    bodyPreview:    rawBody.slice(0, 300),
-    skipSigEnvVar:  process.env.RAPYD_SKIP_SIGNATURE_VERIFICATION === "true" ? "SET" : "not set",
+    // bodyPreview intentionally omitted — Rapyd payloads contain client PII.
     webhookPath:    process.env.RAPYD_WEBHOOK_URL_PATH?.trim() || "/api/payments/webhook (default)",
   });
 
