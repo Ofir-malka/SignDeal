@@ -317,7 +317,12 @@ export async function POST(request: Request) {
     // Use existing client record if broker selected one, otherwise find-or-create by phone
     let client;
     if (existingClientDbId) {
-      const found = await prisma.client.findUnique({ where: { id: existingClientDbId } });
+      // Ownership check: broker may only link their own clients.
+      // Using findFirst with both id and userId prevents IDOR — another broker's
+      // client ID returns 404 rather than leaking cross-account client data.
+      const found = await prisma.client.findFirst({
+        where: { id: existingClientDbId, userId },
+      });
       if (!found) {
         return NextResponse.json({ error: "Client not found" }, { status: 404 });
       }

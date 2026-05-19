@@ -1,6 +1,7 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { NextResponse }  from "next/server";
+import { prisma }        from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
+import { requireAdmin }  from "@/lib/require-admin";
 
 // ── GET /api/contract-templates/[id] ─────────────────────────────────────────
 // Returns the full template including content (for editing / preview).
@@ -31,14 +32,14 @@ export async function GET(
 
 // ── PATCH /api/contract-templates/[id] ───────────────────────────────────────
 // Updates title and/or content; bumps version automatically.
-// TODO: Restrict to admin role when roles are introduced.
+// Restricted to ADMIN role users only (DB-verified, not JWT).
 
 export async function PATCH(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const result = await requireUserId();
+    const result = await requireAdmin();
     if (result instanceof NextResponse) return result;
 
     const { id } = await params;
@@ -75,14 +76,14 @@ export async function PATCH(
 // ── DELETE /api/contract-templates/[id] ──────────────────────────────────────
 // Soft-delete only — existing contracts that reference this template are unaffected
 // because generatedText is an immutable snapshot on the Contract record.
-// TODO: Restrict to admin role when roles are introduced.
+// Restricted to ADMIN role users only (DB-verified, not JWT).
 
 export async function DELETE(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const result = await requireUserId();
+    const result = await requireAdmin();
     if (result instanceof NextResponse) return result;
 
     const { id } = await params;
