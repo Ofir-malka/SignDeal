@@ -21,25 +21,26 @@ import { DashboardShell } from "@/components/DashboardShell";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type PaymentRow = {
-  id:              string;
-  status:          string;
-  provider:        string | null;
-  grossAmount:     number | null;
-  platformFee:     number | null;
-  netAmount:       number | null;
-  paidAt:          Date | null;
+  id:               string;
+  status:           string;
+  provider:         string | null;
+  grossAmount:      number | null;
+  processorFee:     number | null;
+  platformFee:      number | null;
+  netAmount:        number | null;
+  paidAt:           Date | null;
   stripeTransferId: string | null;
-  transferStatus:  string | null;
-  payoutId:        string | null;
+  transferStatus:   string | null;
+  payoutId:         string | null;
   payoutEvent: {
     status:      string;
     arrivalDate: Date | null;
     failureCode: string | null;
   } | null;
   contract: {
-    id:             string;
+    id:              string;
     propertyAddress: string;
-    propertyCity:   string;
+    propertyCity:    string;
     client: { name: string };
   };
 };
@@ -59,6 +60,7 @@ export default async function PaymentsPage() {
       status:           true,
       provider:         true,
       grossAmount:      true,
+      processorFee:     true,
       platformFee:      true,
       netAmount:        true,
       paidAt:           true,
@@ -109,6 +111,7 @@ export default async function PaymentsPage() {
                     <th className="px-4 py-3 font-medium text-gray-500 whitespace-nowrap">לקוח / נכס</th>
                     <th className="px-4 py-3 font-medium text-gray-500 whitespace-nowrap">תאריך תשלום</th>
                     <th className="px-4 py-3 font-medium text-gray-500 whitespace-nowrap text-left">סכום ברוטו</th>
+                    <th className="px-4 py-3 font-medium text-gray-500 whitespace-nowrap text-left">עמלת עיבוד</th>
                     <th className="px-4 py-3 font-medium text-gray-500 whitespace-nowrap text-left">עמלת פלטפורמה</th>
                     <th className="px-4 py-3 font-medium text-gray-500 whitespace-nowrap text-left">נטו למתווך</th>
                     <th className="px-4 py-3 font-medium text-gray-500 whitespace-nowrap">סטטוס תשלום</th>
@@ -162,7 +165,15 @@ function PaymentTableRow({ payment: p }: { payment: PaymentRow }) {
         {formatNIS(p.grossAmount)}
       </td>
 
-      {/* Platform fee */}
+      {/* Processor fee (Stripe / provider cut) */}
+      <td className="px-4 py-3.5 text-left font-mono whitespace-nowrap">
+        {isStripe && (p.processorFee ?? 0) > 0
+          ? <span className="text-gray-500">{formatNIS(p.processorFee)}</span>
+          : <span className="text-gray-300">—</span>
+        }
+      </td>
+
+      {/* Platform fee (SignDeal cut) */}
       <td className="px-4 py-3.5 text-left font-mono whitespace-nowrap">
         {isStripe
           ? <span className="text-gray-500">{formatNIS(p.platformFee)}</span>
@@ -340,10 +351,15 @@ function EmptyState() {
 
 // ── Formatting helpers ────────────────────────────────────────────────────────
 
-/** Formats agorot (1/100 NIS) as "₪1,234" — returns "—" for null/undefined. */
+/** Converts agorot → ILS and formats with Intl (e.g. "₪12,000") — returns "—" for null. */
 function formatNIS(agorot: number | null | undefined): string {
   if (agorot == null) return "—";
-  return `₪${Math.round(agorot / 100).toLocaleString("he-IL")}`;
+  return new Intl.NumberFormat("he-IL", {
+    style:                 "currency",
+    currency:              "ILS",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  }).format(agorot / 100);
 }
 
 /** Formats a Date as "15 ינואר 2026" in Hebrew locale — returns "—" for null. */
