@@ -2,6 +2,12 @@
  * StubPaymentProvider — active when PAYMENT_PROVIDER=stub (or unset).
  * Returns a deterministic fake URL; verifyWebhook always resolves to PAID.
  * Safe for local dev and CI; never makes network calls.
+ *
+ * Payment URL base resolution order (mirrors the Rapyd provider):
+ *   1. PAYMENT_REDIRECT_BASE_URL — explicit override (ngrok, staging, etc.)
+ *   2. APP_BASE_URL              — generic app base
+ *   3. NEXTAUTH_URL              — NextAuth-provided canonical URL
+ *   4. http://localhost:3000     — local dev fallback
  */
 
 import type {
@@ -13,14 +19,24 @@ import type {
   MappedStatus,
 } from "../provider";
 
+function resolveBase(): string {
+  return (
+    process.env.PAYMENT_REDIRECT_BASE_URL ??
+    process.env.APP_BASE_URL              ??
+    process.env.NEXTAUTH_URL              ??
+    "http://localhost:3000"
+  ).replace(/\/$/, "");
+}
+
 export class StubPaymentProvider implements PaymentProvider {
   async createPaymentLink(params: CreatePaymentLinkParams): Promise<CreatePaymentLinkResult> {
+    const base = resolveBase();
     console.log(
-      `[StubPaymentProvider] createPaymentLink paymentId=${params.paymentId} grossAmount=${params.amount} agorot`,
+      `[StubPaymentProvider] createPaymentLink paymentId=${params.paymentId} grossAmount=${params.amount} agorot base=${base}`,
     );
     return {
       ok:                true,
-      paymentUrl:        `https://pay.signdeal.app/pay/${params.paymentId}`,
+      paymentUrl:        `${base}/pay/${params.paymentId}`,
       providerPaymentId: `stub-${params.paymentId}`,
     };
   }

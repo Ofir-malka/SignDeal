@@ -18,30 +18,38 @@
  *     grossAmount = amount + processorFee
  *     netAmount   = amount − platformFee
  *
- * Example (SPLIT, amount=10,000, processorFee=1.7%, platformFee=0.5%):
- *   processorFee → 170   grossAmount → 10,170
- *   platformFee  →  50   netAmount   →  9,950
+ * Example (SPLIT, amount=1,000,000 agorot = ₪10,000, processorFee=1.4%, platformFee=2%, minPlatformFee=500):
+ *   processorFee → 14,000   grossAmount → 1,014,000
+ *   platformFee  → max(20,000, 500) = 20,000   netAmount → 980,000
  *
- * .env keys (all optional; default to SPLIT with 0% fees in Phase 1):
+ * Example (SPLIT, amount=20,000 agorot = ₪200, processorFee=1.4%, platformFee=2%, minPlatformFee=500):
+ *   rawPlatformFee = 400 agorot (₪4) — below minimum
+ *   platformFee    → max(400, 500) = 500 agorot (₪5 minimum applied)
+ *   processorFee   → 280   grossAmount → 20,280
+ *   netAmount      → 19,500
+ *
+ * .env keys (all optional; defaults shown):
  *   FEE_MODE=SPLIT                  # BROKER | CLIENT | SPLIT
- *   PROVIDER_FEE_PERCENT=1.7
- *   PLATFORM_FEE_PERCENT=0.5
+ *   PROVIDER_FEE_PERCENT=1.4        # payment processor's cut (e.g. Stripe ILS rate)
+ *   PLATFORM_FEE_PERCENT=2          # SignDeal platform cut
+ *   MINIMUM_PLATFORM_FEE=500        # floor in agorot (₪5 = 500); 0 = no floor
  */
 
 // Mirrors the Prisma FeePaidBy enum values exactly — no translation needed.
 export type FeeMode = "BROKER" | "CLIENT" | "SPLIT";
 
 export interface FeeConfig {
-  providerFeePercent: number;  // 0–100, e.g. 1.7 means 1.7%
-  platformFeePercent: number;  // 0–100, e.g. 0.5 means 0.5%
-  feeMode:            FeeMode;
+  providerFeePercent:  number;  // 0–100, e.g. 1.4 means 1.4%
+  platformFeePercent:  number;  // 0–100, e.g. 2 means 2%
+  minimumPlatformFee:  number;  // floor in agorot; 0 = no floor
+  feeMode:             FeeMode;
 }
 
 export interface FeeBreakdown {
   // mirrors Payment model field names exactly — passes directly into prisma.payment.upsert
   amount:             number;  // base commission, in agorot
   processorFee:       number;  // payment-processor cut, in agorot
-  platformFee:        number;  // SignDeal platform cut, in agorot
+  platformFee:        number;  // SignDeal platform cut (after minimum applied), in agorot
   grossAmount:        number;  // total charged to customer, in agorot
   netAmount:          number;  // broker net after fees, in agorot
   feePaidBy:          FeeMode; // passes directly to Prisma as FeePaidBy
@@ -53,10 +61,18 @@ export interface FeeBreakdown {
 /**
  * Calculates a full fee breakdown.
  * All monetary values are in agorot (integer). Fractional agorot are rounded.
+ *
+ * The minimum platform fee floor is applied BEFORE the gross/net split so that
+ * all downstream amounts (grossAmount, netAmount, application_fee_amount) are
+ * consistent with the final platformFee value.
  */
 export function calculateFees(amount: number, config: FeeConfig): FeeBreakdown {
   const processorFee = Math.round(amount * config.providerFeePercent / 100);
-  const platformFee  = Math.round(amount * config.platformFeePercent / 100);
+
+  // Apply minimum floor: platformFee is always at least minimumPlatformFee agorot.
+  // Math.max(0, ...) guards against negative values if percent or amount are 0.
+  const rawPlatformFee = Math.round(amount * config.platformFeePercent / 100);
+  const platformFee    = Math.max(rawPlatformFee, config.minimumPlatformFee);
 
   let grossAmount: number;
   let netAmount:   number;
@@ -98,14 +114,22 @@ const VALID_FEE_MODES = new Set<FeeMode>(["BROKER", "CLIENT", "SPLIT"]);
 
 /**
  * Reads fee config from environment variables.
- * Defaults to SPLIT mode with 0% fees in Phase 1 (no-op: grossAmount = amount, netAmount = amount).
+ *
+ *   FEE_MODE                 BROKER | CLIENT | SPLIT  (default: SPLIT)
+ *   PROVIDER_FEE_PERCENT     processor's cut, e.g. "1.4" for Stripe ILS (default: "0")
+ *   PLATFORM_FEE_PERCENT     SignDeal's cut, e.g. "2" for 2%           (default: "0")
+ *   MINIMUM_PLATFORM_FEE     floor in agorot, e.g. "500" for ₪5        (default: "0")
+ *
+ * All four must be set in Vercel Environment Variables to collect real revenue.
+ * Defaults to 0% / no floor — safe for local dev and CI (no money moved).
  */
 export function defaultFeeConfig(): FeeConfig {
   const raw = (process.env.FEE_MODE ?? "SPLIT").trim().toUpperCase();
 
   return {
-    providerFeePercent: parseFloat(process.env.PROVIDER_FEE_PERCENT ?? "0") || 0,
-    platformFeePercent: parseFloat(process.env.PLATFORM_FEE_PERCENT ?? "0") || 0,
+    providerFeePercent: parseFloat(process.env.PROVIDER_FEE_PERCENT  ?? "0") || 0,
+    platformFeePercent: parseFloat(process.env.PLATFORM_FEE_PERCENT  ?? "0") || 0,
+    minimumPlatformFee: parseInt  (process.env.MINIMUM_PLATFORM_FEE  ?? "0", 10) || 0,
     feeMode:            VALID_FEE_MODES.has(raw as FeeMode) ? (raw as FeeMode) : "SPLIT",
   };
 }
