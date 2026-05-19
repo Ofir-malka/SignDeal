@@ -33,8 +33,10 @@ export async function POST(
     // 5 requests per contract per hour — enough for retries after provider errors.
     // 15 per broker per hour across all contracts — blocks bulk automation.
     // Both limits call Rapyd (external) and send SMS; conservative caps are correct.
-    const rlContract = rateLimit(id,     "payment-request",    { max: 5,  windowMs: 60 * 60_000 });
-    const rlBroker   = rateLimit(userId, "payment-request-all", { max: 15, windowMs: 60 * 60_000 });
+    const [rlContract, rlBroker] = await Promise.all([
+      rateLimit(id,     "payment-request",    { max: 5,  windowMs: 60 * 60_000 }),
+      rateLimit(userId, "payment-request-all", { max: 15, windowMs: 60 * 60_000 }),
+    ]);
     if (!rlContract.allowed || !rlBroker.allowed) {
       const retryAfter = Math.max(rlContract.retryAfter ?? 0, rlBroker.retryAfter ?? 0);
       return NextResponse.json(

@@ -37,7 +37,7 @@ export async function POST(request: Request) {
     const { userId } = result;
 
     // ── Rate limit: 20 property creations per broker per hour ─────────────────
-    const rl = rateLimit(userId, "property-create", { max: 20, windowMs: 60 * 60_000 });
+    const rl = await rateLimit(userId, "property-create", { max: 20, windowMs: 60 * 60_000 });
     if (!rl.allowed) {
       return NextResponse.json(
         { error: "יותר מדי נכסים — המתן שעה ונסה שוב" },

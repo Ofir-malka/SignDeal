@@ -43,7 +43,7 @@ export async function POST(
     const { id } = await params;
 
     // ── Rate limit: 3 retries per message per hour ────────────────────────────
-    const rl = rateLimit(`msg:${id}`, "message-retry", { max: 3, windowMs: 60 * 60_000 });
+    const rl = await rateLimit(`msg:${id}`, "message-retry", { max: 3, windowMs: 60 * 60_000 });
     if (!rl.allowed) {
       return NextResponse.json(
         { error: "יותר מדי ניסיונות חוזרים — המתן שעה ונסה שוב" },

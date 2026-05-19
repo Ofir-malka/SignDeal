@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     const { userId } = result;
 
     // ── Rate limit: 30 client creations per broker per hour ───────────────────
-    const rl = rateLimit(userId, "client-create", { max: 30, windowMs: 60 * 60_000 });
+    const rl = await rateLimit(userId, "client-create", { max: 30, windowMs: 60 * 60_000 });
     if (!rl.allowed) {
       return NextResponse.json(
         { error: "יותר מדי לקוחות — המתן שעה ונסה שוב" },

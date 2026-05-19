@@ -11,7 +11,7 @@ import { sendEmail, welcomeEmail } from "@/lib/email";
 export async function POST(request: Request) {
   // ── Rate limit: max 10 registration attempts per IP per hour ─────────────────
   const ip = getRealIp(request);
-  const rl = rateLimit(ip, "register", { max: 10, windowMs: 3_600_000 });
+  const rl = await rateLimit(ip, "register", { max: 10, windowMs: 3_600_000 });
   if (!rl.allowed) {
     return NextResponse.json(
       { error: "יותר מדי בקשות — נסה שוב מאוחר יותר" },

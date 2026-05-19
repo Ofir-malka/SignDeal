@@ -229,7 +229,7 @@ export async function POST(request: Request) {
     // Keyed on userId (not IP) — brokers may share office NAT.
     // Each creation sends an SMS and may call an external template; 20/hr is
     // well above normal usage for a single broker.
-    const rl = rateLimit(userId, "contract-create", { max: 20, windowMs: 60 * 60_000 });
+    const rl = await rateLimit(userId, "contract-create", { max: 20, windowMs: 60 * 60_000 });
     if (!rl.allowed) {
       return NextResponse.json(
         { error: "יותר מדי חוזים — המתן שעה ונסה שוב" },

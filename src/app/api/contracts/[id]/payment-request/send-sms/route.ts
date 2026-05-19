@@ -18,7 +18,7 @@ export async function POST(
     const { id } = await params;
 
     // ── Rate limit: max 3 payment SMS per contract per hour ───────────────────
-    const rl = rateLimit(id, "sms-payment", { max: 3, windowMs: 60 * 60_000 });
+    const rl = await rateLimit(id, "sms-payment", { max: 3, windowMs: 60 * 60_000 });
     if (!rl.allowed) {
       return NextResponse.json(
         { error: "יותר מדי בקשות תשלום — המתן שעה ונסה שוב" },

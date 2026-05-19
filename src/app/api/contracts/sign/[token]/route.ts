@@ -381,8 +381,10 @@ export async function PATCH(
     // Keyed on token so it prevents brute-force enumeration of signing tokens.
     // Also keyed on IP to catch clients with multiple tokens.
     const ip = getRealIp(request);
-    const rlToken = rateLimit(token, "sign-patch",  { max: 10, windowMs: 15 * 60_000 });
-    const rlIp    = rateLimit(ip,    "sign-patch-ip", { max: 30, windowMs: 15 * 60_000 });
+    const [rlToken, rlIp] = await Promise.all([
+      rateLimit(token, "sign-patch",   { max: 10, windowMs: 15 * 60_000 }),
+      rateLimit(ip,    "sign-patch-ip", { max: 30, windowMs: 15 * 60_000 }),
+    ]);
     if (!rlToken.allowed || !rlIp.allowed) {
       const retryAfter = Math.max(rlToken.retryAfter ?? 0, rlIp.retryAfter ?? 0);
       return NextResponse.json(

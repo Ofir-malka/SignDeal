@@ -55,7 +55,7 @@ const OK_RESPONSE = NextResponse.json({ ok: true });
 export async function POST(request: Request) {
   // ── Rate limit: 3 per IP per 15 min ─────────────────────────────────────
   const ip = getRealIp(request);
-  const rl = rateLimit(ip, "forgot-password", { max: 3, windowMs: 15 * 60 * 1000 });
+  const rl = await rateLimit(ip, "forgot-password", { max: 3, windowMs: 15 * 60 * 1000 });
 
   if (!rl.allowed) {
     return NextResponse.json(

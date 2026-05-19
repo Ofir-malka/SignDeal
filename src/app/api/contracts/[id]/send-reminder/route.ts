@@ -37,7 +37,7 @@ export async function POST(
     const { id } = await params;
 
     // ── Rate limit: 5 reminders per contract per 10 minutes (all channels) ───
-    const rl = rateLimit(id, "sms-reminder", { max: 5, windowMs: 10 * 60_000 });
+    const rl = await rateLimit(id, "sms-reminder", { max: 5, windowMs: 10 * 60_000 });
     if (!rl.allowed) {
       return NextResponse.json(
         { error: "יותר מדי תזכורות — המתן מספר דקות ונסה שוב" },

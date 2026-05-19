@@ -20,6 +20,7 @@ import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { authConfig } from "@/lib/auth.config";
 import { sendEmail, welcomeEmail } from "@/lib/email";
+import { rateLimit } from "@/lib/rate-limit";
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   ...authConfig,
@@ -302,6 +303,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
+
+        // ── Rate limit: 10 sign-in attempts per email per 15 minutes ─────────
+        // Prevents credential-stuffing and brute-force attacks.
+        // Keyed on email (not IP) to catch distributed attacks from many IPs
+        // targeting a single account. Returns null (same as wrong password) so
+        // attackers cannot distinguish rate-limiting from failed authentication.
+        const email = String(credentials.email).trim().toLowerCase();
+        const rl    = await rateLimit(email, "signin", { max: 10, windowMs: 15 * 60_000 });
+        if (!rl.allowed) return null;
 
         // Include role so the JWT callback can set token.role without an extra query.
         // Subscription is fetched separately in the jwt callback (consistent for

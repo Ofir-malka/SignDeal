@@ -34,7 +34,7 @@ const BCRYPT_ROUNDS = 10;
 export async function POST(request: Request) {
   // ── Rate limit: 5 per IP per 10 min ─────────────────────────────────────
   const ip = getRealIp(request);
-  const rl = rateLimit(ip, "reset-password", { max: 5, windowMs: 10 * 60 * 1000 });
+  const rl = await rateLimit(ip, "reset-password", { max: 5, windowMs: 10 * 60 * 1000 });
 
   if (!rl.allowed) {
     return NextResponse.json(
