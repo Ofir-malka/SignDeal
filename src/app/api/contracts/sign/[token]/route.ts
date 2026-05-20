@@ -8,6 +8,7 @@ import { rateLimit, getRealIp } from "@/lib/rate-limit";
 import { sendEmail, contractSignedEmail, contractSignedClientEmail } from "@/lib/email";
 import { parsePropertyAddress } from "@/lib/format-address";
 import { generateContractPdf } from "@/lib/pdf/generate-contract-pdf";
+import { buildSignatureDigestInput, generateSignatureDigest } from "@/lib/contracts/signature-integrity";
 
 // ── UUID format guard — reject obviously invalid tokens before hitting the DB ─
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -419,7 +420,13 @@ export async function PATCH(
     }
 
     const contract = await prisma.contract.findUnique({
-      where: { signatureToken: token },
+      where:   { signatureToken: token },
+      // client + user (broker) included so buildSignatureDigestInput() can read
+      // client.name and user.fullName without a second query before the update.
+      include: {
+        client: true,
+        user:   { select: { fullName: true } },
+      },
     });
 
     if (!contract) {
@@ -458,17 +465,34 @@ export async function PATCH(
 
     // Signing
     if (signatureStatus === "SIGNED") {
-      const ip = request.headers.get("x-forwarded-for")?.split(",")[0].trim()
-               ?? request.headers.get("x-real-ip")
-               ?? null;
-      const ua = request.headers.get("user-agent") ?? null;
+      // Extract signing context — server-controlled; client-supplied values ignored.
+      const signingIp      = request.headers.get("x-forwarded-for")?.split(",")[0].trim()
+                           ?? request.headers.get("x-real-ip")
+                           ?? null;
+      const signingUa      = request.headers.get("user-agent") ?? null;
+      const serverSignedAt = new Date(); // server controls timestamp; client-supplied signedAt is ignored
 
       data.status      = "SIGNED";
-      data.signedAt    = new Date(); // server controls timestamp; client-supplied signedAt is ignored
-      data.signatureIp = ip;
-      data.userAgent   = ua;
+      data.signedAt    = serverSignedAt;
+      data.signatureIp = signingIp;
+      data.userAgent   = signingUa;
       if (typeof signatureData === "string") data.signatureData = signatureData;
       if (typeof signatureHash === "string") data.signatureHash = signatureHash;
+
+      // ── Server-side signature integrity digest ──────────────────────────────
+      // buildSignatureDigestInput() selects the canonical immutable fields:
+      // contract substance (type, address, price, commission), client name,
+      // broker name, and server-controlled signedAt.
+      //
+      // Mutable operational fields (IP, UA, reminders, payments, message IDs)
+      // are intentionally excluded — they can change without altering the legal
+      // agreement and must not invalidate an otherwise-correct signature.
+      //
+      // Spread contract with serverSignedAt so signedAt reflects the
+      // server-controlled timestamp rather than the pre-update null value.
+      data.signatureDigest = generateSignatureDigest(
+        buildSignatureDigestInput({ ...contract, signedAt: serverSignedAt }),
+      );
     }
 
     if (Object.keys(data).length === 0) {

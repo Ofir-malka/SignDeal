@@ -278,11 +278,12 @@ model Contract {
   hideFullAddressFromClient Boolean @default(false)
 
   // Signing audit (used in public /contracts/sign/[token] URL)
-  signatureToken  String?         @unique
-  signatureIp     String?
-  signatureData   String?         // base64 PNG of drawn signature
-  signatureHash   String?         // SHA-256(signatureData) — tamper detection
-  userAgent       String?         // browser/device string at signing time
+  signatureToken   String?         @unique
+  signatureIp      String?
+  signatureData    String?         // base64 PNG of drawn signature
+  signatureHash    String?         // SHA-256(signatureData) — client-supplied; kept for backward compat
+  signatureDigest  String?         // server-computed SHA-256 over full signing context (see lib/signature-integrity.ts)
+  userAgent        String?         // browser/device string at signing time
 
   // Template snapshot (frozen at creation time; immutable after that)
   language        String          @default("HE")   // "HE"|"EN"|"FR"|"RU"|"AR" — language used at creation
