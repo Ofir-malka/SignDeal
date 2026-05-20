@@ -1,15 +1,31 @@
 "use client";
 
 /**
- * Root error boundary — catches unhandled render errors anywhere in the app
- * that don't have a more specific error.tsx ancestor.
+ * Subtree error boundary — catches unhandled render errors anywhere inside
+ * the root layout that don't have a more specific error.tsx ancestor.
+ *
+ * Errors that crash the root layout itself are caught by global-error.tsx.
+ *
+ * Every caught error is reported to Sentry so no client-side crash goes
+ * untracked. The error.digest links this client event to the corresponding
+ * server-side Sentry event (Next.js generates the same digest on both sides).
  */
+
+import { useEffect } from "react";
+import * as Sentry from "@sentry/nextjs";
+
 export default function RootError({
+  error,
   reset,
 }: {
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  useEffect(() => {
+    Sentry.captureException(error, {
+      tags: { boundary: "subtree", digest: error.digest ?? "none" },
+    });
+  }, [error]);
   return (
     <div
       className="min-h-screen bg-slate-50 flex items-center justify-center p-4"

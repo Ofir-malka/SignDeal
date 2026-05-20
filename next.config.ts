@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { withSentryConfig } from "@sentry/nextjs";
 
 // ── Security headers ──────────────────────────────────────────────────────────
 //
@@ -72,4 +73,57 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+// ── Sentry ────────────────────────────────────────────────────────────────────
+//
+// withSentryConfig() wraps the Next.js config to:
+//   1. Auto-instrument Server Components and API routes (via instrumentation.ts)
+//   2. Upload source maps to Sentry at build time (requires SENTRY_AUTH_TOKEN)
+//   3. Add the tunnel route at /monitoring so Sentry events bypass ad-blockers
+//      and stay on our own domain (no extra CSP rules needed — 'self' covers it)
+//
+// Turbopack note: the Sentry webpack plugin that uploads source maps does not
+// run under Turbopack. Source maps can be uploaded separately via `sentry-cli`
+// in the CI pipeline using SENTRY_AUTH_TOKEN. Runtime error capturing works
+// correctly with Turbopack in both dev and production.
+//
+// tunnelRoute: "/monitoring" — Sentry automatically creates this Next.js API
+// route. The existing CSP `connect-src 'self'` already allows same-origin
+// requests, so no CSP changes are required.
+
+export default withSentryConfig(nextConfig, {
+  // ── Build-time source map upload ──────────────────────────────────────────
+  org:       process.env.SENTRY_ORG,
+  project:   process.env.SENTRY_PROJECT,
+  authToken: process.env.SENTRY_AUTH_TOKEN,
+
+  // Suppress upload output in local builds; CI gets the verbose log.
+  silent: !process.env.CI,
+
+  // ── Tunnel route ──────────────────────────────────────────────────────────
+  // Routes Sentry SDK requests through /monitoring (same origin as the app)
+  // so they are not blocked by ad-blockers and pass the existing CSP.
+  // The existing connect-src 'self' covers same-origin requests — no new
+  // CSP entries are required.
+  tunnelRoute: "/monitoring",
+
+  // ── Webpack-specific options (v10 API) ────────────────────────────────────
+  webpack: {
+    // Tree-shake Sentry's internal debug logger out of production bundles.
+    // v10 equivalent of the deprecated `disableLogger` top-level option.
+    treeshake: {
+      removeDebugLogging: true,
+    },
+    // Disable automatic Vercel Cron Monitor creation — we will configure
+    // Sentry Cron Monitors manually in Phase B with explicit thresholds.
+    // v10 equivalent of the deprecated `automaticVercelMonitors` top-level option.
+    automaticVercelMonitors: false,
+  },
+
+  // ── Source maps ───────────────────────────────────────────────────────────
+  // Delete uploaded source maps from the build output so they are never
+  // served to browsers (they would expose original source code).
+  // v10 equivalent of the deprecated `hideSourceMaps` top-level option.
+  sourcemaps: {
+    deleteSourcemapsAfterUpload: true,
+  },
+});
