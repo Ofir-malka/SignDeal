@@ -7,7 +7,8 @@ import { getPaymentProvider } from "@/lib/payments";
 import { getStripeClient } from "@/lib/stripe";
 import { sendSms, getSmsProviderName } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
-import { rateLimit } from "@/lib/rate-limit";
+import { rateLimit, getRealIp } from "@/lib/rate-limit";
+import { logAuditEvent }         from "@/lib/audit/log-audit-event";
 import { sendEmail, paymentRequestEmail } from "@/lib/email";
 import { parsePropertyAddress } from "@/lib/format-address";
 
@@ -82,7 +83,11 @@ export async function POST(
     // ── Provider branch: delegate Stripe payments to dedicated handler ────────
     // Rapyd / stub path continues below unchanged.
     if ((process.env.PAYMENT_PROVIDER?.trim() ?? "stub") === "stripe") {
-      return await handleStripePaymentRequest(id, contract, userId, user);
+      return await handleStripePaymentRequest(
+        id, contract, userId, user,
+        getRealIp(request),
+        request.headers.get("user-agent") ?? null,
+      );
     }
 
     // ── Step 1: calculate fee breakdown ──────────────────────────────────────
@@ -300,8 +305,10 @@ async function handleStripePaymentRequest(
     propertyCity:    string;
     client: { id: string; name: string; phone: string; email: string };
   },
-  userId:  string,
-  user:    { fullName: string },
+  userId:    string,
+  user:      { fullName: string },
+  ip:        string | null = null,
+  userAgent: string | null = null,
 ): Promise<NextResponse> {
   // ── 1. Stripe client ────────────────────────────────────────────────────────
   let stripe: ReturnType<typeof getStripeClient>;
@@ -497,6 +504,22 @@ async function handleStripePaymentRequest(
     `[payment-request/stripe] session created` +
     ` contractId=${contractId} sessionId=${session.id} paymentId=${payment.id}`,
   );
+
+  // ── Audit log: payment request created (Stripe path) ───────────────────────
+  await logAuditEvent({
+    userId,
+    action:     "contract.payment_request.created",
+    entityType: "payment",
+    entityId:   updated.id,
+    metadata:   {
+      provider:   "stripe",
+      amount:     fees.amount,
+      feePaidBy:  fees.feePaidBy,
+      contractId,
+    },
+    ip,
+    userAgent,
+  });
 
   // ── 9. Send SMS / email with the Stripe Checkout URL ───────────────────────
   // Same helpers as the Rapyd path — paymentUrl is the hosted Stripe Checkout URL.

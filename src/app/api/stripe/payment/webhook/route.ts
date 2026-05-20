@@ -65,6 +65,7 @@ import type Stripe                       from "stripe";
 import * as Sentry                       from "@sentry/nextjs";
 import { getStripeClient, getStripeConfig } from "@/lib/stripe";
 import { prisma }                        from "@/lib/prisma";
+import { logAuditEvent }                 from "@/lib/audit/log-audit-event";
 
 export async function POST(request: Request): Promise<NextResponse> {
   // ── 1. Read raw body FIRST — required for HMAC verification ─────────────────
@@ -318,6 +319,23 @@ async function handleCheckoutSessionCompleted(
       where: { id: payment.contractId, status: { in: ["PAYMENT_PENDING", "SIGNED", "OPENED"] } },
       data:  { status: "PAID" },
     });
+  });
+
+  // ── Audit log: payment paid ──────────────────────────────────────────────────
+  // userId is null — this is a system webhook, no broker session.
+  // amount_total and currency come from the Stripe session object; no secrets logged.
+  await logAuditEvent({
+    userId:     null,
+    action:     "contract.payment.paid",
+    entityType: "payment",
+    entityId:   payment.id,
+    metadata:   {
+      provider:   "stripe",
+      contractId: payment.contractId,
+      amount:     session.amount_total ?? null,
+      currency:   session.currency    ?? null,
+      eventType:  "checkout.session.completed",
+    },
   });
 
   console.log(
