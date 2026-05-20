@@ -44,6 +44,7 @@
 
 import { NextResponse }                          from "next/server";
 import type Stripe                               from "stripe";
+import * as Sentry                               from "@sentry/nextjs";
 import { getStripeClient, syncBrokerStripeAccount, getStripeConfig } from "@/lib/stripe";
 import { prisma }                                from "@/lib/prisma";
 
@@ -187,6 +188,18 @@ export async function POST(request: Request): Promise<NextResponse> {
         err,
       );
     }
+  }
+
+  // Alert when a handler failed — revenue-impacting; Stripe will NOT retry (we return 200).
+  if (processingError) {
+    Sentry.captureMessage(
+      `Stripe connect webhook handler failed: ${processingError}`,
+      {
+        level: "error",
+        tags:  { component: "stripe_connect_webhook", eventType: event.type },
+        extra: { eventId: event.id },
+      },
+    );
   }
 
   return NextResponse.json({ received: true });

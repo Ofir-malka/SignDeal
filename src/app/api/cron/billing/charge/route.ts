@@ -29,6 +29,7 @@
 
 import { NextResponse }             from "next/server";
 import { timingSafeEqual }          from "crypto";
+import * as Sentry                  from "@sentry/nextjs";
 import { processRecurringCharges }  from "@/lib/billing/recurring";
 
 export async function GET(request: Request) {
@@ -70,12 +71,37 @@ export async function GET(request: Request) {
       ` recurringProvider=${result.recurringProvider}`,
     );
 
+    // Alert when one or more charges failed — this is revenue-impacting.
+    // Counts only; no subscription IDs or customer PII in the event.
+    if (result.failed > 0) {
+      Sentry.captureMessage(
+        `[billing-cron] ${result.failed} charge(s) failed out of ${result.eligible} eligible`,
+        {
+          level: "error",
+          tags:  { component: "billing_cron" },
+          extra: {
+            eligible: result.eligible,
+            charged:  result.charged,
+            failed:   result.failed,
+            skipped:  result.skipped,
+            noToken:  result.noToken,
+            dryRunMode: result.dryRunMode,
+          },
+        },
+      );
+    }
+
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
     console.error(
       `[cron/billing/charge] ERROR:`,
       err instanceof Error ? err.message : err,
     );
+    // Fatal — the entire cron job crashed; every eligible subscription was skipped.
+    Sentry.captureException(err, {
+      tags:  { component: "billing_cron" },
+      level: "fatal",
+    });
     return NextResponse.json(
       { error: "Billing charge job failed — check server logs" },
       { status: 500 },

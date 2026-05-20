@@ -62,6 +62,7 @@
 
 import { NextResponse }                 from "next/server";
 import type Stripe                       from "stripe";
+import * as Sentry                       from "@sentry/nextjs";
 import { getStripeClient, getStripeConfig } from "@/lib/stripe";
 import { prisma }                        from "@/lib/prisma";
 
@@ -214,6 +215,18 @@ export async function POST(request: Request): Promise<NextResponse> {
         err,
       );
     }
+  }
+
+  // Alert when a handler failed — revenue-impacting; Stripe will NOT retry (we return 200).
+  if (processingError) {
+    Sentry.captureMessage(
+      `Stripe payment webhook handler failed: ${processingError}`,
+      {
+        level: "error",
+        tags:  { component: "stripe_payment_webhook", eventType: event.type },
+        extra: { eventId: event.id },
+      },
+    );
   }
 
   // Always 200 after the 400 guard — prevents Stripe from retrying on our DB errors.

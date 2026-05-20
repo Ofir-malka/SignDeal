@@ -40,6 +40,7 @@
  */
 
 import { NextResponse }            from "next/server";
+import * as Sentry                 from "@sentry/nextjs";
 import { prisma }                  from "@/lib/prisma";
 import { requireUserId }           from "@/lib/require-user";
 import { verifyContractIntegrity } from "@/lib/contracts/signature-integrity";
@@ -109,6 +110,16 @@ export async function GET(
         contractId:     id,
         expectedDigest: result.expectedDigest,
         actualDigest:   result.actualDigest,
+      });
+
+      Sentry.captureMessage("Contract signature integrity failed", {
+        level: "error",
+        tags:  { component: "signature_integrity" },
+        extra: {
+          contractId:     id,
+          expectedDigest: result.expectedDigest,
+          actualDigest:   result.actualDigest,
+        },
       });
 
       return NextResponse.json(
