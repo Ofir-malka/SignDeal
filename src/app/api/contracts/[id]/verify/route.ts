@@ -112,7 +112,7 @@ export async function GET(
         actualDigest:   result.actualDigest,
       });
 
-      Sentry.captureMessage("Contract signature integrity failed", {
+      Sentry.captureMessage("SIGNATURE_INTEGRITY_FAILED", {
         level: "error",
         tags:  { component: "signature_integrity" },
         extra: {
@@ -121,6 +121,10 @@ export async function GET(
           actualDigest:   result.actualDigest,
         },
       });
+
+      // Flush before returning — serverless functions freeze immediately after
+      // the response is sent, which would drop buffered Sentry events.
+      await Sentry.flush(2000);
 
       return NextResponse.json(
         {
