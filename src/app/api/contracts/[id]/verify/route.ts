@@ -44,6 +44,7 @@ import * as Sentry                 from "@sentry/nextjs";
 import { prisma }                  from "@/lib/prisma";
 import { requireUserId }           from "@/lib/require-user";
 import { verifyContractIntegrity } from "@/lib/contracts/signature-integrity";
+import { logAuditEvent }           from "@/lib/audit/log-audit-event";
 
 export async function GET(
   _request: Request,
@@ -117,6 +118,20 @@ export async function GET(
         tags:  { component: "signature_integrity" },
         extra: {
           contractId:     id,
+          expectedDigest: result.expectedDigest,
+          actualDigest:   result.actualDigest,
+        },
+      });
+
+      // ── Audit log: integrity failure ────────────────────────────────────────
+      // Awaited before the Sentry flush so all three (log + Sentry + response)
+      // complete in the correct order. logAuditEvent never throws.
+      await logAuditEvent({
+        userId:     userId,
+        action:     "contract.integrity.failed",
+        entityType: "contract",
+        entityId:   id,
+        metadata:   {
           expectedDigest: result.expectedDigest,
           actualDigest:   result.actualDigest,
         },

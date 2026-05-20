@@ -11,6 +11,7 @@
 import { NextResponse }   from "next/server";
 import { prisma }         from "@/lib/prisma";
 import { requireAdmin }   from "@/lib/require-admin";
+import { logAuditEvent }  from "@/lib/audit/log-audit-event";
 
 const VALID_ROLES = ["BROKER", "ADMIN"] as const;
 type ValidRole = (typeof VALID_ROLES)[number];
@@ -65,6 +66,16 @@ export async function PATCH(
     where:  { id: userId },
     data:   { role },
     select: { id: true, role: true },
+  });
+
+  // ── Audit log: role changed ───────────────────────────────────────────────
+  // No email, name, or phone — only role values and the two user IDs.
+  await logAuditEvent({
+    userId:     adminId,
+    action:     "admin.user.role_changed",
+    entityType: "user",
+    entityId:   userId,
+    metadata:   { fromRole: target.role, toRole: updated.role },
   });
 
   return NextResponse.json({ role: updated.role });
