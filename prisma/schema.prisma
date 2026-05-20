@@ -531,6 +531,7 @@ enum MessageType {
   USER_WELCOME                // אימייל ברוכים הבאים לאחר הרשמה
   USER_PASSWORD_RESET         // אימייל איפוס סיסמה
   CLIENT_CONTRACT_SIGNED_PDF  // אימייל ללקוח: החוזה החתום + PDF מצורף
+  SUBSCRIPTION_PAYMENT_FAILED // התראה למתווך: תשלום מנוי נכשל
 }
 
 // ── MessageTemplate ────────────────────────────────────────────────────────────

@@ -58,6 +58,7 @@ import { prisma }                                                       from "@/
 import { PLAN_AMOUNTS, PLAN_LABELS, BILLABLE_PLANS, type BillablePlan } from "./amounts";
 import { callHypSoft, type SoftChargeResult }                           from "./providers/hyp";
 import { logAuditEvent }                                                from "@/lib/audit/log-audit-event";
+import { sendEmail, paymentFailedEmail }                               from "@/lib/email";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -532,6 +533,19 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
         },
       });
 
+      // ── Email broker: payment failed ───────────────────────────────────────
+      // Runs synchronously (no after() — this is a cron context, not a route).
+      // Errors are caught internally — must never break the billing loop.
+      await sendSubscriptionPaymentFailedEmail({
+        userId:          sub.userId,
+        plan:            planLabel,
+        billingInterval: intervalLabel,
+        amountShekels,
+        attemptNumber:   newFailures,
+        isMaxFailures,
+        retryDate,
+      });
+
       console.warn(
         `[billing/recurring] CHARGE_FAILED` +
         ` chargeId=${charge.id}` +
@@ -572,4 +586,109 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
     realChargesEnabled,
     recurringProvider,
   };
+}
+
+// ── Helper: email broker on subscription payment failure (never throws) ────────
+// Called synchronously in the cron billing loop — after() is not available
+// outside Next.js route handlers. Errors are swallowed so a send failure
+// never interrupts the charge loop or affects the DB state.
+// TODO(queue): Replace with a durable job queue once retry-on-failure is needed.
+
+async function sendSubscriptionPaymentFailedEmail(params: {
+  userId:          string;
+  plan:            string;
+  billingInterval: string;
+  amountShekels:   number;
+  attemptNumber:   number;
+  isMaxFailures:   boolean;
+  retryDate:       Date | null;
+}): Promise<void> {
+  try {
+    const { userId, plan, billingInterval, amountShekels, attemptNumber, isMaxFailures, retryDate } = params;
+
+    // Fetch broker name + email — not included in the subscription select to
+    // avoid loading PII for every subscription in the scan.
+    const user = await prisma.user.findUnique({
+      where:  { id: userId },
+      select: { email: true, fullName: true },
+    });
+
+    const brokerEmail = user?.email?.trim() ?? "";
+    if (!brokerEmail) {
+      console.log(
+        `[sendSubscriptionPaymentFailedEmail] userId=${userId} has no email — skipped`,
+      );
+      return;
+    }
+
+    const baseUrl          = process.env.APP_BASE_URL?.trim() || "https://www.signdeal.co.il";
+    const updatePaymentUrl = `${baseUrl}/settings/billing/payment-method`;
+
+    const retryDateFormatted = retryDate
+      ? retryDate.toLocaleDateString("he-IL", { day: "numeric", month: "long", year: "numeric" })
+      : null;
+
+    const template = paymentFailedEmail({
+      brokerName:       user?.fullName ?? brokerEmail,
+      plan,
+      billingInterval,
+      amountNis:        amountShekels,   // amountShekels = agorot / 100 = whole NIS
+      attemptNumber,
+      isMaxFailures,
+      retryDate:        retryDateFormatted,
+      updatePaymentUrl,
+    });
+
+    // Create PENDING record before the network call so a mid-flight crash
+    // still leaves an auditable record.
+    const message = await prisma.message.create({
+      data: {
+        type:           "SUBSCRIPTION_PAYMENT_FAILED",
+        channel:        "EMAIL",
+        provider:       "resend",
+        subject:        template.subject,
+        body:           template.text,
+        userId,
+        status:         "PENDING",
+        attempts:       0,
+      },
+    });
+
+    const result = await sendEmail({
+      to:        brokerEmail,
+      ...template,
+      emailType: "subscription_payment_failed",
+    });
+
+    await prisma.message.update({
+      where: { id: message.id },
+      data: result.ok
+        ? {
+            status:            "SENT",
+            providerMessageId: result.messageId ?? null,
+            attempts:          1,
+            lastAttemptAt:     new Date(),
+          }
+        : {
+            status:        "FAILED",
+            failureReason: result.reason,
+            attempts:      1,
+            lastAttemptAt: new Date(),
+          },
+    });
+
+    if (!result.ok) {
+      console.error(
+        `[sendSubscriptionPaymentFailedEmail] email failed for userId=${userId}: ${result.reason}`,
+      );
+    } else {
+      console.log(
+        `[sendSubscriptionPaymentFailedEmail] sent — userId=${userId}` +
+        ` messageId=${result.messageId ?? "n/a"}`,
+      );
+    }
+  } catch (err) {
+    // Must never propagate — billing DB state is already committed.
+    console.error("[sendSubscriptionPaymentFailedEmail] unexpected error:", err);
+  }
 }
