@@ -902,6 +902,49 @@ model ContractUsageEvent {
   @@index([contractId])         // FK traversal index
 }
 
+// ── AuditLog ───────────────────────────────────────────────────────────────────
+//
+// Append-only cross-cutting audit trail for critical user and system actions.
+//
+// Design decisions:
+//   • No FK on userId — audit rows must survive user deletion.
+//   • No FK on entityId — a single int FK cannot span contracts, payments,
+//     subscriptions, and users simultaneously; cascades would destroy the trail.
+//   • metadata is Json (JSONB) — structured and queryable; never holds secrets,
+//     full phone/email, card tokens, or idNumbers (enforced in the helper).
+//   • No updatedAt — rows are written once and never modified.
+//   • ip / userAgent are nullable — omitted for cron and system-to-system events.
+//
+// Action catalogue (string, not enum — avoids migration churn for new actions):
+//   contract.created                   contract.signed
+//   contract.payment_request.created   contract.payment.paid
+//   contract.integrity.failed
+//   subscription.activated             subscription.canceled
+//   subscription.payment.succeeded     subscription.payment.failed
+//   admin.user.role_changed
+//   admin.template.created             admin.template.updated
+//   admin.template.deleted
+//
+// Retention: no automated cleanup at launch. Revisit at 500 K rows.
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?                        // null = system / webhook / public-endpoint action
+  action     String                         // see action catalogue above
+  entityType String                         // "contract" | "payment" | "user" | "subscription" | "contractTemplate"
+  entityId   String?                        // affected row id; null for collection-level actions
+  metadata   Json?                          // structured context — sanitized before write; NEVER raw PII/secrets
+  ip         String?                        // request IP; null for cron/server-to-server events
+  userAgent  String?                        // browser UA; null for server-to-server events
+  createdAt  DateTime @default(now())
+
+  // ── Indexes ──────────────────────────────────────────────────────────────────
+  @@index([userId, createdAt])      // "all actions by this broker" (chronological)
+  @@index([entityType, entityId])   // "all audit events for contract X"
+  @@index([action])                 // "all contract.signed events"
+  @@index([createdAt])              // chronological queries + future retention cleanup
+}
+
 // ── WebhookEvent ───────────────────────────────────────────────────────────────
 //
 // Append-only log of inbound webhook events from payment providers.
