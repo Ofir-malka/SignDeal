@@ -17,6 +17,7 @@
  * has been removed; this file is the sole implementation.
  */
 
+import * as Sentry        from "@sentry/nextjs";
 import { getEmailConfig } from "./env";
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -60,6 +61,12 @@ export interface SendEmailOptions {
    * Resend limit: 40 MB per email; typical contract PDFs are < 500 KB.
    */
   attachments?: EmailAttachment[];
+  /**
+   * Logical email type used only for Sentry error tagging (e.g. "password_reset",
+   * "contract_signed", "payment_received"). Never logged with PII.
+   * Optional — omitting it is safe; callers can add it incrementally.
+   */
+  emailType?: string;
 }
 
 export type EmailResult =
@@ -132,6 +139,22 @@ class ResendProvider implements EmailProvider {
         console.error(
           `[ResendProvider] Resend error — status=${res.status} body=${rawBody.slice(0, 300)}`,
         );
+
+        // ── Sentry: HTTP delivery failure ─────────────────────────────────────
+        // Safe tags/extras only. Recipient, body, HTML, and attachments are
+        // intentionally excluded — they may contain PII or sensitive content.
+        Sentry.captureException(
+          new Error(`Resend email delivery failed: HTTP ${res.status}`),
+          {
+            tags:  {
+              component: "email",
+              provider:  "resend",
+              emailType: options.emailType ?? "unknown",
+            },
+            extra: { statusCode: res.status },
+          },
+        );
+
         return { ok: false, reason: `Resend ${res.status}: ${rawBody.slice(0, 200)}` };
       }
 
@@ -144,6 +167,18 @@ class ResendProvider implements EmailProvider {
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       console.error(`[ResendProvider] network error — ${reason}`);
+
+      // ── Sentry: network failure (fetch threw) ─────────────────────────────
+      // No statusCode available — the request never completed.
+      // Recipient, body, HTML, and attachments are intentionally excluded.
+      Sentry.captureException(err, {
+        tags: {
+          component: "email",
+          provider:  "resend",
+          emailType: options.emailType ?? "unknown",
+        },
+      });
+
       return { ok: false, reason: `Network error: ${reason}` };
     }
   }
