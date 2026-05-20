@@ -57,6 +57,7 @@
 import { prisma }                                                       from "@/lib/prisma";
 import { PLAN_AMOUNTS, PLAN_LABELS, BILLABLE_PLANS, type BillablePlan } from "./amounts";
 import { callHypSoft, type SoftChargeResult }                           from "./providers/hyp";
+import { logAuditEvent }                                                from "@/lib/audit/log-audit-event";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -413,6 +414,39 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
         });
       });
 
+      // ── Audit: payment succeeded ───────────────────────────────────────────
+      // fromStatus captured from sub (fetched before the transaction).
+      await logAuditEvent({
+        userId:     sub.userId,
+        action:     "subscription.payment.succeeded",
+        entityType: "subscription",
+        entityId:   sub.id,
+        metadata:   {
+          plan:            sub.plan,
+          billingInterval: sub.billingInterval,
+          amountAgorot,
+          chargeId:        charge.id,
+          fromStatus:      sub.status,
+        },
+      });
+
+      // ── Audit: activated (TRIALING → ACTIVE on first real charge) ─────────
+      if (sub.status === "TRIALING") {
+        await logAuditEvent({
+          userId:     sub.userId,
+          action:     "subscription.activated",
+          entityType: "subscription",
+          entityId:   sub.id,
+          metadata:   {
+            plan:            sub.plan,
+            billingInterval: sub.billingInterval,
+            fromStatus:      "TRIALING",
+            toStatus:        "ACTIVE",
+            source:          "recurring_billing",
+          },
+        });
+      }
+
       console.log(
         `[billing/recurring] CHARGE_SUCCEEDED` +
         ` chargeId=${charge.id}` +
@@ -477,6 +511,25 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
             }),
           },
         });
+      });
+
+      // ── Audit: payment failed ──────────────────────────────────────────────
+      // fromStatus captured from sub (fetched before the transaction).
+      await logAuditEvent({
+        userId:     sub.userId,
+        action:     "subscription.payment.failed",
+        entityType: "subscription",
+        entityId:   sub.id,
+        metadata:   {
+          plan:            sub.plan,
+          billingInterval: sub.billingInterval,
+          amountAgorot,
+          chargeId:        charge.id,
+          fromStatus:      sub.status,
+          toStatus:        newStatus,
+          attemptNumber:   newFailures,
+          isMaxFailures,
+        },
       });
 
       console.warn(

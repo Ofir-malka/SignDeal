@@ -8,6 +8,7 @@
 import { NextResponse }   from "next/server";
 import { prisma }         from "@/lib/prisma";
 import { requireAdmin }   from "@/lib/require-admin";
+import { logAuditEvent }  from "@/lib/audit/log-audit-event";
 
 const VALID_STATUSES = [
   "INCOMPLETE",  // Phase 2A: reset to "awaiting card" (useful for testing)
@@ -78,6 +79,23 @@ export async function PATCH(
 
     return sub;
   });
+
+  // ── Audit: subscription canceled ─────────────────────────────────────────
+  // Only emitted when the admin explicitly sets status to CANCELED.
+  // fromStatus comes from the subscription fetched before the update.
+  if (status === "CANCELED") {
+    await logAuditEvent({
+      userId:     adminId,
+      action:     "subscription.canceled",
+      entityType: "subscription",
+      entityId:   subscription.id,
+      metadata:   {
+        fromStatus: subscription.status,
+        toStatus:   "CANCELED",
+        source:     "admin",
+      },
+    });
+  }
 
   return NextResponse.json({ status: updated.status });
 }

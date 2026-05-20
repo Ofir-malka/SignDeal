@@ -35,6 +35,7 @@ import { auth }          from "@/lib/auth";
 import { prisma }        from "@/lib/prisma";
 import { TRIAL_DAYS }    from "@/lib/plans";
 import { callGetToken }  from "@/lib/billing/providers/hyp";
+import { logAuditEvent } from "@/lib/audit/log-audit-event";
 import { DashboardLink } from "./DashboardLink";
 
 export const metadata: Metadata = {
@@ -736,6 +737,10 @@ async function activateCheckout(params: {
 
   if (!subscription) throw new Error("SUBSCRIPTION_NOT_FOUND");
 
+  // Snapshot status BEFORE the transaction so audit metadata reflects
+  // the pre-update state even if the object is mutated later.
+  const fromStatus = subscription.status;
+
   const isTrialActivation = subscription.status === "INCOMPLETE";
 
   // ── Purpose detection ────────────────────────────────────────────────────
@@ -944,6 +949,27 @@ async function activateCheckout(params: {
     ` userId=${userId}` +
     ` order="${order}"`,
   );
+
+  // ── Audit: subscription activated ─────────────────────────────────────────
+  // Not emitted for payment_method_update — that path changes no billing state.
+  // fromStatus is the snapshot taken before the transaction.
+  if (!isPaymentMethodUpdate) {
+    await logAuditEvent({
+      userId,
+      action:     "subscription.activated",
+      entityType: "subscription",
+      entityId:   subscription.id,
+      metadata:   {
+        plan:            checkout.plan,
+        billingInterval: checkout.interval,
+        fromStatus,
+        toStatus:        isTrialActivation ? "TRIALING" : "ACTIVE",
+        source:          isTrialActivation ? "trial_start"
+                       : isRecovery        ? "recovery"
+                       :                    "paid_activation",
+      },
+    });
+  }
 
   // ── Phase 3A: capture 19-digit charge token for future recurring charges ──
   // action=getToken returns a 19-digit Token usable for action=soft charges
