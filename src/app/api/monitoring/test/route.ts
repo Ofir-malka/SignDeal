@@ -2,34 +2,21 @@
  * GET /api/monitoring/test
  *
  * Temporary Sentry connectivity test endpoint.
- * Fires a captureMessage() and confirms the SDK is wired up correctly in
- * every environment including production.
+ * Fires a captureMessage() to confirm the SDK is wired up correctly.
  *
  * ── Access control ────────────────────────────────────────────────────────────
- * Two valid ways to call this endpoint (tried in order):
+ * In non-production environments (NODE_ENV !== "production"): open — no secret
+ * required (useful for local and staging Sentry checks without managing secrets).
  *
- *   1. Authenticated admin session — requireAdmin() does a live DB role check.
- *      Works in every environment without any query params.
- *
- *   2. ?secret=<CRON_SECRET> query param — works in ALL environments.
- *      The CRON_SECRET value is the protection; the environment is not.
- *      Comparison is timing-safe (constant-time) to resist timing attacks.
- *      The secret is never echoed in the response or in logs.
- *
- * If neither path succeeds the endpoint returns the 401/403 from requireAdmin().
- *
- * ── Safe debug fields in response ────────────────────────────────────────────
- * On success the response includes two boolean hints to aid diagnosis:
- *   hasCronSecret  — true when CRON_SECRET env var is set and non-empty
- *   receivedSecret — true when the caller sent a non-empty ?secret param
- * These are booleans only — the actual secret values are never exposed.
+ * In production: requires ?secret=<CRON_SECRET> query param.
+ * Comparison is timing-safe (constant-time) to resist timing attacks.
+ * Wrong or missing secret → 403. The secret is never echoed in the response.
  *
  * ── Usage ─────────────────────────────────────────────────────────────────────
- *   # As admin (any environment):
- *   curl "https://app.signdeal.co.il/api/monitoring/test" \
- *     -H "Cookie: authjs.session-token=<token>"
+ *   # Non-production (no secret needed):
+ *   curl "http://localhost:3000/api/monitoring/test"
  *
- *   # With CRON_SECRET (any environment including production):
+ *   # Production:
  *   curl "https://app.signdeal.co.il/api/monitoring/test?secret=<CRON_SECRET>"
  *
  * ── Removal ───────────────────────────────────────────────────────────────────
@@ -40,49 +27,35 @@
 import { NextResponse }    from "next/server";
 import * as Sentry         from "@sentry/nextjs";
 import { timingSafeEqual } from "crypto";
-import { requireAdmin }    from "@/lib/require-admin";
 
 export async function GET(request: Request): Promise<NextResponse> {
-  const url            = new URL(request.url);
-  const providedSecret = url.searchParams.get("secret") ?? "";
-  const cronSecret     = process.env.CRON_SECRET?.trim() ?? "";
+  const isProduction = process.env.NODE_ENV === "production";
 
-  // Precompute debug booleans — booleans only, never the actual values.
-  const hasCronSecret  = cronSecret.length > 0;
-  const receivedSecret = providedSecret.length > 0;
+  // ── Production gate: require ?secret=CRON_SECRET ─────────────────────────
+  // In non-production environments the check is skipped entirely.
+  if (isProduction) {
+    const url            = new URL(request.url);
+    const providedSecret = url.searchParams.get("secret") ?? "";
+    const cronSecret     = process.env.CRON_SECRET?.trim() ?? "";
 
-  // ── Path 1: authenticated admin session ───────────────────────────────────
-  // requireAdmin() does a live DB role check — JWT role is never trusted.
-  const adminResult = await requireAdmin();
-  const isAdmin     = !(adminResult instanceof NextResponse);
+    // timingSafeEqual requires equal-length buffers — length pre-check is safe
+    // because it only reveals the expected length, not its content.
+    const secretValid =
+      cronSecret.length > 0 &&
+      providedSecret.length === cronSecret.length &&
+      timingSafeEqual(Buffer.from(providedSecret), Buffer.from(cronSecret));
 
-  // ── Path 2: CRON_SECRET query param ──────────────────────────────────────
-  // Works in all environments. The strength of CRON_SECRET is the protection.
-  // timingSafeEqual requires equal-length buffers — the length pre-check is
-  // safe because it only reveals the expected length, not its content.
-  const secretValid =
-    !isAdmin &&
-    hasCronSecret &&
-    receivedSecret &&
-    providedSecret.length === cronSecret.length &&
-    timingSafeEqual(Buffer.from(providedSecret), Buffer.from(cronSecret));
-
-  // ── Reject if neither path passed ────────────────────────────────────────
-  if (!isAdmin && !secretValid) {
-    // Return the 401/403 from requireAdmin() — do not reveal which path failed.
-    return adminResult;
+    if (!secretValid) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
   }
 
-  // ── Fire Sentry test events ───────────────────────────────────────────────
+  // ── Fire Sentry event ─────────────────────────────────────────────────────
   Sentry.captureMessage("Manual monitoring test from production", "info");
 
-  Sentry.captureException(
-    new Error("Manual Sentry test error from production"),
-  );
-
-  // Flush ensures both events are delivered before the serverless function
+  // Flush ensures the event is delivered before the serverless function
   // returns. Without this, the function may be frozen before the SDK has
-  // sent the buffered events to Sentry's ingest endpoint.
+  // sent the buffered event to Sentry's ingest endpoint.
   await Sentry.flush(2000);
 
   return NextResponse.json({ ok: true, sent: true });
