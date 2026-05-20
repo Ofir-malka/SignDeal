@@ -9,6 +9,7 @@ import { sendEmail, contractSignedEmail, contractSignedClientEmail } from "@/lib
 import { parsePropertyAddress } from "@/lib/format-address";
 import { generateContractPdf } from "@/lib/pdf/generate-contract-pdf";
 import { buildSignatureDigestInput, generateSignatureDigest } from "@/lib/contracts/signature-integrity";
+import { logAuditEvent } from "@/lib/audit/log-audit-event";
 
 // ── UUID format guard — reject obviously invalid tokens before hitting the DB ─
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -531,6 +532,24 @@ export async function PATCH(
           userId:     contract.userId,
         },
       });
+
+      // ── Audit log: contract signed ──────────────────────────────────────────
+      // userId is null — this is a public client-facing endpoint.
+      // IP and UA come from data.signatureIp / data.userAgent (set in the first
+      // signatureStatus === "SIGNED" block above). No PII in metadata.
+      await logAuditEvent({
+        userId:     null,
+        action:     "contract.signed",
+        entityType: "contract",
+        entityId:   contract.id,
+        metadata:   {
+          contractType: contract.contractType,
+          dealType:     contract.dealType,
+        },
+        ip:        (data.signatureIp  as string | null) ?? null,
+        userAgent: (data.userAgent    as string | null) ?? null,
+      });
+
       const signingContext = {
         id:              contract.id,
         userId:          contract.userId,

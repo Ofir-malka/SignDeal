@@ -6,7 +6,8 @@ import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { requireUserId }          from "@/lib/require-user";
 import { canCreateContract }      from "@/lib/subscription";
 import { resolveTemplate, buildContext } from "@/lib/contracts/resolve-template";
-import { rateLimit } from "@/lib/rate-limit";
+import { rateLimit, getRealIp } from "@/lib/rate-limit";
+import { logAuditEvent }         from "@/lib/audit/log-audit-event";
 import { parsePositiveInt, parseNonNegativeInt, parseEnum, firstError } from "@/lib/validate";
 import { sendEmail, contractSigningEmail } from "@/lib/email";
 import { parsePropertyAddress } from "@/lib/format-address";
@@ -424,6 +425,18 @@ export async function POST(request: Request) {
       });
 
       return newContract;
+    });
+
+    // ── Audit log: contract created ───────────────────────────────────────────
+    // Awaited inline — fast single INSERT, never throws (errors caught inside helper).
+    await logAuditEvent({
+      userId:     userId,
+      action:     "contract.created",
+      entityType: "contract",
+      entityId:   contract.id,
+      metadata:   { contractType, dealType: validatedDealType, language },
+      ip:         getRealIp(request),
+      userAgent:  request.headers.get("user-agent"),
     });
 
     // Send signing-link SMS — awaited so Vercel doesn't kill the promise on response return.
