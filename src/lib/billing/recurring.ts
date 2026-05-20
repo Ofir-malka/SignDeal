@@ -302,20 +302,51 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
     // ── Pre-create PENDING BillingCharge ───────────────────────────────────
     // Created before the HYP call so a crash between the call and the DB
     // update still leaves an audit record.
-    const charge = await prisma.billingCharge.create({
-      data: {
-        subscriptionId: sub.id,
-        userId:         sub.userId,
-        status:         "PENDING",
-        amountAgorot,
-        plan:           sub.plan,
-        interval:       sub.billingInterval,
-        periodStart,
-        periodEnd,
-        attemptNumber:  sub.billingFailures + 1,
-      },
-      select: { id: true },
-    });
+    //
+    // P2002 guard: the @@unique([subscriptionId, periodStart]) constraint
+    // (added in Phase E) provides a DB-level idempotency guarantee in addition
+    // to the findFirst check above. If a concurrent cron invocation already
+    // created a row for this (subscriptionId, periodStart) pair and the
+    // findFirst check raced past it, the INSERT will fail with P2002.
+    // Treat P2002 identically to the findFirst skip — safe, idempotent.
+    let charge: { id: string };
+    try {
+      charge = await prisma.billingCharge.create({
+        data: {
+          subscriptionId: sub.id,
+          userId:         sub.userId,
+          status:         "PENDING",
+          amountAgorot,
+          plan:           sub.plan,
+          interval:       sub.billingInterval,
+          periodStart,
+          periodEnd,
+          attemptNumber:  sub.billingFailures + 1,
+        },
+        select: { id: true },
+      });
+    } catch (createErr: unknown) {
+      // P2002 = unique constraint violation → concurrent cron won the race.
+      const isUniqueViolation =
+        typeof createErr === "object" &&
+        createErr !== null &&
+        "code" in createErr &&
+        (createErr as { code: unknown }).code === "P2002";
+
+      if (isUniqueViolation) {
+        console.log(
+          `[billing/recurring] IDEMPOTENCY_SKIP_P2002` +
+          ` subscriptionId=${sub.id}` +
+          ` periodStart=${periodStart.toISOString()}` +
+          ` — unique constraint blocked duplicate charge row (concurrent cron invocation)`,
+        );
+        skipped++;
+        continue;
+      }
+
+      // Any other create error — propagate so the outer try/catch logs it.
+      throw createErr;
+    }
 
     const planLabel     = PLAN_LABELS[planKey];
     const intervalLabel = sub.billingInterval === "YEARLY" ? "שנתי" : "חודשי";

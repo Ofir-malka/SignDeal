@@ -7,6 +7,14 @@
     {
       "path":     "/api/admin/trials/process",
       "schedule": "0 7 * * *"
+    },
+    {
+      "path":     "/api/cron/subscriptions/expire",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path":     "/api/cron/billing/watchdog",
+      "schedule": "0 10 * * *"
     }
   ]
 }

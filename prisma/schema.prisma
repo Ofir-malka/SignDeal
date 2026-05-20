@@ -532,6 +532,8 @@ enum MessageType {
   USER_PASSWORD_RESET         // אימייל איפוס סיסמה
   CLIENT_CONTRACT_SIGNED_PDF  // אימייל ללקוח: החוזה החתום + PDF מצורף
   SUBSCRIPTION_PAYMENT_FAILED // התראה למתווך: תשלום מנוי נכשל
+  TRIAL_EXPIRED               // התראה למתווך: תקופת הניסיון הסתיימה ללא אמצעי תשלום
+  SUBSCRIPTION_SUSPENDED      // התראה למתווך: המנוי הושהה לאחר כישלונות חיוב מרובים
 }
 
 // ── MessageTemplate ────────────────────────────────────────────────────────────
@@ -595,6 +597,9 @@ model Message {
   // Timestamps
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([status])     // Phase E: watchdog + admin queries for PENDING/FAILED messages
+  @@index([createdAt])  // Phase E: time-based watchdog queries ("PENDING older than 1h")
 }
 
 // ── Subscription ───────────────────────────────────────────────────────────────
@@ -684,9 +689,10 @@ model Subscription {
   events  SubscriptionEvent[]
   charges BillingCharge[]      // Phase 3B: one row per charge attempt
 
-  @@index([status])           // fast queries: "all TRIALING users", "all INCOMPLETE users"
-  @@index([trialEndsAt])      // fast queries: "trials expiring soon"
-  @@index([nextBillingAt])    // Phase 3: billing cron cursor — "charge due now"
+  @@index([status])                    // fast queries: "all TRIALING users", "all INCOMPLETE users"
+  @@index([trialEndsAt])               // fast queries: "trials expiring soon"
+  @@index([nextBillingAt])             // Phase 3: billing cron cursor — "charge due now"
+  @@index([status, nextBillingAt])     // Phase E: compound index for billing cron WHERE status IN (...) AND nextBillingAt <= now
 }
 
 // ── SubscriptionEvent ──────────────────────────────────────────────────────────
@@ -853,6 +859,7 @@ model BillingCharge {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
+  @@unique([subscriptionId, periodStart])  // Phase E: DB-level idempotency — one charge row per subscription per billing period start
   @@index([subscriptionId])  // look up all charges for a subscription
   @@index([userId])          // look up all charges for a user
   @@index([status])          // "all FAILED charges", "all PENDING charges"

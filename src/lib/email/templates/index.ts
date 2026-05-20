@@ -6,6 +6,8 @@ export { paymentRequestEmail }        from "./payment-request";
 export { paymentReceivedEmail }       from "./payment-received";
 export { paymentFailedEmail }         from "./payment-failed";
 export { trialEndingEmail }           from "./trial-ending";
+export { trialExpiredEmail }          from "./trial-expired";
+export { subscriptionSuspendedEmail } from "./subscription-suspended";
 export { passwordResetEmail }         from "./password-reset";
 
 export type { WelcomeEmailData }                  from "./welcome";
@@ -16,4 +18,6 @@ export type { PaymentRequestEmailData }           from "./payment-request";
 export type { PaymentReceivedEmailData }          from "./payment-received";
 export type { PaymentFailedEmailData }            from "./payment-failed";
 export type { TrialEndingEmailData }              from "./trial-ending";
+export type { TrialExpiredEmailData }             from "./trial-expired";
+export type { SubscriptionSuspendedEmailData }    from "./subscription-suspended";
 export type { PasswordResetEmailData }            from "./password-reset";
