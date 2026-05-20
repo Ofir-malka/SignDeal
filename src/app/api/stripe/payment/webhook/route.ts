@@ -60,12 +60,14 @@
  * ⚠ Do NOT mix HYP billing events here — HYP uses /api/billing/hyp-notify.
  */
 
-import { NextResponse }                 from "next/server";
+import { NextResponse, after }           from "next/server";
 import type Stripe                       from "stripe";
 import * as Sentry                       from "@sentry/nextjs";
 import { getStripeClient, getStripeConfig } from "@/lib/stripe";
 import { prisma }                        from "@/lib/prisma";
 import { logAuditEvent }                 from "@/lib/audit/log-audit-event";
+import { sendEmail, paymentReceivedEmail } from "@/lib/email";
+import { parsePropertyAddress }          from "@/lib/format-address";
 
 export async function POST(request: Request): Promise<NextResponse> {
   // ── 1. Read raw body FIRST — required for HMAC verification ─────────────────
@@ -338,6 +340,14 @@ async function handleCheckoutSessionCompleted(
     },
   });
 
+  // ── Email broker: payment received — deferred via after() ───────────────────
+  // Runs after the 200 is returned to Stripe. Never delays webhook response.
+  // sendBrokerPaidEmail never throws — errors are swallowed so the webhook
+  // always returns 200 regardless of email delivery outcome.
+  after(async () => {
+    await sendBrokerPaidEmail(payment.contractId, payment.id, paidAt);
+  });
+
   console.log(
     `[handleCheckoutSessionCompleted] ✓ payment=${payment.id} → PAID` +
     ` piId=${piId ?? "n/a"}` +
@@ -488,6 +498,114 @@ async function handleTransferReversed(transfer: Stripe.Transfer): Promise<void> 
     `[handleTransferReversed] ✓ payment=${payment.id} → transferStatus=reversed` +
     ` transfer=${transfer.id}`,
   );
+}
+
+// ── Helper: email broker on Stripe payment received (never throws) ────────────
+// Mirrors the pattern in /api/payments/webhook (Rapyd) exactly.
+// Deferred via after() by the caller — runs after 200 is returned to Stripe.
+// Skipped silently when broker has no email.
+// TODO(queue): Replace with a durable job queue once retry-on-failure is needed.
+
+async function sendBrokerPaidEmail(
+  contractId: string,
+  paymentId:  string,
+  paidAt:     Date,
+): Promise<void> {
+  try {
+    const contract = await prisma.contract.findUnique({
+      where:   { id: contractId },
+      include: { client: true, user: true, payment: true },
+    });
+
+    if (!contract) {
+      console.warn(`[sendBrokerPaidEmail] contract ${contractId} not found — email skipped`);
+      return;
+    }
+
+    const brokerEmail = contract.user.email?.trim() ?? "";
+    if (!brokerEmail) {
+      console.log(`[sendBrokerPaidEmail] broker for contract ${contractId} has no email — skipped`);
+      return;
+    }
+
+    // grossAmount and commission are both stored in agorot; divide by 100 for NIS.
+    const amountAgorot = contract.payment?.grossAmount ?? contract.commission;
+    const amountNis    = Math.round(amountAgorot / 100);
+
+    const baseUrl      = process.env.APP_BASE_URL?.trim() || "http://localhost:3000";
+    const dashboardUrl = `${baseUrl}/contracts/${contractId}`;
+
+    const receivedAtFormatted = paidAt.toLocaleDateString("he-IL", {
+      day: "numeric", month: "long", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
+
+    const template = paymentReceivedEmail({
+      brokerName:      contract.user.fullName,
+      clientName:      contract.client.name,
+      propertyAddress: parsePropertyAddress(contract.propertyAddress).address,
+      amountNis,
+      contractId,
+      receivedAt:      receivedAtFormatted,
+      dashboardUrl,
+    });
+
+    // Create PENDING record before network call so a crash mid-flight
+    // still leaves an auditable record.
+    const message = await prisma.message.create({
+      data: {
+        type:           "BROKER_PAYMENT_RECEIVED",
+        channel:        "EMAIL",
+        provider:       "resend",
+        subject:        template.subject,
+        body:           template.text,
+        contractId,
+        clientId:       contract.clientId,
+        paymentId,
+        userId:         contract.userId,
+        recipientEmail: brokerEmail,
+        status:         "PENDING",
+        attempts:       0,
+      },
+    });
+
+    const result = await sendEmail({
+      to:        brokerEmail,
+      ...template,
+      emailType: "payment_received",
+    });
+
+    await prisma.message.update({
+      where: { id: message.id },
+      data: result.ok
+        ? {
+            status:            "SENT",
+            providerMessageId: result.messageId ?? null,
+            attempts:          1,
+            lastAttemptAt:     new Date(),
+          }
+        : {
+            status:        "FAILED",
+            failureReason: result.reason,
+            attempts:      1,
+            lastAttemptAt: new Date(),
+          },
+    });
+
+    if (!result.ok) {
+      console.error(
+        `[sendBrokerPaidEmail] email failed for contract ${contractId}: ${result.reason}`,
+      );
+    } else {
+      console.log(
+        `[sendBrokerPaidEmail] sent to broker — messageId=${result.messageId ?? "n/a"}` +
+        ` contractId=${contractId}`,
+      );
+    }
+  } catch (err) {
+    // Must never propagate — payment is already recorded as PAID.
+    console.error("[sendBrokerPaidEmail] unexpected error:", err);
+  }
 }
 
 /**
