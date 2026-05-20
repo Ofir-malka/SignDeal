@@ -73,22 +73,17 @@ export async function GET(request: Request): Promise<NextResponse> {
     return adminResult;
   }
 
-  // ── Fire the Sentry test event ────────────────────────────────────────────
-  Sentry.captureMessage("Sentry production test from SignDeal", {
-    level: "info",
-    tags: {
-      component:    "monitoring_test",
-      environment:  process.env.SENTRY_ENVIRONMENT ?? process.env.NODE_ENV ?? "unknown",
-      triggered_by: isAdmin ? "admin_session" : "cron_secret",
-    },
-  });
+  // ── Fire Sentry test events ───────────────────────────────────────────────
+  Sentry.captureMessage("Manual monitoring test from production", "info");
 
-  return NextResponse.json({
-    ok:             true,
-    sent:           true,
-    // Safe debug booleans — help confirm env var + param presence without
-    // exposing any secret values.
-    hasCronSecret,
-    receivedSecret,
-  });
+  Sentry.captureException(
+    new Error("Manual Sentry test error from production"),
+  );
+
+  // Flush ensures both events are delivered before the serverless function
+  // returns. Without this, the function may be frozen before the SDK has
+  // sent the buffered events to Sentry's ingest endpoint.
+  await Sentry.flush(2000);
+
+  return NextResponse.json({ ok: true, sent: true });
 }
