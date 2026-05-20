@@ -2,6 +2,7 @@ import { NextResponse }   from "next/server";
 import { prisma }         from "@/lib/prisma";
 import { requireUserId }  from "@/lib/require-user";
 import { requireAdmin }   from "@/lib/require-admin";
+import { logAuditEvent }  from "@/lib/audit/log-audit-event";
 
 // ── GET /api/contract-templates ───────────────────────────────────────────────
 // Returns active templates for the broker's template picker.
@@ -33,6 +34,7 @@ export async function POST(request: Request) {
   try {
     const result = await requireAdmin();
     if (result instanceof NextResponse) return result;
+    const { adminId } = result;
 
     const body = await request.json();
     const { title, content, templateKey, language } = body;
@@ -56,6 +58,21 @@ export async function POST(request: Request) {
         content:  content.trim(),
         language: resolvedLang,
         ...(resolvedKey ? { templateKey: resolvedKey } : {}),
+      },
+    });
+
+    // ── Audit: template created ───────────────────────────────────────────────
+    // content is intentionally excluded from metadata.
+    await logAuditEvent({
+      userId:     adminId,
+      action:     "admin.template.created",
+      entityType: "contractTemplate",
+      entityId:   template.id,
+      metadata:   {
+        title:       template.title,
+        templateKey: template.templateKey ?? null,
+        language:    template.language,
+        isActive:    template.isActive,
       },
     });
 

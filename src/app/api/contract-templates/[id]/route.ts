@@ -2,6 +2,7 @@ import { NextResponse }  from "next/server";
 import { prisma }        from "@/lib/prisma";
 import { requireUserId } from "@/lib/require-user";
 import { requireAdmin }  from "@/lib/require-admin";
+import { logAuditEvent } from "@/lib/audit/log-audit-event";
 
 // ── GET /api/contract-templates/[id] ─────────────────────────────────────────
 // Returns the full template including content (for editing / preview).
@@ -41,6 +42,7 @@ export async function PATCH(
   try {
     const result = await requireAdmin();
     if (result instanceof NextResponse) return result;
+    const { adminId } = result;
 
     const { id } = await params;
     const body = await request.json();
@@ -66,6 +68,21 @@ export async function PATCH(
       },
     });
 
+    // ── Audit: template updated ───────────────────────────────────────────────
+    // content is intentionally excluded from metadata.
+    await logAuditEvent({
+      userId:     adminId,
+      action:     "admin.template.updated",
+      entityType: "contractTemplate",
+      entityId:   updated.id,
+      metadata:   {
+        title:       updated.title,
+        templateKey: updated.templateKey ?? null,
+        language:    updated.language,
+        isActive:    updated.isActive,
+      },
+    });
+
     return NextResponse.json(updated);
   } catch (error) {
     console.error("[PATCH /api/contract-templates/:id]", error);
@@ -85,6 +102,7 @@ export async function DELETE(
   try {
     const result = await requireAdmin();
     if (result instanceof NextResponse) return result;
+    const { adminId } = result;
 
     const { id } = await params;
     const existing = await prisma.contractTemplate.findFirst({
@@ -98,6 +116,20 @@ export async function DELETE(
     await prisma.contractTemplate.update({
       where: { id },
       data:  { isActive: false },
+    });
+
+    // ── Audit: template deleted ───────────────────────────────────────────────
+    // existing is the pre-delete snapshot — content is intentionally excluded.
+    await logAuditEvent({
+      userId:     adminId,
+      action:     "admin.template.deleted",
+      entityType: "contractTemplate",
+      entityId:   id,
+      metadata:   {
+        title:       existing.title,
+        templateKey: existing.templateKey ?? null,
+        language:    existing.language,
+      },
     });
 
     return new NextResponse(null, { status: 204 });
