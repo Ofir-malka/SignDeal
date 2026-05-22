@@ -1878,6 +1878,22 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
           </div>
         </Section>
 
+        {/* ── [DEBUG] Client resolution panel ─────────────────────────────────
+            Shows the exact client data that WILL be sent on submit.
+            TEMPORARY — remove after the stale-client bug is confirmed fixed.   */}
+        <div className="border border-amber-300 bg-amber-50 rounded-xl p-4 text-xs font-mono space-y-1" dir="ltr">
+          <p className="font-bold text-amber-800 mb-2">[DEBUG] Client payload preview (remove after fix verified)</p>
+          <p><span className="text-gray-500">existingClientDbId:</span> <span className={selectedClientId ? "text-red-600 font-bold" : "text-green-700"}>{selectedClientId ?? "(none — new client will be created)"}</span></p>
+          <p><span className="text-gray-500">clientName:</span> {form.clientName || "(empty)"}</p>
+          <p><span className="text-gray-500">clientPhone:</span> {form.clientPhone || "(empty)"}</p>
+          <p><span className="text-gray-500">clientEmail:</span> {form.skipEmailId ? "(skipped)" : form.clientEmail || "(empty)"}</p>
+          <p><span className="text-gray-500">clientIdNumber:</span> {form.skipEmailId ? "(skipped)" : form.clientIdNumber || "(empty)"}</p>
+          <p><span className="text-gray-500">skipEmailId:</span> {String(form.skipEmailId)}</p>
+          {selectedClientId && (
+            <p className="text-red-700 font-bold mt-2">⚠ existingClientDbId is SET — contract will link to the SELECTED client, not what you typed above</p>
+          )}
+        </div>
+
         {/* Error banner */}
         {stage.name === "error" && (
           <div className="flex items-start gap-3 px-4 py-3.5 bg-red-50 border border-red-200 rounded-xl text-red-700">

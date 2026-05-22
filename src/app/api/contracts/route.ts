@@ -315,12 +315,23 @@ export async function POST(request: Request) {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-    // Use existing client record if broker selected one, otherwise find-or-create by phone
+    // ── Client resolution ─────────────────────────────────────────────────────
+    // Two paths:
+    //   A. existingClientDbId provided → broker explicitly selected a known client
+    //      from the picker; use that record exactly (ownership-checked).
+    //   B. No existingClientDbId → broker typed the client manually; ALWAYS create
+    //      a new Client record from the form body.
+    //
+    // ⚠ IMPORTANT: path B used to do findFirst({ phone }) (find-or-create).
+    // That caused a critical identity bug: if "אופיר מלכה" existed in the DB
+    // with the same phone the broker typed for "גפן בראון", the server silently
+    // linked the new contract to "אופיר מלכה" and the generated document showed
+    // the wrong name/phone/idNumber.  Since Client.phone has no unique constraint,
+    // always-create is safe and is now the only correct behaviour for path B.
     let client;
     if (existingClientDbId) {
-      // Ownership check: broker may only link their own clients.
-      // Using findFirst with both id and userId prevents IDOR — another broker's
-      // client ID returns 404 rather than leaking cross-account client data.
+      // Path A — ownership check: broker may only link their own clients.
+      // findFirst with both id and userId prevents IDOR.
       const found = await prisma.client.findFirst({
         where: { id: existingClientDbId, userId },
       });
@@ -329,24 +340,23 @@ export async function POST(request: Request) {
       }
       client = found;
     } else {
-      client = await prisma.client.findFirst({ where: { phone: clientPhone, userId: user.id } });
-      if (!client) {
-        client = await prisma.client.create({
-          data: {
-            name:     clientName,
-            phone:    clientPhone,
-            // email/idNumber are non-nullable String in schema — use "" not null
-            email:    clientEmail?.trim() || "",
-            idNumber: clientIdNumber?.trim() || "",
-            // Use Prisma relation connect instead of scalar userId to satisfy v7 validation
-            user: { connect: { id: user.id } },
-          },
-        });
-      }
+      // Path B — always create; never deduplicate by phone.
+      client = await prisma.client.create({
+        data: {
+          name:     clientName,
+          phone:    clientPhone,
+          // email/idNumber are non-nullable String in schema — use "" not null
+          email:    clientEmail?.trim()    || "",
+          idNumber: clientIdNumber?.trim() || "",
+          // Use Prisma relation connect instead of scalar userId to satisfy v7 validation
+          user: { connect: { id: user.id } },
+        },
+      });
     }
 
     // ── [DEBUG] Log resolved client — remove after bug is confirmed fixed ───────
     console.log("[POST /api/contracts][resolved client]", {
+      path:                   existingClientDbId ? "A-existing" : "B-created",
       bodyExistingClientDbId: existingClientDbId ?? "(none)",
       bodyClientName:         clientName,
       bodyClientPhone:        clientPhone,
