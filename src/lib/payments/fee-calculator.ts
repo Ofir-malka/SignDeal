@@ -2,75 +2,249 @@
  * fee-calculator.ts
  *
  * Pure fee-calculation logic — no DB, no HTTP, no side-effects.
- * Consumed by the payment-request route and future webhook handler.
+ * Consumed by the payment-request route and tests.
  *
- * Three fee modes (mapped directly to the FeePaidBy Prisma enum):
+ * ── Modes ─────────────────────────────────────────────────────────────────────
  *
- *   BROKER  — broker absorbs all fees; customer pays base commission only
- *     grossAmount = amount
- *     netAmount   = amount − processorFee − platformFee
+ *   BREAK_EVEN_SPLIT  (FEE_MODE=BREAK_EVEN_SPLIT)  ← production mode
+ *     SignDeal earns 0 profit on payment processing.
+ *     The actual Stripe cost stack is modelled exactly:
+ *       totalProcessingCost = percentageFee + stripeFixedFee + payoutFee
+ *       clientShare = ceil(totalProcessingCost / 2)   ← never under-collects
+ *       brokerShare = totalProcessingCost − clientShare
+ *       grossAmount = commission + clientShare
+ *       netAmount   = commission − brokerShare
+ *       applicationFeeAmount = totalProcessingCost
+ *     Invariant: netAmount + applicationFeeAmount = grossAmount (always)
  *
- *   CLIENT  — customer pays all fees on top; broker receives full commission
- *     grossAmount = amount + processorFee + platformFee
- *     netAmount   = amount
+ *   Legacy modes (BROKER | CLIENT | SPLIT) — preserved for backward compatibility.
+ *     These retain the old behaviour where applicationFeeAmount = platformFee.
+ *     They are NOT recommended for production use with Stripe Connect because
+ *     processorFee is not included in application_fee_amount, causing the
+ *     platform to absorb Stripe's processing costs from its own balance.
+ *     See architecture notes in the codebase for the full explanation.
  *
- *   SPLIT   — hybrid (platform default): customer pays processorFee, broker absorbs platformFee
- *     grossAmount = amount + processorFee
- *     netAmount   = amount − platformFee
+ *     BROKER  — broker absorbs all fees; customer pays base commission only
+ *       grossAmount = commission
+ *       netAmount   = commission − processorFee − platformFee
  *
- * Example (SPLIT, amount=1,000,000 agorot = ₪10,000, processorFee=1.4%, platformFee=2%, minPlatformFee=500):
- *   processorFee → 14,000   grossAmount → 1,014,000
- *   platformFee  → max(20,000, 500) = 20,000   netAmount → 980,000
+ *     CLIENT  — customer pays all fees on top; broker receives full commission
+ *       grossAmount = commission + processorFee + platformFee
+ *       netAmount   = commission
  *
- * Example (SPLIT, amount=20,000 agorot = ₪200, processorFee=1.4%, platformFee=2%, minPlatformFee=500):
- *   rawPlatformFee = 400 agorot (₪4) — below minimum
- *   platformFee    → max(400, 500) = 500 agorot (₪5 minimum applied)
- *   processorFee   → 280   grossAmount → 20,280
- *   netAmount      → 19,500
+ *     SPLIT   — hybrid: customer pays processorFee, broker absorbs platformFee
+ *       grossAmount = commission + processorFee
+ *       netAmount   = commission − platformFee
  *
- * .env keys (all optional; defaults shown):
- *   FEE_MODE=SPLIT                  # BROKER | CLIENT | SPLIT
- *   PROVIDER_FEE_PERCENT=1.4        # payment processor's cut (e.g. Stripe ILS rate)
- *   PLATFORM_FEE_PERCENT=2          # SignDeal platform cut
- *   MINIMUM_PLATFORM_FEE=500        # floor in agorot (₪5 = 500); 0 = no floor
+ * ── Env vars ──────────────────────────────────────────────────────────────────
+ *
+ *   FEE_MODE                    BREAK_EVEN_SPLIT | BROKER | CLIENT | SPLIT
+ *                               (default: SPLIT — safe for local dev)
+ *
+ *   BREAK_EVEN_SPLIT vars (all default to 0 — must be set explicitly in prod):
+ *   STRIPE_PROCESSING_PERCENT   Stripe base processing rate, e.g. "4.4"
+ *   STRIPE_FX_PERCENT           FX conversion surcharge, e.g. "1.0"
+ *   CONNECT_VOLUME_PERCENT      Connect platform volume fee, e.g. "0.25"
+ *   STRIPE_FIXED_FEE_AGOROT     Per-transaction fixed fee in agorot (≈$0.30)
+ *   PAYOUT_FIXED_FEE_AGOROT     Per-payout fixed fee in agorot (≈$0.25)
+ *
+ *   Legacy vars (used by BROKER | CLIENT | SPLIT; default to 0):
+ *   PROVIDER_FEE_PERCENT        Payment processor's cut, e.g. "1.4"
+ *   PLATFORM_FEE_PERCENT        SignDeal's cut, e.g. "2"
+ *   MINIMUM_PLATFORM_FEE        Floor in agorot, e.g. "500" for ₪5
  */
 
-// Mirrors the Prisma FeePaidBy enum values exactly — no translation needed.
-export type FeeMode = "BROKER" | "CLIENT" | "SPLIT";
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+// Mirrors the Prisma FeePaidBy enum exactly — no translation needed.
+export type FeeMode = "BROKER" | "CLIENT" | "SPLIT" | "BREAK_EVEN_SPLIT";
 
 export interface FeeConfig {
-  providerFeePercent:  number;  // 0–100, e.g. 1.4 means 1.4%
-  platformFeePercent:  number;  // 0–100, e.g. 2 means 2%
-  minimumPlatformFee:  number;  // floor in agorot; 0 = no floor
-  feeMode:             FeeMode;
+  feeMode: FeeMode;
+
+  // ── BREAK_EVEN_SPLIT config ───────────────────────────────────────────────
+  /** Stripe's base processing percentage for ILS/IL cards, e.g. 4.4 */
+  stripeProcessingPercent: number;
+  /** FX conversion surcharge percentage, e.g. 1.0 */
+  stripeFxPercent:         number;
+  /** Connect platform volume fee percentage, e.g. 0.25 */
+  connectVolumePercent:    number;
+  /** Stripe's fixed per-transaction fee in agorot (e.g. 111 ≈ $0.30 at ₪3.7/$1) */
+  stripeFixedFeeAgorot:    number;
+  /** Stripe's fixed per-payout fee in agorot (e.g. 93 ≈ $0.25 at ₪3.7/$1) */
+  payoutFixedFeeAgorot:    number;
+
+  // ── Legacy mode config (BROKER | CLIENT | SPLIT) ─────────────────────────
+  /** Legacy: Stripe percentage estimate used in old modes, e.g. 1.4 */
+  providerFeePercent:  number;
+  /** Legacy: SignDeal platform margin percentage, e.g. 2 */
+  platformFeePercent:  number;
+  /** Legacy: Minimum platform fee floor in agorot, e.g. 500 */
+  minimumPlatformFee:  number;
 }
 
 export interface FeeBreakdown {
-  // mirrors Payment model field names exactly — passes directly into prisma.payment.upsert
-  amount:             number;  // base commission, in agorot
-  processorFee:       number;  // payment-processor cut, in agorot
-  platformFee:        number;  // SignDeal platform cut (after minimum applied), in agorot
-  grossAmount:        number;  // total charged to customer, in agorot
-  netAmount:          number;  // broker net after fees, in agorot
-  feePaidBy:          FeeMode; // passes directly to Prisma as FeePaidBy
-  // config snapshot (stored for auditability)
+  // ── Core amounts (mirror Payment model field names exactly) ───────────────
+  /** Base commission amount, in agorot. */
+  amount:      number;
+  /**
+   * Total charged to the customer, in agorot.
+   * BREAK_EVEN_SPLIT: commission + clientProcessingShare
+   * Legacy modes: varies by mode
+   */
+  grossAmount: number;
+  /**
+   * Broker's net payout after fees, in agorot.
+   * BREAK_EVEN_SPLIT: commission − brokerProcessingShare
+   * Legacy modes: varies by mode
+   */
+  netAmount:   number;
+
+  // ── Fee components (stored on Payment row) ────────────────────────────────
+  /**
+   * Total processing cost, in agorot.
+   * BREAK_EVEN_SPLIT: totalProcessingCost (what Stripe actually costs)
+   * Legacy modes: the estimated processorFee only
+   */
+  processorFee:  number;
+  /**
+   * Platform profit margin, in agorot.
+   * BREAK_EVEN_SPLIT: always 0 (break-even, no platform profit)
+   * Legacy modes: calculated platform margin
+   */
+  platformFee:   number;
+  /** Fee mode used — maps directly to Prisma FeePaidBy enum. */
+  feePaidBy:     FeeMode;
+
+  // ── BREAK_EVEN_SPLIT detailed breakdown ───────────────────────────────────
+  /** Config snapshot: Stripe base processing %, e.g. 4.4 */
+  stripeProcessingPercent: number;
+  /** Config snapshot: FX conversion %, e.g. 1.0 */
+  stripeFxPercent:         number;
+  /** Config snapshot: Connect volume %, e.g. 0.25 */
+  connectVolumePercent:    number;
+  /** Config snapshot: fixed per-transaction fee in agorot */
+  stripeFixedFeeAgorot:    number;
+  /** Config snapshot: fixed per-payout fee in agorot */
+  payoutFixedFeeAgorot:    number;
+  /** percentageFee + stripeFixedFeeAgorot + payoutFixedFeeAgorot */
+  totalProcessingCost:     number;
+  /**
+   * Client's share of totalProcessingCost.
+   * = ceil(totalProcessingCost / 2) — always rounds up to avoid under-collection.
+   * BREAK_EVEN_SPLIT: equals half (rounded up); legacy modes: 0.
+   */
+  clientProcessingShare:   number;
+  /**
+   * Broker's share of totalProcessingCost.
+   * = totalProcessingCost − clientProcessingShare
+   * BREAK_EVEN_SPLIT: equals half (rounded down); legacy modes: 0.
+   */
+  brokerProcessingShare:   number;
+  /**
+   * SignDeal platform profit on this transaction.
+   * BREAK_EVEN_SPLIT: always 0.
+   * Legacy modes: equals platformFee.
+   */
+  platformProfitFee:       number;
+  /**
+   * The value to pass to Stripe's payment_intent_data.application_fee_amount.
+   * BREAK_EVEN_SPLIT: totalProcessingCost (covers both Stripe's cut and keeps broker honest)
+   * Legacy modes: platformFee (old behaviour — preserved for backward compat)
+   *
+   * Invariant (all modes): netAmount + applicationFeeAmount = grossAmount
+   */
+  applicationFeeAmount:    number;
+
+  // ── Config snapshot (stored for auditability) ─────────────────────────────
+  /** Legacy config snapshot. */
   providerFeePercent: number;
+  /** Legacy config snapshot. */
   platformFeePercent: number;
 }
 
+// ── calculateFees — public entry point ────────────────────────────────────────
+
 /**
- * Calculates a full fee breakdown.
- * All monetary values are in agorot (integer). Fractional agorot are rounded.
+ * Calculates a full fee breakdown for a given commission amount.
  *
- * The minimum platform fee floor is applied BEFORE the gross/net split so that
- * all downstream amounts (grossAmount, netAmount, application_fee_amount) are
- * consistent with the final platformFee value.
+ * All monetary values are in agorot (smallest ILS unit; 100 agorot = ₪1).
+ * All arithmetic uses integers — no floating-point accumulation.
+ *
+ * @param amount - Base commission in agorot (must be a positive integer)
+ * @param config - Fee configuration (from defaultFeeConfig() or test fixture)
+ * @returns FeeBreakdown with all amounts and the correct applicationFeeAmount
  */
 export function calculateFees(amount: number, config: FeeConfig): FeeBreakdown {
+  if (config.feeMode === "BREAK_EVEN_SPLIT") {
+    return calculateBreakEvenSplit(amount, config);
+  }
+  return calculateLegacyFees(amount, config);
+}
+
+// ── BREAK_EVEN_SPLIT calculation ──────────────────────────────────────────────
+
+function calculateBreakEvenSplit(amount: number, config: FeeConfig): FeeBreakdown {
+  // ── 1. Percentage-based processing cost ────────────────────────────────────
+  const totalPercent = config.stripeProcessingPercent
+    + config.stripeFxPercent
+    + config.connectVolumePercent;
+
+  const percentageFee = Math.round(amount * totalPercent / 100);
+
+  // ── 2. Fixed processing costs ──────────────────────────────────────────────
+  const fixedFee = config.stripeFixedFeeAgorot + config.payoutFixedFeeAgorot;
+
+  // ── 3. Total actual Stripe cost ────────────────────────────────────────────
+  const totalProcessingCost = percentageFee + fixedFee;
+
+  // ── 4. 50/50 split with ceiling rounding on client share ───────────────────
+  // ceil ensures the platform never under-collects by 1 agorot on odd totals.
+  const clientProcessingShare = Math.ceil(totalProcessingCost / 2);
+  const brokerProcessingShare = totalProcessingCost - clientProcessingShare;
+
+  // ── 5. Gross and net amounts ───────────────────────────────────────────────
+  const grossAmount = amount + clientProcessingShare;
+  const netAmount   = amount - brokerProcessingShare;
+
+  // ── 6. applicationFeeAmount covers the full Stripe cost ───────────────────
+  // Platform collects totalProcessingCost via application_fee_amount, pays
+  // Stripe from it, and retains nothing (break-even).
+  // Invariant: netAmount + applicationFeeAmount = grossAmount  ← always true
+  const applicationFeeAmount = totalProcessingCost;
+
+  return {
+    // Core amounts
+    amount,
+    grossAmount,
+    netAmount,
+    // Fee components stored on Payment row
+    processorFee:  totalProcessingCost,   // Stripe's full cost = "processor fee" in DB
+    platformFee:   0,                     // no platform profit
+    feePaidBy:     "BREAK_EVEN_SPLIT",
+    // BREAK_EVEN_SPLIT detailed breakdown
+    stripeProcessingPercent: config.stripeProcessingPercent,
+    stripeFxPercent:         config.stripeFxPercent,
+    connectVolumePercent:    config.connectVolumePercent,
+    stripeFixedFeeAgorot:    config.stripeFixedFeeAgorot,
+    payoutFixedFeeAgorot:    config.payoutFixedFeeAgorot,
+    totalProcessingCost,
+    clientProcessingShare,
+    brokerProcessingShare,
+    platformProfitFee: 0,
+    applicationFeeAmount,
+    // Legacy config snapshot (not used in this mode; zero for clarity)
+    providerFeePercent: 0,
+    platformFeePercent: 0,
+  };
+}
+
+// ── Legacy fee calculation (BROKER | CLIENT | SPLIT) ─────────────────────────
+
+function calculateLegacyFees(amount: number, config: FeeConfig): FeeBreakdown {
   const processorFee = Math.round(amount * config.providerFeePercent / 100);
 
-  // Apply minimum floor: platformFee is always at least minimumPlatformFee agorot.
-  // Math.max(0, ...) guards against negative values if percent or amount are 0.
+  // Apply minimum floor: platformFee is at least minimumPlatformFee agorot.
   const rawPlatformFee = Math.round(amount * config.platformFeePercent / 100);
   const platformFee    = Math.max(rawPlatformFee, config.minimumPlatformFee);
 
@@ -98,38 +272,79 @@ export function calculateFees(amount: number, config: FeeConfig): FeeBreakdown {
       break;
   }
 
+  // Legacy: applicationFeeAmount = platformFee only (old behaviour preserved).
+  // NOTE: this means the platform absorbs Stripe's processing cost on legacy modes.
+  // See architecture notes — this will be corrected when legacy modes are retired.
+  const applicationFeeAmount = platformFee;
+
   return {
+    // Core amounts
     amount,
-    processorFee,
-    platformFee,
     grossAmount,
     netAmount,
-    feePaidBy:          config.feeMode,
+    // Fee components
+    processorFee,
+    platformFee,
+    feePaidBy: config.feeMode as FeeMode,
+    // BREAK_EVEN_SPLIT fields — zeroed out for legacy modes
+    stripeProcessingPercent: 0,
+    stripeFxPercent:         0,
+    connectVolumePercent:    0,
+    stripeFixedFeeAgorot:    0,
+    payoutFixedFeeAgorot:    0,
+    totalProcessingCost:     processorFee,   // estimated Stripe cost only
+    clientProcessingShare:   0,
+    brokerProcessingShare:   0,
+    platformProfitFee:       platformFee,
+    applicationFeeAmount,
+    // Config snapshot
     providerFeePercent: config.providerFeePercent,
     platformFeePercent: config.platformFeePercent,
   };
 }
 
-const VALID_FEE_MODES = new Set<FeeMode>(["BROKER", "CLIENT", "SPLIT"]);
+// ── defaultFeeConfig — read from environment variables ────────────────────────
+
+const VALID_FEE_MODES = new Set<FeeMode>(["BROKER", "CLIENT", "SPLIT", "BREAK_EVEN_SPLIT"]);
 
 /**
- * Reads fee config from environment variables.
+ * Reads fee configuration from environment variables.
  *
- *   FEE_MODE                 BROKER | CLIENT | SPLIT  (default: SPLIT)
- *   PROVIDER_FEE_PERCENT     processor's cut, e.g. "1.4" for Stripe ILS (default: "0")
- *   PLATFORM_FEE_PERCENT     SignDeal's cut, e.g. "2" for 2%           (default: "0")
- *   MINIMUM_PLATFORM_FEE     floor in agorot, e.g. "500" for ₪5        (default: "0")
+ * All percentage and agorot values default to 0 — safe for local dev and CI
+ * (no money moved, no fees charged). Production values must be set explicitly
+ * in Vercel Environment Variables.
  *
- * All four must be set in Vercel Environment Variables to collect real revenue.
- * Defaults to 0% / no floor — safe for local dev and CI (no money moved).
+ * For BREAK_EVEN_SPLIT (production):
+ *   FEE_MODE=BREAK_EVEN_SPLIT
+ *   STRIPE_PROCESSING_PERCENT=4.4
+ *   STRIPE_FX_PERCENT=1.0
+ *   CONNECT_VOLUME_PERCENT=0.25
+ *   STRIPE_FIXED_FEE_AGOROT=111    # ≈$0.30 at current ILS/USD rate
+ *   PAYOUT_FIXED_FEE_AGOROT=93     # ≈$0.25 at current ILS/USD rate
+ *
+ * For testing/measurement (all fees zeroed):
+ *   FEE_MODE=SPLIT
+ *   PROVIDER_FEE_PERCENT=0
+ *   PLATFORM_FEE_PERCENT=0
+ *   MINIMUM_PLATFORM_FEE=0
  */
 export function defaultFeeConfig(): FeeConfig {
-  const raw = (process.env.FEE_MODE ?? "SPLIT").trim().toUpperCase();
+  const raw     = (process.env.FEE_MODE ?? "SPLIT").trim().toUpperCase();
+  const feeMode = VALID_FEE_MODES.has(raw as FeeMode) ? (raw as FeeMode) : "SPLIT";
 
   return {
-    providerFeePercent: parseFloat(process.env.PROVIDER_FEE_PERCENT  ?? "0") || 0,
-    platformFeePercent: parseFloat(process.env.PLATFORM_FEE_PERCENT  ?? "0") || 0,
-    minimumPlatformFee: parseInt  (process.env.MINIMUM_PLATFORM_FEE  ?? "0", 10) || 0,
-    feeMode:            VALID_FEE_MODES.has(raw as FeeMode) ? (raw as FeeMode) : "SPLIT",
+    feeMode,
+
+    // BREAK_EVEN_SPLIT vars
+    stripeProcessingPercent: parseFloat(process.env.STRIPE_PROCESSING_PERCENT ?? "0") || 0,
+    stripeFxPercent:         parseFloat(process.env.STRIPE_FX_PERCENT          ?? "0") || 0,
+    connectVolumePercent:    parseFloat(process.env.CONNECT_VOLUME_PERCENT      ?? "0") || 0,
+    stripeFixedFeeAgorot:    parseInt  (process.env.STRIPE_FIXED_FEE_AGOROT    ?? "0", 10) || 0,
+    payoutFixedFeeAgorot:    parseInt  (process.env.PAYOUT_FIXED_FEE_AGOROT    ?? "0", 10) || 0,
+
+    // Legacy vars
+    providerFeePercent: parseFloat(process.env.PROVIDER_FEE_PERCENT ?? "0") || 0,
+    platformFeePercent: parseFloat(process.env.PLATFORM_FEE_PERCENT ?? "0") || 0,
+    minimumPlatformFee: parseInt  (process.env.MINIMUM_PLATFORM_FEE ?? "0", 10) || 0,
   };
 }

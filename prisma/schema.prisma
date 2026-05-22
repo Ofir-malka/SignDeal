@@ -409,9 +409,10 @@ enum PaymentStatus {
 }
 
 enum FeePaidBy {
-  BROKER   // מתווך נושא בעלויות
-  CLIENT   // לקוח משלם עמלת נוחות
-  SPLIT    // חלוקה מותאמת אישית
+  BROKER           // מתווך נושא בעלויות
+  CLIENT           // לקוח משלם עמלת נוחות
+  SPLIT            // חלוקה מותאמת אישית
+  BREAK_EVEN_SPLIT // עלויות Stripe מחולקות 50/50 בין לקוח למתווך; SignDeal ללא רווח
 }
 
 // ── Stripe Connect enums ───────────────────────────────────────────────────────

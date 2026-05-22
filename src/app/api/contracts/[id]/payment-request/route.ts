@@ -404,7 +404,7 @@ async function handleStripePaymentRequest(
       feePaidBy:               fees.feePaidBy,
       providerFeePercent:      fees.providerFeePercent,
       platformFeePercent:      fees.platformFeePercent,
-      applicationFeeAmount:    fees.platformFee,
+      applicationFeeAmount:    fees.applicationFeeAmount,
     },
     update: {
       status:                  "PENDING",
@@ -422,7 +422,7 @@ async function handleStripePaymentRequest(
       feePaidBy:               fees.feePaidBy,
       providerFeePercent:      fees.providerFeePercent,
       platformFeePercent:      fees.platformFeePercent,
-      applicationFeeAmount:    fees.platformFee,
+      applicationFeeAmount:    fees.applicationFeeAmount,
     },
     select: { id: true },
   });
@@ -451,8 +451,10 @@ async function handleStripePaymentRequest(
         },
       ],
       payment_intent_data: {
-        // Platform's share (agorot).  0 is valid when PLATFORM_FEE_PERCENT=0.
-        application_fee_amount: fees.platformFee,
+        // applicationFeeAmount covers the full Stripe cost stack.
+        // BREAK_EVEN_SPLIT: = totalProcessingCost (processorFee + platformFee).
+        // Legacy modes:      = platformFee only (old behaviour; see fee-calculator.ts).
+        application_fee_amount: fees.applicationFeeAmount,
         // Destination charge — Stripe automatically transfers net to the broker's
         // Express account after the platform fee is deducted.
         transfer_data: {
