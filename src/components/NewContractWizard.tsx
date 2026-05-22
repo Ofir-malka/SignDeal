@@ -286,7 +286,21 @@ function Step2({ data, set }: { data: FormData; set: (d: Partial<FormData>) => v
   }, []);
 
   function switchMode(mode: ClientMode) {
-    set({ clientMode: mode, existingClientDbId: "" });
+    // Fix: clear ALL client fields on mode switch to prevent stale data from a
+    // previously-selected/entered client from leaking into the new selection.
+    // Before this fix, only existingClientDbId was cleared; leaving clientPhone
+    // populated caused the POST handler to findFirst({ phone }) and link the
+    // WRONG existing client record. Leaving clientEmail/clientId non-empty also
+    // caused needsClientInfo=false on the signing page, bypassing the completion gate.
+    set({
+      clientMode:         mode,
+      existingClientDbId: "",
+      clientName:         "",
+      clientPhone:        "",
+      clientEmail:        "",
+      clientId:           "",
+      clientMissingInfo:  false,
+    });
     if (mode === "select" && !fetched) loadClients();
   }
 
