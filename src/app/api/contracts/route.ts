@@ -373,7 +373,13 @@ export async function POST(request: Request) {
       if (tpl) {
         const ctx = buildContext({
           broker:   { fullName: user.fullName, licenseNumber: user.licenseNumber ?? null, phone: user.phone ?? null, idNumber: user.idNumber ?? null },
-          client:   { name: clientName, idNumber: clientIdNumber || "", phone: clientPhone, email: clientEmail || "" },
+          // ── Fix: use the resolved client DB record, NOT the raw form-body values.
+          // When existingClientDbId is provided the form body may contain stale or
+          // different data from a previous wizard session; the DB record is always
+          // canonical.  Using form-body values here was the root cause of the
+          // client/broker identity mixing bug (phone/idNumber mismatch between the
+          // client details card and the legal document).
+          client:   { name: client.name, idNumber: client.idNumber || "", phone: client.phone, email: client.email || "" },
           contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: validatedCommission, commissionSale: validatedCommissionSale, createdAt: new Date() },
         });
         generatedText      = resolveTemplate(tpl.content, ctx);

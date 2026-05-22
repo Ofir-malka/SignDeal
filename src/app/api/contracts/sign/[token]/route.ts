@@ -9,6 +9,7 @@ import { sendEmail, contractSignedEmail, contractSignedClientEmail } from "@/lib
 import { parsePropertyAddress } from "@/lib/format-address";
 import { generateContractPdf } from "@/lib/pdf/generate-contract-pdf";
 import { buildSignatureDigestInput, generateSignatureDigest } from "@/lib/contracts/signature-integrity";
+import { buildContext, resolveTemplate } from "@/lib/contracts/resolve-template";
 import { logAuditEvent } from "@/lib/audit/log-audit-event";
 
 // ── UUID format guard — reject obviously invalid tokens before hitting the DB ─
@@ -422,11 +423,14 @@ export async function PATCH(
 
     const contract = await prisma.contract.findUnique({
       where:   { signatureToken: token },
-      // client + user (broker) included so buildSignatureDigestInput() can read
-      // client.name and user.fullName without a second query before the update.
+      // client + user (broker) included so:
+      //   • buildSignatureDigestInput() can read client.name + user.fullName
+      //   • generatedText regeneration (Fix 2) can rebuild the template context
+      //     using the broker's full profile (licenseNumber / phone / idNumber)
+      //     without a second query.
       include: {
         client: true,
-        user:   { select: { fullName: true } },
+        user:   { select: { fullName: true, licenseNumber: true, phone: true, idNumber: true } },
       },
     });
 
@@ -458,11 +462,81 @@ export async function PATCH(
 
     const data: Record<string, unknown> = {};
 
-    // Client info fields
+    // ── Client info fields ────────────────────────────────────────────────────
+    // Updates go to the linked Client record.  When any client field changes we
+    // also re-resolve the generatedText snapshot so the legal document, the
+    // client detail card, and the PDF all show the same canonical client data.
+    //
+    // This fixes the stale-snapshot bug: previously a client who completed
+    // missing email/idNumber would see "—" in the signed document even though
+    // the client card showed the correct value.
     const clientData: Record<string, string> = {};
     if (clientEmail    !== undefined) clientData.email    = clientEmail;
     if (clientIdNumber !== undefined) clientData.idNumber = clientIdNumber;
-    if (Object.keys(clientData).length > 0) data.client = { update: clientData };
+
+    if (Object.keys(clientData).length > 0) {
+      data.client = { update: clientData };
+
+      // Re-resolve generatedText only when the contract was created from a
+      // template (templateId is set).  Contracts without a template use the
+      // hardcoded fallback layout which reads live client fields at render time
+      // and therefore never needs a snapshot update.
+      //
+      // This is intentionally non-fatal: a template load failure or render
+      // error must never block the client completion or signing flow.
+      if (contract.templateId) {
+        try {
+          const tpl = await prisma.contractTemplate.findUnique({
+            where:  { id: contract.templateId },
+            select: { content: true },
+          });
+
+          if (tpl) {
+            // Merge incoming PATCH values over the existing client record.
+            // clientData keys take precedence; the DB values fill the rest.
+            // This mirrors Prisma's own update semantics.
+            const mergedClient = {
+              name:     contract.client.name,
+              phone:    contract.client.phone,
+              email:    clientData.email    ?? contract.client.email,
+              idNumber: clientData.idNumber ?? contract.client.idNumber,
+            };
+
+            const ctx = buildContext({
+              broker: {
+                fullName:      contract.user.fullName,
+                licenseNumber: contract.user.licenseNumber ?? null,
+                phone:         contract.user.phone         ?? null,
+                idNumber:      contract.user.idNumber      ?? null,
+              },
+              // Client fields come exclusively from mergedClient — broker fields
+              // never fall back into client placeholders.
+              client: {
+                name:     mergedClient.name,
+                idNumber: mergedClient.idNumber || "",
+                phone:    mergedClient.phone,
+                email:    mergedClient.email    || "",
+              },
+              contract: {
+                id:              contract.id,
+                propertyAddress: contract.propertyAddress,
+                propertyCity:    contract.propertyCity,
+                propertyPrice:   contract.propertyPrice,
+                dealType:        contract.dealType,
+                commission:      contract.commission,
+                commissionSale:  contract.commissionSale ?? null,
+                createdAt:       contract.createdAt,
+              },
+            });
+
+            data.generatedText = resolveTemplate(tpl.content, ctx);
+          }
+        } catch (err) {
+          // Log for ops visibility but never propagate — signing must succeed.
+          console.error("[sign PATCH] generatedText regeneration failed:", err);
+        }
+      }
+    }
 
     // Signing
     if (signatureStatus === "SIGNED") {
