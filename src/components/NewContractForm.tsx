@@ -1071,6 +1071,19 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
   const [selectedPropertyId,   setSelectedPropertyId]   = useState<string | null>(null);
   const [selectedPropertyAddr, setSelectedPropertyAddr] = useState<string | null>(null);
 
+  // Fields that, when manually edited, mean the broker is typing a new client
+  // rather than using the one they picked from the picker.  Editing any of
+  // these while a client is already selected MUST clear selectedClientId so
+  // the POST payload does NOT send existingClientDbId for the old client.
+  //
+  // Without this, a broker who picks "אופיר מלכה" then types over the fields
+  // to create "גפן בראון" still sends existingClientDbId pointing to "אופיר מלכה",
+  // causing the contract to link to the wrong DB record and showing the wrong
+  // client name / phone / idNumber in the generated document and signing page.
+  const CLIENT_MANUAL_FIELDS = new Set<keyof FormState>([
+    "clientName", "clientPhone", "clientEmail", "clientIdNumber",
+  ]);
+
   const set = useCallback(<K extends keyof FormState>(key: K, value: FormState[K]) => {
     setForm((prev) => ({ ...prev, [key]: value }));
     setErrors((prev) => {
@@ -1078,6 +1091,17 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
       const next = { ...prev }; delete next[key]; return next;
     });
     setStage((s) => s.name === "error" ? { name: "idle" } : s);
+    // Root-cause fix: deselect the previously-picked client the instant the
+    // broker manually edits any client field.  useState setters are stable
+    // references so adding them to the deps array is unnecessary.
+    if (CLIENT_MANUAL_FIELDS.has(key)) {
+      if (process.env.NODE_ENV !== "production") {
+        console.debug(`[NewContractForm] manual edit of "${key}" — clearing selectedClientId`);
+      }
+      setSelectedClientId(null);
+      setSelectedClientName(null);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── Client selection handlers ─────────────────────────────────────────────
@@ -1285,6 +1309,16 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
       ...(selectedClientId   ? { existingClientDbId: selectedClientId }   : {}),
       ...(resolvedPropertyId ? { propertyId:         resolvedPropertyId } : {}),
     };
+    // ── [DEBUG] Log outgoing payload — remove after bug is confirmed fixed ─────
+    console.log("[NewContractForm][POST payload]", {
+      existingClientDbId: payload.existingClientDbId ?? "(none — new client)",
+      clientName:         payload.clientName,
+      clientPhone:        payload.clientPhone,
+      clientEmail:        payload.clientEmail    ? `${payload.clientEmail.slice(0,3)}***` : "(empty)",
+      clientIdNumber:     payload.clientIdNumber ? `${payload.clientIdNumber.slice(0,2)}***` : "(empty)",
+      skipEmailId:        form.skipEmailId,
+    });
+
     try {
       const res = await fetch("/api/contracts", {
         method: "POST", headers: { "Content-Type": "application/json" },

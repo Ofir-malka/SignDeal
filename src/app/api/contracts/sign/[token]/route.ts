@@ -51,6 +51,21 @@ export async function GET(
       }).catch((err) => console.error("[sign GET] OPENED transition failed:", err));
     }
 
+    // ── [DEBUG] Log signing page data — remove after bug is confirmed fixed ─────
+    console.log("[GET /api/contracts/sign/:token][contract client]", {
+      contractId:    contract.id,
+      contractClientId: contract.clientId,
+      clientName:    contract.client.name,
+      clientPhone:   contract.client.phone,
+      clientEmail:   contract.client.email ? `${contract.client.email.slice(0,3)}***` : "(empty)",
+      clientIdNumber: contract.client.idNumber ? `${contract.client.idNumber.slice(0,2)}***` : "(empty)",
+      needsClientInfo: !contract.client.email || !contract.client.idNumber,
+      hasGeneratedText: !!contract.generatedText,
+      generatedTextContainsClientName: contract.generatedText
+        ? contract.generatedText.includes(contract.client.name)
+        : null,
+    });
+
     // ── Return only fields required to render + sign the contract ─────────────
     // Deliberately omitted (audit/broker-private):
     //   signatureHash — tamper-detection only; client has no use for it
