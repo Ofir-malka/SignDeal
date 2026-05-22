@@ -1309,16 +1309,6 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
       ...(selectedClientId   ? { existingClientDbId: selectedClientId }   : {}),
       ...(resolvedPropertyId ? { propertyId:         resolvedPropertyId } : {}),
     };
-    // ── [DEBUG] Log outgoing payload — remove after bug is confirmed fixed ─────
-    console.log("[NewContractForm][POST payload]", {
-      existingClientDbId: payload.existingClientDbId ?? "(none — new client)",
-      clientName:         payload.clientName,
-      clientPhone:        payload.clientPhone,
-      clientEmail:        payload.clientEmail    ? `${payload.clientEmail.slice(0,3)}***` : "(empty)",
-      clientIdNumber:     payload.clientIdNumber ? `${payload.clientIdNumber.slice(0,2)}***` : "(empty)",
-      skipEmailId:        form.skipEmailId,
-    });
-
     try {
       const res = await fetch("/api/contracts", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -1877,22 +1867,6 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
             })}
           </div>
         </Section>
-
-        {/* ── [DEBUG] Client resolution panel ─────────────────────────────────
-            Shows the exact client data that WILL be sent on submit.
-            TEMPORARY — remove after the stale-client bug is confirmed fixed.   */}
-        <div className="border border-amber-300 bg-amber-50 rounded-xl p-4 text-xs font-mono space-y-1" dir="ltr">
-          <p className="font-bold text-amber-800 mb-2">[DEBUG] Client payload preview (remove after fix verified)</p>
-          <p><span className="text-gray-500">existingClientDbId:</span> <span className={selectedClientId ? "text-red-600 font-bold" : "text-green-700"}>{selectedClientId ?? "(none — new client will be created)"}</span></p>
-          <p><span className="text-gray-500">clientName:</span> {form.clientName || "(empty)"}</p>
-          <p><span className="text-gray-500">clientPhone:</span> {form.clientPhone || "(empty)"}</p>
-          <p><span className="text-gray-500">clientEmail:</span> {form.skipEmailId ? "(skipped)" : form.clientEmail || "(empty)"}</p>
-          <p><span className="text-gray-500">clientIdNumber:</span> {form.skipEmailId ? "(skipped)" : form.clientIdNumber || "(empty)"}</p>
-          <p><span className="text-gray-500">skipEmailId:</span> {String(form.skipEmailId)}</p>
-          {selectedClientId && (
-            <p className="text-red-700 font-bold mt-2">⚠ existingClientDbId is SET — contract will link to the SELECTED client, not what you typed above</p>
-          )}
-        </div>
 
         {/* Error banner */}
         {stage.name === "error" && (

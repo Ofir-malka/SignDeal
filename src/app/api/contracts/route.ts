@@ -354,22 +354,6 @@ export async function POST(request: Request) {
       });
     }
 
-    // ── [DEBUG] Log resolved client — remove after bug is confirmed fixed ───────
-    console.log("[POST /api/contracts][resolved client]", {
-      path:                   existingClientDbId ? "A-existing" : "B-created",
-      bodyExistingClientDbId: existingClientDbId ?? "(none)",
-      bodyClientName:         clientName,
-      bodyClientPhone:        clientPhone,
-      bodyClientEmail:        clientEmail ? `${String(clientEmail).slice(0,3)}***` : "(empty)",
-      bodyClientIdNumber:     clientIdNumber ? `${String(clientIdNumber).slice(0,2)}***` : "(empty)",
-      resolvedClientId:       client.id,
-      resolvedClientName:     client.name,
-      resolvedClientPhone:    client.phone,
-      resolvedClientEmail:    client.email ? `${client.email.slice(0,3)}***` : "(empty)",
-      resolvedClientIdNumber: client.idNumber ? `${client.idNumber.slice(0,2)}***` : "(empty)",
-      bodyMatchesResolved:    client.name === clientName && client.phone === clientPhone,
-    });
-
     // Auto-resolve template snapshot by contract type.
     // generatedText is frozen at creation time — subsequent edits to the template
     // never affect contracts that have already been sent.
