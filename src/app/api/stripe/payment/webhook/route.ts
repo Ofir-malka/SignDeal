@@ -13,11 +13,13 @@
  *                                   keeps the session open (user can retry). We mark
  *                                   FAILED per spec; the session expired event fires
  *                                   if the user never succeeds.
+ *   charge.refunded              → Payment = REFUNDED.  Stores refundedAt, refundAmount,
+ *                                   stripeRefundId, refundReason.  Contract stays PAID
+ *                                   (legal document remains signed and valid).
  *   transfer.created             → Payment.transferStatus = "paid".  Lookup via
  *                                   stripeTransferId (fast) or source_transaction
  *                                   charge → PaymentIntent (fallback, one API call).
- *   transfer.reversed            → Payment.transferStatus = "reversed".  Minimal
- *                                   flag — full accounting is Phase E.
+ *   transfer.reversed            → Payment.transferStatus = "reversed".
  *   All other event types        → logged and ignored (200 returned).
  *
  * ── How this differs from /api/stripe/connect/webhook ────────────────────────
@@ -51,10 +53,19 @@
  *   Events: checkout.session.completed
  *           checkout.session.expired
  *           payment_intent.payment_failed
+ *           charge.refunded
+ *           transfer.created
+ *           transfer.reversed
+ *
+ * ⚠ Verify all six events above are selected in the Stripe Dashboard.
+ *   Missing transfer.created / transfer.reversed → transferStatus never updates.
+ *   Missing charge.refunded → refunded payments stay PAID in DB forever.
  *
  * For local development with Stripe CLI:
  *   stripe listen --forward-to localhost:3000/api/stripe/payment/webhook \
- *     --events checkout.session.completed,checkout.session.expired,payment_intent.payment_failed
+ *     --events checkout.session.completed,checkout.session.expired,\
+ *              payment_intent.payment_failed,charge.refunded,\
+ *              transfer.created,transfer.reversed
  *
  * ⚠ Do NOT handle account.updated here — that belongs in /api/stripe/connect/webhook.
  * ⚠ Do NOT mix HYP billing events here — HYP uses /api/billing/hyp-notify.
@@ -172,6 +183,12 @@ export async function POST(request: Request): Promise<NextResponse> {
         await handlePaymentIntentFailed(
           stripe,
           event.data.object as Stripe.PaymentIntent,
+        );
+        break;
+
+      case "charge.refunded":
+        await handleChargeRefunded(
+          event.data.object as Stripe.Charge,
         );
         break;
 
@@ -392,8 +409,122 @@ async function handleCheckoutSessionExpired(
     data:  { status: "CANCELED" },
   });
 
+  await logAuditEvent({
+    userId:     null,
+    action:     "contract.payment.expired",
+    entityType: "payment",
+    entityId:   payment.id,
+    metadata:   {
+      provider:  "stripe",
+      sessionId,
+      eventType: "checkout.session.expired",
+    },
+  });
+
   console.log(
     `[handleCheckoutSessionExpired] payment=${payment.id} → CANCELED session=${sessionId}`,
+  );
+}
+
+/**
+ * charge.refunded  (Phase E)
+ *
+ * A Stripe Charge was refunded — either in full or partially.  For Phase 1 we
+ * treat any refund event as a full REFUNDED transition; partial refund support
+ * (PARTIALLY_REFUNDED status) is deferred to a future phase.
+ *
+ * Contract status is intentionally NOT changed.  The contract was legally signed
+ * and executed — the refund is a financial event, not a legal one.  The broker
+ * can see the REFUNDED badge in the dashboard.
+ *
+ * Lookup order:
+ *   1. By stripePaymentIntentId — the charge carries payment_intent; this is
+ *      the canonical field set by checkout.session.completed.
+ *   2. Not found → log warning and return.  May be a Rapyd / manual payment;
+ *      charge.refunded for non-Stripe payments never arrives here.
+ *
+ * Idempotency:
+ *   If Payment.status is already REFUNDED, skip silently (duplicate delivery).
+ *
+ * Refund ID:
+ *   Stripe attaches the list of Refund objects at charge.refunds.data.
+ *   We use the most recent refund's ID (index 0 in Stripe's desc order).
+ *   If the list is empty or not expanded, stripeRefundId is stored as null.
+ */
+async function handleChargeRefunded(charge: Stripe.Charge): Promise<void> {
+  // The charge object carries the PaymentIntent ID as a string field.
+  const piId = typeof charge.payment_intent === "string" ? charge.payment_intent : null;
+
+  if (!piId) {
+    console.log(
+      `[handleChargeRefunded] charge=${charge.id} has no payment_intent — ignored` +
+      ` (may be a Rapyd or manual payment charge)`,
+    );
+    return;
+  }
+
+  const payment = await prisma.payment.findFirst({
+    where:  { stripePaymentIntentId: piId },
+    select: { id: true, contractId: true, status: true },
+  });
+
+  if (!payment) {
+    console.log(
+      `[handleChargeRefunded] no Payment found for PI=${piId} charge=${charge.id} — ignored` +
+      ` (may be a test charge or non-brokerage payment)`,
+    );
+    return;
+  }
+
+  if (payment.status === "REFUNDED") {
+    console.log(
+      `[handleChargeRefunded] payment=${payment.id} already REFUNDED — idempotent skip`,
+    );
+    return;
+  }
+
+  // Stripe sends refunds as a paginated list on the charge object (desc order).
+  // charge.refunds.data[0] is the most recent refund.
+  const latestRefund  = (charge.refunds as Stripe.ApiList<Stripe.Refund> | undefined)?.data?.[0];
+  const stripeRefundId = latestRefund?.id ?? null;
+  const refundReason   = latestRefund?.reason ?? charge.refunds?.data?.[0]?.reason ?? null;
+
+  // charge.amount_refunded is the cumulative refunded amount in smallest currency unit.
+  const refundAmount = charge.amount_refunded ?? null;
+  const refundedAt   = new Date();
+
+  await prisma.payment.update({
+    where: { id: payment.id },
+    data:  {
+      status:        "REFUNDED",
+      refundedAt,
+      refundAmount:  refundAmount  ?? undefined,
+      stripeRefundId: stripeRefundId ?? undefined,
+      refundReason:  refundReason  ?? undefined,
+    },
+  });
+
+  await logAuditEvent({
+    userId:     null,   // system webhook — no broker session
+    action:     "contract.payment.refunded",
+    entityType: "payment",
+    entityId:   payment.id,
+    metadata:   {
+      provider:      "stripe",
+      contractId:    payment.contractId,
+      chargeId:      charge.id,
+      piId,
+      refundAmount,
+      refundReason,
+      stripeRefundId,
+    },
+  });
+
+  console.log(
+    `[handleChargeRefunded] ✓ payment=${payment.id} → REFUNDED` +
+    ` chargeId=${charge.id} piId=${piId}` +
+    ` refundAmount=${refundAmount ?? "n/a"}` +
+    ` refundId=${stripeRefundId ?? "n/a"}`,
   );
 }
 
@@ -464,6 +595,23 @@ async function handleTransferCreated(
     },
   });
 
+  await logAuditEvent({
+    userId:     null,
+    action:     "contract.payment.transfer_paid",
+    entityType: "payment",
+    entityId:   payment.id,
+    metadata:   {
+      provider:    "stripe",
+      transferId:  transfer.id,
+      amount:      transfer.amount,
+      currency:    transfer.currency,
+      destination: typeof transfer.destination === "string"
+        ? transfer.destination
+        : (transfer.destination as { id?: string } | null)?.id ?? null,
+      eventType:   "transfer.created",
+    },
+  });
+
   console.log(
     `[handleTransferCreated] ✓ payment=${payment.id} → transferStatus=paid` +
     ` transfer=${transfer.id}`,
@@ -492,6 +640,23 @@ async function handleTransferReversed(transfer: Stripe.Transfer): Promise<void> 
   await prisma.payment.update({
     where: { id: payment.id },
     data:  { transferStatus: "reversed" },
+  });
+
+  await logAuditEvent({
+    userId:     null,
+    action:     "contract.payment.transfer_reversed",
+    entityType: "payment",
+    entityId:   payment.id,
+    metadata:   {
+      provider:    "stripe",
+      transferId:  transfer.id,
+      amount:      transfer.amount,
+      currency:    transfer.currency,
+      destination: typeof transfer.destination === "string"
+        ? transfer.destination
+        : (transfer.destination as { id?: string } | null)?.id ?? null,
+      eventType:   "transfer.reversed",
+    },
   });
 
   console.log(
@@ -671,6 +836,20 @@ async function handlePaymentIntentFailed(
   await prisma.payment.update({
     where: { id: payment.id },
     data:  { status: "FAILED", stripePaymentIntentId: pi.id },
+  });
+
+  await logAuditEvent({
+    userId:     null,
+    action:     "contract.payment.failed",
+    entityType: "payment",
+    entityId:   payment.id,
+    metadata:   {
+      provider:      "stripe",
+      piId:          pi.id,
+      failureCode:   pi.last_payment_error?.code    ?? null,
+      failureReason: pi.last_payment_error?.message ?? null,
+      eventType:     "payment_intent.payment_failed",
+    },
   });
 
   console.log(

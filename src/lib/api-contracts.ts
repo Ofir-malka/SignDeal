@@ -69,6 +69,7 @@ const PAY_STATUS_MAP: Record<string, NonNullable<PaymentStatus>> = {
   PAID:     "שולם",
   FAILED:   "נכשל",
   CANCELED: "בוטל",
+  REFUNDED: "הוחזר",
 };
 
 // ─── Mapper ───────────────────────────────────────────────────────────────────

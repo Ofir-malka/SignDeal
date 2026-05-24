@@ -365,6 +365,22 @@ model Payment {
   payoutId        String?             // "po_..." — null until reconciled
   payoutEvent     StripePayoutEvent?  @relation(fields: [payoutId], references: [payoutId], onDelete: SetNull)
 
+  // ── Refund fields (Phase E — null for non-refunded payments) ──────────────
+  // Populated by the charge.refunded webhook handler.
+  //
+  // refundedAt    — wall-clock time the refund was processed (from Stripe event).
+  // refundAmount  — amount refunded in agorot.  For full refunds this equals
+  //                 grossAmount.  Stored even for full refunds so queries don't
+  //                 need to join on the charge.
+  // stripeRefundId — Stripe's Refund object ID ("re_...").  Null when the
+  //                  webhook fires before refund expansion is available.
+  // refundReason  — Stripe refund reason string: "duplicate" | "fraudulent" |
+  //                 "requested_by_customer" | null (when not set by the operator).
+  refundedAt     DateTime?  // null until charge.refunded fires
+  refundAmount   Int?       // agorot — null until refunded
+  stripeRefundId String?    // "re_..." — null when not yet available
+  refundReason   String?    // Stripe reason string or null
+
   createdAt         DateTime      @default(now())
   messages          Message[]
 
@@ -406,6 +422,7 @@ enum PaymentStatus {
   PAID      // שולם
   FAILED    // נכשל
   CANCELED  // בוטל
+  REFUNDED  // הוחזר — Stripe charge.refunded webhook processed
 }
 
 enum FeePaidBy {

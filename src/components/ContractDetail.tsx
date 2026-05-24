@@ -19,10 +19,11 @@ const SIG_STYLE: Record<SignatureStatus, { bg: string; text: string; dot: string
 };
 
 const PAY_STYLE: Record<NonNullable<PaymentStatus>, { bg: string; text: string; dot: string }> = {
-  "ממתין לתשלום": { bg: "bg-amber-50",  text: "text-amber-700",  dot: "bg-amber-500"  },
-  שולם:           { bg: "bg-indigo-50", text: "text-indigo-700", dot: "bg-indigo-500" },
-  נכשל:           { bg: "bg-red-50",    text: "text-red-700",    dot: "bg-red-500"    },
-  בוטל:           { bg: "bg-gray-100",  text: "text-gray-500",   dot: "bg-gray-400"   },
+  "ממתין לתשלום": { bg: "bg-amber-50",   text: "text-amber-700",   dot: "bg-amber-500"   },
+  שולם:           { bg: "bg-indigo-50",  text: "text-indigo-700",  dot: "bg-indigo-500"  },
+  נכשל:           { bg: "bg-red-50",     text: "text-red-700",     dot: "bg-red-500"     },
+  בוטל:           { bg: "bg-gray-100",   text: "text-gray-500",    dot: "bg-gray-400"    },
+  הוחזר:          { bg: "bg-orange-50",  text: "text-orange-700",  dot: "bg-orange-500"  },
 };
 
 function StatusBadge({

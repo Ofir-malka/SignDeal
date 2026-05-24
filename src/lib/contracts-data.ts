@@ -7,7 +7,7 @@ export type SignatureStatus =
   | "שולם"            // PAID
   | "פג תוקף"         // EXPIRED
   | "בוטל";           // CANCELED
-export type PaymentStatus  = "ממתין לתשלום" | "שולם" | "נכשל" | "בוטל" | null;
+export type PaymentStatus  = "ממתין לתשלום" | "שולם" | "נכשל" | "בוטל" | "הוחזר" | null;
 
 export interface Contract {
   // ── Table fields (ContractsList) ──────────────────────
