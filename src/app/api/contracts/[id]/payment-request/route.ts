@@ -23,10 +23,10 @@ export async function POST(
 
     const { id } = await params;
 
-    // Fetch broker early — needed for notification copy.
+    // Fetch broker early — fullName for notification copy; email for Stripe metadata.
     const user = await prisma.user.findUnique({
       where:  { id: userId },
-      select: { fullName: true },
+      select: { fullName: true, email: true },
     });
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
@@ -306,7 +306,7 @@ async function handleStripePaymentRequest(
     client: { id: string; name: string; phone: string; email: string };
   },
   userId:    string,
-  user:      { fullName: string },
+  user:      { fullName: string; email: string },
   ip:        string | null = null,
   userAgent: string | null = null,
 ): Promise<NextResponse> {
@@ -438,6 +438,25 @@ async function handleStripePaymentRequest(
 
   let session: Awaited<ReturnType<typeof stripe.checkout.sessions.create>>;
   try {
+    // Shared metadata applied to both the Checkout Session and the underlying
+    // PaymentIntent so every downstream event (webhook, dispute, refund) carries
+    // full reconciliation context.  All values must be strings (Stripe requirement).
+    // Keys ≤ 40 chars, values ≤ 500 chars, max 50 keys.
+    const stripeMetadata: Record<string, string> = {
+      contractId,
+      paymentId:            payment.id,
+      brokerId:             userId,
+      brokerEmail:          user.email,
+      connectedAccountId:   brokerAccount.stripeAccountId,
+      feeMode:              fees.feePaidBy,
+      grossAmount:          String(fees.grossAmount),
+      netAmount:            String(fees.netAmount),
+      applicationFeeAmount: String(fees.applicationFeeAmount),
+      processorFeeAmount:   String(fees.processorFee),
+      currency:             "ils",
+      environment:          process.env.VERCEL_ENV ?? process.env.NODE_ENV ?? "development",
+    };
+
     session = await stripe.checkout.sessions.create({
       mode: "payment",
       line_items: [
@@ -450,6 +469,9 @@ async function handleStripePaymentRequest(
           quantity: 1,
         },
       ],
+      // Session-level metadata — visible on the Checkout Session object and in the
+      // Stripe Dashboard; survives even if the PaymentIntent is detached.
+      metadata: stripeMetadata,
       payment_intent_data: {
         // applicationFeeAmount covers the full Stripe cost stack.
         // BREAK_EVEN_SPLIT: = totalProcessingCost (processorFee + platformFee).
@@ -460,6 +482,9 @@ async function handleStripePaymentRequest(
         transfer_data: {
           destination: brokerAccount.stripeAccountId,
         },
+        // PaymentIntent-level metadata — copied to every charge, dispute, and refund
+        // object so webhook handlers and Stripe Radar rules have full context.
+        metadata: stripeMetadata,
       },
       success_url: successUrl,
       cancel_url:  cancelUrl,
