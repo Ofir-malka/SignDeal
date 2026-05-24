@@ -1,223 +1,117 @@
-import Link from "next/link";
-import { AnimateIn } from "@/components/marketing/ui/AnimateIn";
-import { GlassCard }  from "@/components/marketing/ui/GlassCard";
-import { MockTilt }   from "@/components/marketing/ui/MockTilt";
+"use client";
+
+import { useRef }                     from "react";
+import Link                           from "next/link";
+import { AnimateIn }                  from "@/components/marketing/ui/AnimateIn";
+import { BackgroundGlowSystem }       from "@/components/marketing/hero/BackgroundGlowSystem";
+import { FloatingBadges }             from "@/components/marketing/hero/FloatingBadges";
+import { LivingLedger }               from "@/components/marketing/hero/LivingLedger";
+import { FeaturePills }               from "@/components/marketing/hero/FeaturePills";
+import { HeroCursorProvider }         from "@/components/marketing/hero/HeroCursorContext";
 
 /**
- * Hero section — public marketing homepage.
+ * HeroSection — public marketing homepage hero.
  *
- * Layout:
- *  • Mobile  : single column, centered text, mock below
- *  • Desktop : two columns (RTL — text on right, mock on left)
+ * Slim orchestrator: layout, text copy, CTA buttons, and entrance timing.
+ * All visual subsystems are in dedicated components under ./hero/:
+ *   BackgroundGlowSystem — grid, radial glows, network energy, vignette
+ *   FloatingBadges       — depth-field floating status chips (desktop)
+ *   LivingLedger         — 3D animated dashboard mock with live event feed
+ *   FeaturePills         — stats strip with liquid morph tooltips + flip counter
  *
- * Visual upgrades (Phase 6.5):
- *  • Grid texture overlay (pure CSS, no deps)
- *  • Layered radial glows for depth
- *  • DashboardMock wrapped in premium browser/app frame
- *  • Floating live-status chips around the mock (desktop only)
- *  • Stronger primary CTA with ring
- *  • Stats strip in contained pill with dividers
+ * ── Layout ────────────────────────────────────────────────────────────────────
+ * Mobile  : single column, centered text, LivingLedger below
+ * Desktop : two columns (RTL — text right, card left)
  *
- * Server component — AnimateIn (client) handles entrance animations.
- * Mock UI is decorative (aria-hidden) and uses the float keyframe
- * defined in globals.css.
+ * ── Phase 3 (Cinematic Polish) changes ───────────────────────────────────────
+ * • Background: deeper black-violet base for more cinematic contrast.
+ * • Cinematic vignette: radial edge-darkening focuses eye on the hero core.
+ * • Directional focus light: soft spot over headline + card zone.
+ * • Card column: slightly wider (460 px) + flex-[1.1] for more presence.
+ * • Gap tightened: gap-14 → gap-10 / gap-20 → gap-14 — card feels integrated.
+ * • Typography: tracking-[-0.025em] + leading-[1.04] for premium display weight.
+ * • Subheadline: lower opacity + generous line-height for breathing hierarchy.
+ * • Primary CTA: wider padding, no violet hover-glow (reduce noise).
+ * • Secondary CTA: intentional tonal difference from primary.
+ * • Trust copy: more restrained opacity (luxury understates).
  */
 
-// ─── Hero stat items ──────────────────────────────────────────────────────────
-
-const HERO_STATS = [
-  {
-    label: "3 דקות לחוזה",
-    /* subtle tick: rotates 8° then snaps back every 3.5 s */
-    iconAnim: "max-sm:animate-none animate-[hero-clock-tick_3.5s_ease-in-out_infinite]",
-    icon: (
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" strokeWidth="2.5"
-        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-      </svg>
-    ),
-  },
-  {
-    label: "חתימה ב-SMS",
-    /* gentle 2.5 s float nudge */
-    iconAnim: "max-sm:animate-none animate-[hero-sms-bounce_2.5s_ease-in-out_infinite]",
-    icon: (
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" strokeWidth="2.5"
-        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-      </svg>
-    ),
-  },
-  {
-    label: "תשלום מאובטח",
-    /* subtle lift + tilt every 4 s */
-    iconAnim: "max-sm:animate-none animate-[hero-card-tilt_4s_ease-in-out_infinite]",
-    icon: (
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" strokeWidth="2.5"
-        strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
-        <line x1="1" y1="10" x2="23" y2="10" />
-      </svg>
-    ),
-  },
-] as const;
-
-// ─── Floating live-status chips ───────────────────────────────────────────────
-
-const HERO_CHIPS = [
-  {
-    label: "לקוח חתם עכשיו",
-    dot:   "bg-violet-400",
-    color: "text-violet-300",
-    cls:   "-right-4 lg:-right-8 top-10",
-  },
-  {
-    label: "₪12,000 התקבל",
-    dot:   "bg-emerald-400",
-    color: "text-emerald-300",
-    cls:   "-right-6 lg:-right-10 bottom-24",
-  },
-  {
-    label: "SMS נפתח",
-    dot:   "bg-blue-400",
-    color: "text-blue-300",
-    cls:   "left-3 -top-4",
-  },
-] as const;
-
-// ─── Exported section ─────────────────────────────────────────────────────────
-
 export function HeroSection() {
+  const sectionRef = useRef<HTMLElement>(null);
+
   return (
     <section
+      ref={sectionRef}
       className="relative min-h-screen flex flex-col justify-center overflow-hidden
-                 bg-gradient-to-br from-indigo-950 via-indigo-900 to-indigo-800 pt-16"
+                 bg-gradient-to-br from-[#060418] via-indigo-950 to-[#1a1445] pt-16"
       style={{ contain: "paint" }}
     >
-      {/* ── Background layers ─────────────────────────────────────────────── */}
+    <HeroCursorProvider sectionRef={sectionRef}>
+      {/* ── Background layers ──────────────────────────────────────────────── */}
+      <BackgroundGlowSystem />
 
-      {/* Grid texture — very subtle, fades at edges with mask.
-           max-sm:hidden: the mask-image + background-image creates a compositing
-           layer on mobile even at 0.025 opacity — not worth the GPU cost.     */}
+      {/* ── Cinematic lighting ────────────────────────────────────────────── */}
+
+      {/* Vignette: darkens the perimeter, draws the eye inward toward the
+           headline and card. The ellipse is off-center to the right (55 %)
+           and slightly high (38 %) matching the RTL layout's visual center. */}
       <div
         aria-hidden="true"
-        className="max-sm:hidden absolute inset-0 pointer-events-none select-none opacity-[0.025]"
-        style={{
-          backgroundImage:
-            "linear-gradient(to right, white 1px, transparent 1px), linear-gradient(to bottom, white 1px, transparent 1px)",
-          backgroundSize: "48px 48px",
-          WebkitMaskImage: "radial-gradient(ellipse 80% 60% at 50% 40%, black 30%, transparent 100%)",
-          maskImage: "radial-gradient(ellipse 80% 60% at 50% 40%, black 30%, transparent 100%)",
-        }}
-      />
-
-      {/* Central violet radial glow — upgraded to /20 for richer depth.
-           overflow-hidden on the wrapper ensures the 700 px inner glow is
-           double-clipped here before reaching the section boundary.        */}
-      <div
-        aria-hidden="true"
-        className="absolute inset-0 flex items-center justify-center pointer-events-none select-none overflow-hidden"
-      >
-        {/* max-sm:animate-none: stop the infinite animation on mobile —
-             it forces continuous GPU compositing/repaint every ~1s.    */}
-        <div className="w-[700px] h-[700px] bg-violet-600/20 rounded-full blur-3xl
-                        max-sm:animate-none animate-[hero-glow-breathe_9s_ease-in-out_infinite]" />
-      </div>
-
-      {/* Top-right accent glow — offset phase so it doesn't sync with centre.
-           right-0 (was -right-24) keeps the element within the section's right
-           boundary so it can't escape overflow clipping on iOS Safari.
-           max-sm:hidden: the inline-style animation can't be overridden with
-           a responsive Tailwind class, so hide the whole element on mobile —
-           saves one blur-3xl compositing layer and one infinite animation.    */}
-      <div
-        aria-hidden="true"
-        className="max-sm:hidden absolute -top-24 right-0 w-[480px] h-[480px]
-                   bg-violet-500/[0.09] rounded-full blur-3xl pointer-events-none select-none"
-        style={{ animation: "hero-glow-breathe 12s 3.5s ease-in-out infinite" }}
-      />
-
-      {/* Ambient glow behind the mock card — left side (physical) in RTL layout.
-           In dir=rtl flex-row, the mock card renders on the left side of the
-           viewport (it's the second DOM child, which in RTL flows left).
-           This glow adds soft depth beneath the floating card.
-           max-sm:hidden to avoid extra compositing layer on mobile.          */}
-      <div
-        aria-hidden="true"
-        className="max-sm:hidden absolute pointer-events-none select-none
-                   top-[18%] left-[6%] w-[380px] h-[420px]
-                   rounded-full blur-[90px]"
+        className="absolute inset-0 pointer-events-none select-none"
         style={{
           background:
-            "radial-gradient(ellipse at center, " +
-            "rgba(99,102,241,0.10) 0%, " +
-            "rgba(79,70,229,0.05) 45%, " +
-            "transparent 75%)",
+            "radial-gradient(ellipse 78% 72% at 55% 38%, transparent 28%, rgba(4,2,20,0.60) 100%)",
         }}
       />
 
-      {/* Very subtle bottom-center depth gradient — adds cinematic vignette.
-           Separates the hero from the section below without a harsh edge.  */}
+      {/* Directional focus light: an ultra-subtle violet spot over the zone
+           where the H1 and card live. Adds a sense of intent illumination —
+           like a cinematographer's key light placed off-centre.              */}
       <div
         aria-hidden="true"
-        className="absolute inset-x-0 bottom-0 h-[220px] pointer-events-none select-none"
+        className="absolute inset-0 pointer-events-none select-none"
         style={{
           background:
-            "linear-gradient(to bottom, transparent 0%, rgba(15,12,41,0.55) 100%)",
+            "radial-gradient(ellipse 50% 44% at 55% 28%, rgba(139,92,246,0.052) 0%, transparent 70%)",
         }}
       />
 
-      {/* Bottom section blend — kept alongside the depth gradient above.
-           bg-gradient-to-b to-indigo-950 provides the hard floor anchor.  */}
-      <div
-        aria-hidden="true"
-        className="absolute bottom-0 left-0 right-0 h-32
-                   bg-gradient-to-b from-transparent to-indigo-950
-                   pointer-events-none select-none"
-      />
-
-      {/* ── Content ───────────────────────────────────────────────────── */}
+      {/* ── Content ───────────────────────────────────────────────────────── */}
       <div
         dir="rtl"
         className="relative max-w-6xl mx-auto px-6 py-20 sm:py-24
-                   flex flex-col lg:flex-row items-center gap-14 lg:gap-20"
+                   flex flex-col lg:flex-row items-center gap-10 lg:gap-14"
       >
 
         {/* ── Text column ── */}
-        <div className="flex-1 flex flex-col items-center lg:items-start gap-7 text-center lg:text-right">
+        <div className="flex-[0.9] flex flex-col items-center lg:items-start gap-6 text-center lg:text-right lg:max-w-[460px]">
 
           {/* Badge */}
           <AnimateIn delay={0}>
-            <div className="inline-flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-4 py-1.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0 animate-pulse" aria-hidden="true" />
-              <span className="text-xs text-white/80 font-medium">פלטפורמה לסוכני נדל״ן בישראל</span>
+            <div className="inline-flex items-center gap-2 bg-white/[0.07] border border-white/[0.14] rounded-full px-4 py-1.5">
+              <span
+                className="w-1.5 h-1.5 rounded-full bg-violet-400/80 shrink-0 animate-pulse"
+                aria-hidden="true"
+              />
+              <span className="text-xs text-white/65 font-medium tracking-wide">
+                פלטפורמה לסוכני נדל״ן בישראל
+              </span>
             </div>
           </AnimateIn>
 
           {/*
-            H1 — per-line mask-up reveal.
+            H1 — upgraded to text-6xl/7xl/8xl + per-line mask-up reveal.
 
-            Each line sits in an `overflow-hidden block` span that acts as a
-            reveal mask.  The inner `block` span starts at translateY(112%) —
-            below the clip boundary — and slides to translateY(0) via the
-            `hero-line-reveal` CSS keyframe defined in globals.css.
+            Each line sits in an `overflow-hidden block` span (clip mask).
+            The inner span starts at translateY(112%) and slides to 0 via
+            hero-line-reveal (globals.css). animation-fill-mode: both keeps
+            text hidden during the delay and holds position after the animation.
 
-            animation-fill-mode: both (shorthand "both"):
-              backwards → text stays hidden during the delay (no pop-in)
-              forwards  → text holds position after the animation ends
-
-            Gradient is on the h1 itself; background-clip:text propagates
-            through transparent child spans in all modern browsers.
-
-            No AnimateIn wrapper here — this is an above-the-fold element
-            with a baked-in delay.  AnimateIn is kept for below-fold sections.
-            Reduced-motion: global @media block collapses duration to 0.01ms.
+            Gradient: white → violet-300 (RTL — violet blooms from the left end).
+            Reduced motion: global @media collapses duration to 0.01ms (instant).
           */}
-          <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.15]">
-            {/* Line 1 — fires at 80ms (just after badge anchors at t=0) */}
+          <h1 className="text-6xl sm:text-7xl lg:text-8xl font-black tracking-[-0.025em] leading-[1.04]">
+            {/* Line 1 — fires at 80ms */}
             <span className="block overflow-hidden pb-[0.06em]">
               <span
                 className="block bg-gradient-to-l from-white via-white to-violet-300 bg-clip-text text-transparent"
@@ -243,41 +137,34 @@ export function HeroSection() {
             </span>
           </h1>
 
-          {/* Subheadline — appears after line 2 has started its reveal (t≈420ms) */}
+          {/* Subheadline — after line 2 has started (t ≈ 420ms) */}
           <AnimateIn delay={420}>
-            <p className="text-lg sm:text-xl text-indigo-200/80 leading-relaxed max-w-lg tracking-normal">
+            <p className="text-lg text-indigo-100/60 leading-[1.8] max-w-[440px]">
               SignDeal בונה את החוזה, שולח לחתימה ב-SMS, ומאפשר ללקוח
               לשלם את העמלה ישירות מהנייד — בלי ניירת, בלי מרדף.
             </p>
           </AnimateIn>
 
-          {/* CTAs — after subheadline has started (t≈560ms) */}
+          {/* CTAs — after subheadline (t ≈ 560ms) */}
           <AnimateIn delay={560}>
             <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
 
               {/*
                 Primary CTA — shimmer sweep on hover.
-                Classes added: relative overflow-hidden hero-cta-shimmer
-                  • relative: positions the shimmer layer absolutely inside
-                  • overflow-hidden: clips the sweep to rounded-xl bounds
-                  • hero-cta-shimmer: CSS hook that triggers the child-span animation
-                The shimmer span is purely decorative (aria-hidden).
+                hero-cta-shimmer + hero-cta-shimmer-layer: see globals.css.
               */}
               <Link
                 href="/register"
                 className="relative overflow-hidden hero-cta-shimmer
                            w-full sm:w-auto inline-flex items-center justify-center gap-2
                            bg-white text-indigo-700 font-black text-sm
-                           px-7 py-4 rounded-xl
+                           px-8 py-[14px] rounded-xl
                            ring-1 ring-white/30
                            hover:scale-[1.02] hover:bg-indigo-50
-                           hover:shadow-[0_0_32px_rgba(139,92,246,0.4)]
                            active:scale-[0.97]
                            transition-all duration-200 ease-out shadow-xl shadow-black/25"
               >
-                {/* Shimmer sweep layer — white diagonal band triggered by CSS :hover */}
                 <span aria-hidden="true" className="hero-cta-shimmer-layer" />
-
                 התחל חינם — ללא כרטיס אשראי
                 <svg
                   width="13" height="13" viewBox="0 0 24 24"
@@ -290,11 +177,11 @@ export function HeroSection() {
                 </svg>
               </Link>
 
-              {/* Secondary — more subtle */}
+              {/* Secondary CTA */}
               <a
                 href="#how"
                 className="w-full sm:w-auto inline-flex items-center justify-center gap-2
-                           bg-white/[0.07] border border-white/15 text-white/80 font-medium text-sm
+                           bg-transparent border border-white/[0.12] text-indigo-200/75 font-medium text-sm
                            px-7 py-4 rounded-xl
                            hover:scale-[1.02] hover:bg-white/[0.12]
                            hover:text-white hover:border-white/25
@@ -315,312 +202,39 @@ export function HeroSection() {
             </div>
           </AnimateIn>
 
-          {/* Stats strip — per-item staggered entrance via hero-chip-in CSS animation.
-               The AnimateIn wrapper is removed here: each <span> manages its own
-               entrance individually so items stagger in sequence.
+          {/* Feature pills with liquid morph tooltips + flip counter */}
+          <FeaturePills />
 
-               hero-chip-in class (globals.css) only activates under:
-                 @media (min-width: 768px) and (prefers-reduced-motion: no-preference)
-               → On mobile (< 768px): class has no effect, items are immediately visible.
-               → Reduced motion: class has no effect, items are immediately visible.
-               → Desktop: animation-fill-mode: both hides items until their delay fires.
-
-               animationDelay is set via inline style because Tailwind can't express
-               per-item computed delays at static-scan time.
-
-               Orchestration:
-                 item 0: 680ms   (after CTAs start at 560ms, 120ms gap)
-                 item 1: 770ms   (90ms stagger)
-                 item 2: 860ms   (90ms stagger)                                          */}
-          <div
-            dir="rtl"
-            className="flex w-full sm:inline-flex sm:w-auto items-stretch rounded-2xl
-                       bg-white/[0.04] border border-white/[0.09]
-                       overflow-hidden"
-          >
-            {HERO_STATS.map(({ label, icon, iconAnim }, i) => (
-              <span
-                key={label}
-                className={[
-                  "flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-2 sm:px-4 py-2.5",
-                  // Stronger hover: /0.08 instead of /0.05 — more visible acknowledgement
-                  "transition-colors duration-200 hover:bg-white/[0.08]",
-                  // hero-chip-in: staggered entrance on desktop (see globals.css)
-                  "hero-chip-in",
-                  i > 0 ? "border-r border-white/[0.09]" : "",
-                ].join(" ")}
-                // animationDelay overrides the 0s default set by the .hero-chip-in rule.
-                // On mobile the @media guard means this style has no animation to delay.
-                style={{ animationDelay: `${680 + i * 90}ms` }}
-              >
-                {/* Icon wrapper carries the desktop micro-animation. */}
-                <span
-                  className={`text-violet-400 flex-shrink-0 inline-flex ${iconAnim}`}
-                  aria-hidden="true"
-                >
-                  {icon}
-                </span>
-                <span className="text-xs sm:text-sm font-medium text-indigo-200/80 whitespace-nowrap">{label}</span>
-              </span>
-            ))}
-          </div>
-
-          {/* Micro trust-copy — after all chips have entered (t≈800ms) */}
+          {/* Micro trust-copy — after all chips (t ≈ 800ms) */}
           <AnimateIn delay={800}>
-            <p className="text-xs text-indigo-300/45">
+            <p className="text-xs text-indigo-300/32">
               ללא כרטיס אשראי · ביטול בכל עת · תמיכה בעברית
             </p>
           </AnimateIn>
         </div>
 
-        {/* ── Mock UI column — relative anchor for floating chips ── */}
-        {/* overflow-hidden on mobile clips the DashboardMock's -inset-8 glow so
-             it cannot escape the column boundary. lg:overflow-visible lets the
-             floating chips (hidden on mobile, shown on desktop) bleed outside. */}
-        <div className="relative flex-1 w-full max-w-sm lg:max-w-md overflow-hidden lg:overflow-visible">
+        {/* ── Mock UI column — anchor for floating chips ── */}
+        {/*
+          overflow-hidden on mobile clips any glow bleeds.
+          lg:overflow-visible lets floating chips bleed outside on desktop.
+        */}
+        <div className="relative flex-[1.4] w-full max-w-[400px] lg:max-w-[560px] overflow-hidden lg:overflow-visible">
 
-          {/* Floating live-status chips — desktop only, aria-hidden.
-               Each chip drifts at a different duration + phase so they
-               never move in lockstep (avoids mechanical feel).           */}
-          {HERO_CHIPS.map(({ label, dot, color, cls }, chipIdx) => {
-            // Different drift durations + start offsets per chip
-            const DRIFT_STYLES = [
-              { animation: "hero-drift 5s ease-in-out infinite" },
-              { animation: "hero-drift 6.5s 1.3s ease-in-out infinite" },
-              { animation: "hero-drift 4.5s 2.7s ease-in-out infinite" },
-            ] as const;
-            return (
-              <div
-                key={label}
-                aria-hidden="true"
-                className={[
-                  // hidden on mobile — only shown on lg+. No will-change-transform
-                  // to avoid creating unnecessary compositing layers.
-                  "hidden lg:flex items-center gap-2 absolute z-20",
-                  "bg-indigo-900/90 border border-white/[0.12] backdrop-blur-md",
-                  "rounded-xl px-3 py-2 shadow-lg shadow-black/40",
-                  "text-xs font-semibold",
-                  color,
-                  cls,
-                ].join(" ")}
-                style={DRIFT_STYLES[chipIdx]}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full shrink-0 animate-pulse ${dot}`} />
-                {label}
-              </div>
-            );
-          })}
+          {/* Floating depth-field badges — desktop only, aria-hidden */}
+          <FloatingBadges />
 
-          {/* Mock — float animation wraps only the frame, not the chips.
-               from="bottom" (was "left") — eliminates the translateX(-32px)
-               initial transform that caused iOS Safari to compute extra
-               horizontal paint region during the hydration frame.
-               MockTilt: adds a subtle 3D perspective tilt on mouse hover.
-               Fine-pointer + reduced-motion gated inside MockTilt.          */}
-          {/* Mock enters independently on the right column at t=320ms.
-               Visually separate from the text assembly — right column assembles
-               on its own track while the left builds top-down.               */}
+          {/*
+            LivingLedger — the 3D animated dashboard card.
+            AnimateIn from="bottom" at t=320ms: right column assembles on its
+            own track while the left column builds top-down.
+          */}
           <AnimateIn delay={320} from="bottom">
-            <MockTilt>
-              <DashboardMock />
-            </MockTilt>
+            <LivingLedger />
           </AnimateIn>
         </div>
 
       </div>
+    </HeroCursorProvider>
     </section>
-  );
-}
-
-/* ─────────────────────────────────────────────────────────────────────────
-   Decorative contract-lifecycle mock — pure Tailwind, no real data.
-
-   Visual upgrade: wrapped in a premium browser / app frame.
-   Shows the full SignDeal workflow in a single card:
-     contract created → SMS sent → signed → payment collected
-   Float keyframe defined in globals.css.
-───────────────────────────────────────────────────────────────────────── */
-
-const LIFECYCLE_STEPS = [
-  {
-    label:  "חוזה נשלח לחתימה",
-    sub:    "SMS נשלח ליוסי כהן",
-    time:   "10:00",
-    dotCls: "bg-violet-400",
-    textCls:"text-violet-300",
-  },
-  {
-    label:  "לקוח חתם",
-    sub:    "חתימה דיגיטלית אומתה",
-    time:   "10:14",
-    dotCls: "bg-blue-400",
-    textCls:"text-blue-300",
-  },
-  {
-    label:  "בקשת תשלום נשלחה",
-    sub:    "לינק מאובטח ב-SMS",
-    time:   "10:15",
-    dotCls: "bg-amber-400",
-    textCls:"text-amber-300",
-  },
-  {
-    label:  "עמלה ₪12,000 התקבלה",
-    sub:    "הכסף בדרך אליך ✓",
-    time:   "10:31",
-    dotCls: "bg-emerald-400",
-    textCls:"text-emerald-300",
-  },
-] as const;
-
-function DashboardMock() {
-  return (
-    <div
-      aria-hidden="true"
-      className="relative max-sm:animate-none animate-[float_4s_ease-in-out_infinite]
-                 max-sm:will-change-auto will-change-transform"
-    >
-      {/* Depth glows — outside overflow-hidden frame so they bleed correctly */}
-      {/* Outer halo — broad, soft purple cloud for cinematic depth */}
-      <div className="absolute -inset-10 rounded-[3rem] bg-violet-600/[0.13] blur-3xl pointer-events-none" />
-      {/* Mid glow — tighter, indigo-tinted, adds colour separation vs outer halo */}
-      <div className="absolute -inset-3 rounded-[1.8rem] bg-indigo-500/[0.09] blur-2xl pointer-events-none" />
-      {/* Rim light — very tight, very faint — simulates a surface catching light */}
-      <div className="absolute -inset-px rounded-2xl bg-white/[0.02] pointer-events-none" />
-
-      {/* ── Browser / app frame — subtle border/glow brightens on hover ── */}
-      <div
-        className="relative rounded-2xl overflow-hidden
-                   border border-white/[0.14]
-                   shadow-[0_28px_60px_-8px_rgba(0,0,0,0.7),0_0_0_1px_rgba(255,255,255,0.04)]
-                   bg-indigo-950/90 backdrop-blur-xl
-                   transition-[border-color,box-shadow] duration-500
-                   hover:border-white/[0.24]
-                   hover:shadow-[0_28px_60px_-8px_rgba(0,0,0,0.7),0_0_28px_rgba(139,92,246,0.12),0_0_0_1px_rgba(255,255,255,0.07)]"
-      >
-        {/* Chrome bar */}
-        <div className="flex items-center gap-3 px-4 py-3 bg-white/[0.04] border-b border-white/[0.08]">
-          {/* Traffic-light dots */}
-          <div className="flex gap-1.5 shrink-0">
-            <div className="w-3 h-3 rounded-full bg-red-400/60" />
-            <div className="w-3 h-3 rounded-full bg-amber-400/60" />
-            <div className="w-3 h-3 rounded-full bg-emerald-400/60" />
-          </div>
-
-          {/* URL bar */}
-          <div className="flex-1 flex justify-center">
-            <div
-              className="flex items-center gap-1.5
-                         bg-white/[0.05] border border-white/[0.08]
-                         rounded-md px-3 py-1 max-w-[185px] w-full"
-            >
-              <svg
-                width="8" height="8" viewBox="0 0 24 24" fill="none"
-                stroke="#6366f1" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <rect x="3" y="11" width="18" height="11" rx="2" />
-                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-              </svg>
-              <span className="text-[10px] text-indigo-400/70 font-mono tracking-tight truncate">
-                app.signdeal.co.il
-              </span>
-            </div>
-          </div>
-
-          {/* Spacer to visually centre the URL bar */}
-          <div className="w-[42px] shrink-0" />
-        </div>
-
-        {/* ── App content ── */}
-        <div className="p-4 sm:p-5">
-          <GlassCard variant="elevated" className="p-5 shadow-none">
-            <div dir="rtl" className="space-y-4">
-
-              {/* Card header */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-6 h-6 bg-white/10 border border-white/20 rounded-md flex items-center justify-center">
-                    <svg
-                      width="12" height="12" viewBox="0 0 24 24"
-                      fill="none" stroke="white" strokeWidth="2.5"
-                      strokeLinecap="round" strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                  </div>
-                  <span className="text-white text-xs font-semibold">SignDeal</span>
-                </div>
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-400/20 text-emerald-300 border border-emerald-400/30 font-medium">
-                  הושלם ✓
-                </span>
-              </div>
-
-              {/* Contract identity */}
-              <div className="bg-white/5 border border-white/10 rounded-xl px-3.5 py-2.5">
-                <p className="text-white text-xs font-semibold">חוזה תיווך — יוסי כהן</p>
-                <p className="text-indigo-300/60 text-[11px] mt-0.5">רוטשילד 15, תל אביב · עמלה ₪12,000</p>
-              </div>
-
-              {/* Lifecycle timeline — rows stagger in sequentially on load.
-                   Rows use animation-fill-mode:both so they stay hidden
-                   until their delay fires, then hold visible state.
-                   Base offset (200ms) lets the card entrance start first. */}
-              <div className="space-y-0 relative">
-                {LIFECYCLE_STEPS.map((step, i) => (
-                  <div
-                    key={step.label}
-                    className="relative flex items-start gap-2.5 pb-3 last:pb-0
-                               animate-[hero-row-in_0.5s_ease-out_both]"
-                    style={{ animationDelay: `${200 + i * 190}ms` }}
-                  >
-                    {/* Connector line */}
-                    {i < LIFECYCLE_STEPS.length - 1 && (
-                      <div
-                        className="absolute right-[9px] top-4 bottom-0 w-px bg-white/10"
-                        aria-hidden="true"
-                      />
-                    )}
-                    {/* Dot */}
-                    <div
-                      className={`relative z-10 mt-0.5 w-[18px] h-[18px] rounded-full
-                                  ${step.dotCls}/20 border border-current
-                                  flex items-center justify-center shrink-0 ${step.textCls}`}
-                    >
-                      <div className={`w-1.5 h-1.5 rounded-full ${step.dotCls}`} />
-                    </div>
-                    {/* Text */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between gap-1">
-                        <p className={`text-[11px] font-semibold ${step.textCls}`}>{step.label}</p>
-                        <span className="text-[10px] text-indigo-400/70 shrink-0">{step.time}</span>
-                      </div>
-                      <p className="text-[10px] text-indigo-400/60 mt-0.5">{step.sub}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              {/* Footer */}
-              <div className="pt-1 border-t border-white/10 flex items-center justify-between">
-                <button className="text-xs text-violet-400 font-medium flex items-center gap-1">
-                  <svg
-                    width="11" height="11" viewBox="0 0 24 24"
-                    fill="none" stroke="currentColor" strokeWidth="3"
-                    strokeLinecap="round" aria-hidden="true"
-                  >
-                    <line x1="12" y1="5" x2="12" y2="19" />
-                    <line x1="5" y1="12" x2="19" y2="12" />
-                  </svg>
-                  חוזה חדש
-                </button>
-                <span className="text-indigo-400/50 text-[11px]">31 דק׳ מחוזה לתשלום</span>
-              </div>
-
-            </div>
-          </GlassCard>
-        </div>
-      </div>
-    </div>
   );
 }
