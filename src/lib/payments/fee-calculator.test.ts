@@ -24,10 +24,20 @@ import { calculateFees, defaultFeeConfig, type FeeConfig } from "./fee-calculato
 
 // ── Shared test config for BREAK_EVEN_SPLIT ───────────────────────────────────
 //
-// Based on the known Stripe cost stack for US-based Stripe Connect + ILS:
+// Calibrated from a live ₪10 payment test (2026-05):
+//   client paid ₪11.31 → applicationFee ₪2.61 → broker net ₪8.60
+//   actual Stripe platform fees: $0.47 + $0.04 = $0.51 ≈ ₪1.48
+//   over-collection = ₪2.61 − ₪1.48 = ₪1.13, caused by payoutFixedFeeAgorot=93
+//
+//   Fix: payoutFixedFeeAgorot = 0
+//   The $0.25 payout fee is per-payout, not per-payment. A broker with 20
+//   payments in one weekly payout pays $0.25 once — including it per-payment
+//   over-charges clients on every transaction.
+//
+// Stripe cost stack (per-transaction, included):
 //   4.4% (processing) + 1.0% (FX) + 0.25% (Connect volume) = 5.65% total
 //   $0.30 per-transaction fixed ≈ 111 agorot (at ₪3.7/$1)
-//   $0.25 per-payout fixed      ≈ 93 agorot  (at ₪3.7/$1)
+//   $0.25 per-PAYOUT fixed      → 0 agorot   (excluded: amortised across payout)
 
 const BREAK_EVEN_CONFIG: FeeConfig = {
   feeMode:                 "BREAK_EVEN_SPLIT",
@@ -35,7 +45,7 @@ const BREAK_EVEN_CONFIG: FeeConfig = {
   stripeFxPercent:         1.0,
   connectVolumePercent:    0.25,
   stripeFixedFeeAgorot:    111,
-  payoutFixedFeeAgorot:    93,
+  payoutFixedFeeAgorot:    0,    // ← 0 by design; see calibration notes above
   // Legacy fields — unused in BREAK_EVEN_SPLIT
   providerFeePercent: 0,
   platformFeePercent: 0,
@@ -45,30 +55,30 @@ const BREAK_EVEN_CONFIG: FeeConfig = {
 // ── BREAK_EVEN_SPLIT: ₪100 commission ────────────────────────────────────────
 
 describe("BREAK_EVEN_SPLIT — ₪100 commission (10,000 agorot)", () => {
-  // Manual calculation:
+  // Manual calculation (payoutFixedFeeAgorot = 0):
   //   totalPercent   = 5.65%
   //   percentageFee  = round(10000 * 5.65 / 100) = round(565) = 565
-  //   fixedFee       = 111 + 93 = 204
-  //   totalCost      = 565 + 204 = 769
-  //   clientShare    = ceil(769 / 2) = ceil(384.5) = 385
-  //   brokerShare    = 769 - 385 = 384
-  //   grossAmount    = 10000 + 385 = 10385
-  //   netAmount      = 10000 - 384 = 9616
-  //   applicationFee = 769
-  //   check: 9616 + 769 = 10385 ✓
+  //   fixedFee       = 111 + 0 = 111
+  //   totalCost      = 565 + 111 = 676
+  //   clientShare    = ceil(676 / 2) = 338  (even — ceil is no-op)
+  //   brokerShare    = 676 - 338 = 338
+  //   grossAmount    = 10000 + 338 = 10338
+  //   netAmount      = 10000 - 338 = 9662
+  //   applicationFee = 676
+  //   check: 9662 + 676 = 10338 ✓
 
   const result = calculateFees(10_000, BREAK_EVEN_CONFIG);
 
   it("totalProcessingCost is percentageFee + fixedFees", () => {
-    expect(result.totalProcessingCost).toBe(769);
+    expect(result.totalProcessingCost).toBe(676);
   });
 
   it("clientShare = ceil(totalProcessingCost / 2)", () => {
-    expect(result.clientProcessingShare).toBe(385);
+    expect(result.clientProcessingShare).toBe(338);
   });
 
   it("brokerShare = totalProcessingCost - clientShare", () => {
-    expect(result.brokerProcessingShare).toBe(384);
+    expect(result.brokerProcessingShare).toBe(338);
   });
 
   it("clientShare + brokerShare === totalProcessingCost", () => {
@@ -77,16 +87,16 @@ describe("BREAK_EVEN_SPLIT — ₪100 commission (10,000 agorot)", () => {
   });
 
   it("grossAmount = commission + clientShare", () => {
-    expect(result.grossAmount).toBe(10_385);
+    expect(result.grossAmount).toBe(10_338);
   });
 
   it("netAmount = commission - brokerShare", () => {
-    expect(result.netAmount).toBe(9_616);
+    expect(result.netAmount).toBe(9_662);
   });
 
   it("applicationFeeAmount === totalProcessingCost", () => {
     expect(result.applicationFeeAmount).toBe(result.totalProcessingCost);
-    expect(result.applicationFeeAmount).toBe(769);
+    expect(result.applicationFeeAmount).toBe(676);
   });
 
   it("netAmount + applicationFeeAmount === grossAmount  [core invariant]", () => {
@@ -113,29 +123,29 @@ describe("BREAK_EVEN_SPLIT — ₪100 commission (10,000 agorot)", () => {
 // ── BREAK_EVEN_SPLIT: ₪1,000 commission ──────────────────────────────────────
 
 describe("BREAK_EVEN_SPLIT — ₪1,000 commission (100,000 agorot)", () => {
-  // Manual calculation:
+  // Manual calculation (payoutFixedFeeAgorot = 0):
   //   percentageFee  = round(100000 * 5.65 / 100) = round(5650) = 5650
-  //   fixedFee       = 204
-  //   totalCost      = 5854
-  //   clientShare    = ceil(5854 / 2) = ceil(2927) = 2927  (even — ceil is a no-op)
-  //   brokerShare    = 5854 - 2927 = 2927
-  //   grossAmount    = 100000 + 2927 = 102927
-  //   netAmount      = 100000 - 2927 = 97073
-  //   applicationFee = 5854
-  //   check: 97073 + 5854 = 102927 ✓
+  //   fixedFee       = 111 + 0 = 111
+  //   totalCost      = 5761
+  //   clientShare    = ceil(5761 / 2) = ceil(2880.5) = 2881
+  //   brokerShare    = 5761 - 2881 = 2880
+  //   grossAmount    = 100000 + 2881 = 102881
+  //   netAmount      = 100000 - 2880 = 97120
+  //   applicationFee = 5761
+  //   check: 97120 + 5761 = 102881 ✓
 
   const result = calculateFees(100_000, BREAK_EVEN_CONFIG);
 
   it("totalProcessingCost", () => {
-    expect(result.totalProcessingCost).toBe(5_854);
+    expect(result.totalProcessingCost).toBe(5_761);
   });
 
-  it("clientShare (even total — no rounding needed)", () => {
-    expect(result.clientProcessingShare).toBe(2_927);
+  it("clientShare (odd total — ceil rounds up by 1)", () => {
+    expect(result.clientProcessingShare).toBe(2_881);
   });
 
   it("brokerShare", () => {
-    expect(result.brokerProcessingShare).toBe(2_927);
+    expect(result.brokerProcessingShare).toBe(2_880);
   });
 
   it("clientShare + brokerShare === totalProcessingCost", () => {
@@ -144,15 +154,15 @@ describe("BREAK_EVEN_SPLIT — ₪1,000 commission (100,000 agorot)", () => {
   });
 
   it("grossAmount", () => {
-    expect(result.grossAmount).toBe(102_927);
+    expect(result.grossAmount).toBe(102_881);
   });
 
   it("netAmount", () => {
-    expect(result.netAmount).toBe(97_073);
+    expect(result.netAmount).toBe(97_120);
   });
 
   it("applicationFeeAmount === totalProcessingCost", () => {
-    expect(result.applicationFeeAmount).toBe(5_854);
+    expect(result.applicationFeeAmount).toBe(5_761);
   });
 
   it("netAmount + applicationFeeAmount === grossAmount  [core invariant]", () => {
@@ -167,45 +177,101 @@ describe("BREAK_EVEN_SPLIT — ₪1,000 commission (100,000 agorot)", () => {
 // ── BREAK_EVEN_SPLIT: ₪10,000 commission ─────────────────────────────────────
 
 describe("BREAK_EVEN_SPLIT — ₪10,000 commission (1,000,000 agorot)", () => {
-  // Manual calculation:
+  // Manual calculation (payoutFixedFeeAgorot = 0):
   //   percentageFee  = round(1000000 * 5.65 / 100) = round(56500) = 56500
-  //   fixedFee       = 204
-  //   totalCost      = 56704
-  //   clientShare    = ceil(56704 / 2) = ceil(28352) = 28352  (even)
-  //   brokerShare    = 56704 - 28352 = 28352
-  //   grossAmount    = 1000000 + 28352 = 1028352
-  //   netAmount      = 1000000 - 28352 = 971648
-  //   applicationFee = 56704
-  //   check: 971648 + 56704 = 1028352 ✓
+  //   fixedFee       = 111 + 0 = 111
+  //   totalCost      = 56611
+  //   clientShare    = ceil(56611 / 2) = ceil(28305.5) = 28306
+  //   brokerShare    = 56611 - 28306 = 28305
+  //   grossAmount    = 1000000 + 28306 = 1028306
+  //   netAmount      = 1000000 - 28305 = 971695
+  //   applicationFee = 56611
+  //   check: 971695 + 56611 = 1028306 ✓
 
   const result = calculateFees(1_000_000, BREAK_EVEN_CONFIG);
 
   it("totalProcessingCost", () => {
-    expect(result.totalProcessingCost).toBe(56_704);
+    expect(result.totalProcessingCost).toBe(56_611);
   });
 
   it("clientShare", () => {
-    expect(result.clientProcessingShare).toBe(28_352);
+    expect(result.clientProcessingShare).toBe(28_306);
   });
 
   it("brokerShare", () => {
-    expect(result.brokerProcessingShare).toBe(28_352);
+    expect(result.brokerProcessingShare).toBe(28_305);
   });
 
   it("grossAmount", () => {
-    expect(result.grossAmount).toBe(1_028_352);
+    expect(result.grossAmount).toBe(1_028_306);
   });
 
   it("netAmount", () => {
-    expect(result.netAmount).toBe(971_648);
+    expect(result.netAmount).toBe(971_695);
   });
 
   it("applicationFeeAmount === totalProcessingCost", () => {
-    expect(result.applicationFeeAmount).toBe(56_704);
+    expect(result.applicationFeeAmount).toBe(56_611);
   });
 
   it("netAmount + applicationFeeAmount === grossAmount  [core invariant]", () => {
     expect(result.netAmount + result.applicationFeeAmount).toBe(result.grossAmount);
+  });
+});
+
+// ── BREAK_EVEN_SPLIT: ₪10 calibration test (real live payment, 2026-05) ────────
+//
+// Live test results:
+//   commission       ₪10.00 = 1000 agorot
+//   client paid      ₪11.31 = 1131 agorot
+//   applicationFee   ₪2.61  = 261 agorot  ← was over-collecting (payout fee included)
+//   broker net       ₪8.60
+//   actual Stripe    $0.47 + $0.04 = $0.51 ≈ ₪1.48
+//
+// With payoutFixedFeeAgorot = 0 (corrected):
+//   percentageFee  = round(1000 * 5.65 / 100) = round(56.5) = 57
+//   fixedFee       = 111 + 0 = 111
+//   totalCost      = 168  ← ₪1.68 collected vs ₪1.48 actual (+₪0.20 buffer, acceptable)
+//   clientShare    = ceil(168 / 2) = 84
+//   brokerShare    = 84
+//   grossAmount    = 1000 + 84 = 1084  (client pays ₪10.84 not ₪11.31)
+//   netAmount      = 1000 - 84 = 916
+//   applicationFee = 168
+//   check: 916 + 168 = 1084 ✓
+
+describe("BREAK_EVEN_SPLIT — ₪10 commission real-world calibration (1,000 agorot)", () => {
+  const result = calculateFees(1_000, BREAK_EVEN_CONFIG);
+
+  it("totalProcessingCost", () => {
+    expect(result.totalProcessingCost).toBe(168);
+  });
+
+  it("clientShare = ceil(168 / 2) = 84", () => {
+    expect(result.clientProcessingShare).toBe(84);
+  });
+
+  it("brokerShare = 84", () => {
+    expect(result.brokerProcessingShare).toBe(84);
+  });
+
+  it("grossAmount = 1084 (client pays ₪10.84)", () => {
+    expect(result.grossAmount).toBe(1_084);
+  });
+
+  it("netAmount = 916 (broker nets ₪9.16)", () => {
+    expect(result.netAmount).toBe(916);
+  });
+
+  it("applicationFeeAmount = 168 (₪1.68 — close to actual ₪1.48 Stripe cost)", () => {
+    expect(result.applicationFeeAmount).toBe(168);
+  });
+
+  it("netAmount + applicationFeeAmount === grossAmount  [core invariant]", () => {
+    expect(result.netAmount + result.applicationFeeAmount).toBe(result.grossAmount);
+  });
+
+  it("platformProfitFee === 0", () => {
+    expect(result.platformProfitFee).toBe(0);
   });
 });
 

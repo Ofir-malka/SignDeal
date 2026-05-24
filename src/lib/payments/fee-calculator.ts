@@ -71,7 +71,20 @@ export interface FeeConfig {
   connectVolumePercent:    number;
   /** Stripe's fixed per-transaction fee in agorot (e.g. 111 ≈ $0.30 at ₪3.7/$1) */
   stripeFixedFeeAgorot:    number;
-  /** Stripe's fixed per-payout fee in agorot (e.g. 93 ≈ $0.25 at ₪3.7/$1) */
+  /**
+   * Stripe's fixed per-payout fee in agorot.
+   *
+   * ⚠ Set to 0 in production (PAYOUT_FIXED_FEE_AGOROT=0).
+   *
+   * The $0.25 Stripe payout fee is charged once per payout disbursement, not
+   * once per payment.  A broker with 20 payments in a weekly payout is charged
+   * $0.25 total, not $0.25 × 20.  Including it per-payment over-charges clients
+   * on every transaction — confirmed by live test: a ₪10 commission collected
+   * ₪2.61 instead of the actual ₪1.48 Stripe cost when this was set to 93.
+   *
+   * If the platform ever needs to recover payout costs, model them as a separate
+   * monthly fee or amortise across the expected payment volume.
+   */
   payoutFixedFeeAgorot:    number;
 
   // ── Legacy mode config (BROKER | CLIENT | SPLIT) ─────────────────────────
@@ -316,11 +329,13 @@ const VALID_FEE_MODES = new Set<FeeMode>(["BROKER", "CLIENT", "SPLIT", "BREAK_EV
  *
  * For BREAK_EVEN_SPLIT (production):
  *   FEE_MODE=BREAK_EVEN_SPLIT
- *   STRIPE_PROCESSING_PERCENT=4.4
- *   STRIPE_FX_PERCENT=1.0
- *   CONNECT_VOLUME_PERCENT=0.25
- *   STRIPE_FIXED_FEE_AGOROT=111    # ≈$0.30 at current ILS/USD rate
- *   PAYOUT_FIXED_FEE_AGOROT=93     # ≈$0.25 at current ILS/USD rate
+ *   STRIPE_PROCESSING_PERCENT=4.4   # Stripe card processing rate for ILS/IL
+ *   STRIPE_FX_PERCENT=1.0           # Stripe FX conversion surcharge
+ *   CONNECT_VOLUME_PERCENT=0.25     # Stripe Connect platform volume fee (per-transaction)
+ *   STRIPE_FIXED_FEE_AGOROT=111     # ≈$0.30 per-transaction fixed fee at ₪3.7/$1
+ *   PAYOUT_FIXED_FEE_AGOROT=0       # ← MUST be 0; payout fee is per-payout not per-payment
+ *                                   #   (live test: setting this to 93 over-collected ₪2.61
+ *                                   #    on a ₪10 commission vs actual Stripe cost of ₪1.48)
  *
  * For testing/measurement (all fees zeroed):
  *   FEE_MODE=SPLIT
