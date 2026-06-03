@@ -1,0 +1,31 @@
+# CODEOWNERS — Grow secrets & migration-safety boundary (Phase 1)
+#
+# These paths gate the crypto root of trust, encrypted-secret access, audit
+# sanitization, and irreversible DB changes. Edits require review from the named
+# owners (in addition to normal review).
+#
+# NOTE: @security-owner and @db-owner are PLACEHOLDER handles. Replace them with
+# the real GitHub team/user handles before this file is enforced on the remote.
+# (This repo is worked on locally only; nothing here is pushed.)
+
+# ── Key management (KEK) — server-only crypto root of trust ────────────────────
+/src/lib/secrets/kek.ts              @security-owner
+
+# ── Secrets core (envelope crypto, Layer 1 accessor, lifecycle) ───────────────
+/src/lib/secrets/                    @security-owner
+
+# ── Rail-scoped secret facades (Layer 2) ──────────────────────────────────────
+/src/lib/billing/secrets/            @security-owner
+/src/lib/payments/secrets/           @security-owner
+
+# ── Audit sanitization & single writer ────────────────────────────────────────
+/src/lib/audit/                      @security-owner
+
+# ── Raw-SQL migrations & rollback artifacts ───────────────────────────────────
+/prisma/migrations/                  @db-owner @security-owner
+/prisma/rollback/                    @db-owner @security-owner
+/prisma/schema.prisma                @db-owner
+
+# ── Boundary lint & ownership config ──────────────────────────────────────────
+/eslint.config.mjs                   @security-owner
+/.github/CODEOWNERS                  @security-owner

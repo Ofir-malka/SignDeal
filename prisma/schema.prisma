@@ -90,6 +90,10 @@ model User {
   // Completely separate from HYP subscription billing.
   stripeAccount       BrokerStripeAccount?
 
+  // ── Grow migration (Phase 1 foundation — additive; no runtime reads yet) ──
+  growMerchant           GrowBrokerMerchant?     // Rail B — broker Grow merchant (1-to-1)
+  growOnboardingSessions GrowOnboardingSession[] // Rail B — Grow onboarding attempts
+
   // ── Auth.js adapter relations ─────────────────────────────────────────────
   accounts   Account[]
   sessions   Session[]
@@ -381,11 +385,29 @@ model Payment {
   stripeRefundId String?    // "re_..." — null when not yet available
   refundReason   String?    // Stripe reason string or null
 
+  // ── Grow / Rail B routing (Phase 1 foundation — additive; no runtime reads yet) ──
+  // routedProvider records which Rail B processor handled this payment.
+  // Kept separate from `provider` (the legacy/HYP discriminator) to avoid overloading it.
+  routedProvider       String?        // "grow" | "stripe"
+  paymentMethod        PaymentMethod? // APPLE_PAY | GOOGLE_PAY | BIT | CREDIT_CARD | BANK_TRANSFER
+  growProcessId        String?        // Grow createPaymentProcess id (populated in later phases)
+  growTransactionId    String?        // Grow transaction id (populated in later phases)
+  cardLast4            String?        // masked only — never the full PAN
+
+  // Bank transfer — SETTLEMENT TRACKING ONLY (non-PII). Transient-first policy:
+  // payer bank details are NOT persisted by default (forwarded to Grow in-request,
+  // then discarded). The masked/encrypted payer columns (payerBankAccountLast4,
+  // payerBankCode, payerBankBranchCode, payerBankSecretRef) are DEFERRED — added
+  // only if Grow confirms it requires them for reconciliation.
+  settlementStatus     String?        // "PENDING" | "SETTLED" | "FAILED"
+  settlementExpectedAt DateTime?
+
   createdAt         DateTime      @default(now())
   messages          Message[]
 
   @@index([stripeCheckoutSessionId])  // Phase C: fast webhook + idempotency lookup
   @@index([payoutId])                 // Phase D: payout → payments reconciliation
+  @@index([growTransactionId])        // Phase 1: Grow transaction lookup (empty until later phases)
 }
 
 // ── Activity log ───────────────────────────────────────────────────────────────
@@ -656,9 +678,13 @@ model Subscription {
   billingInterval BillingInterval @default(MONTHLY)
 
   // ── Billing provider ───────────────────────────────────────────────────────
-  billingProvider       String?  // "hyp" | future provider slug
+  billingProvider       String?  // "hyp" | "grow" | future provider slug
   billingCustomerId     String?  // provider's customer object ID (future)
   billingSubscriptionId String?  // provider's subscription/agreement object ID
+
+  // ── Grow SaaS billing (Rail A — Phase 1 foundation; additive, no runtime reads yet) ──
+  growSaasCustomerId      String?  // Grow SaaS customer identifier (populated in later phases)
+  growSaasChargeSecretRef String?  // handle → EncryptedSecret (purpose = GROW_SAAS_CHARGE_TOKEN)
 
   // ── Card-on-file (Phase 2A placeholder — written in Phase 2B) ─────────────
   //
@@ -711,6 +737,7 @@ model Subscription {
   @@index([trialEndsAt])               // fast queries: "trials expiring soon"
   @@index([nextBillingAt])             // Phase 3: billing cron cursor — "charge due now"
   @@index([status, nextBillingAt])     // Phase E: compound index for billing cron WHERE status IN (...) AND nextBillingAt <= now
+  @@index([billingProvider])           // Phase 1: provider-scoped queries (empty until Grow rollout)
 }
 
 // ── SubscriptionEvent ──────────────────────────────────────────────────────────
@@ -869,6 +896,12 @@ model BillingCharge {
   hypAuthCode    String?             // HYP authorization code (ACode) returned on success
   hypRaw         String? @db.Text    // intentionally never populated — raw HYP response may contain card-adjacent values
 
+  // ── Grow response fields (Rail A — Phase 1 foundation; additive, no runtime reads yet) ──
+  growTransId      String?            // Grow transaction id (populated in later phases)
+  growStatusCode   String?            // Grow status/result code (populated in later phases)
+  growApprovalCode String?            // Grow approval code (populated in later phases)
+  growRaw          String? @db.Text   // intentionally never populated (mirrors hypRaw)
+
   // ── Retry state ────────────────────────────────────────────────────────────
   attemptNumber  Int       @default(1)  // 1 = first attempt; incremented on each retry
   nextRetryAt    DateTime?              // when to retry; null = no retry scheduled
@@ -997,7 +1030,7 @@ model WebhookEvent {
   id          String             @id @default(cuid())
 
   // ── Provider + event identity ──────────────────────────────────────────────
-  provider    String             // "stripe" | "rapyd"
+  provider    String             // "stripe" | "rapyd" | "grow" | "grow_saas"
   eventId     String             // provider's own event ID:
                                  //   Stripe: evt_... (from stripe-signature header)
                                  //   Rapyd:  event.id from the webhook body
@@ -1019,4 +1052,166 @@ model WebhookEvent {
   @@index([provider])              // "all Stripe events", "all Rapyd events"
   @@index([status])                // "all FAILED events" for admin debugging
   @@index([processedAt])           // chronological queries + retention cleanup
+}
+
+// ╔════════════════════════════════════════════════════════════════════════════╗
+// ║  Grow migration — Phase 1 foundation (database + security)                  ║
+// ║                                                                            ║
+// ║  Additive + nullable only. NO runtime path reads these yet, and no feature ║
+// ║  flag flips behavior on. Secrets never live inline on owner rows — they    ║
+// ║  are referenced by opaque *SecretRef handles into EncryptedSecret, which   ║
+// ║  is reachable only through the secret accessor (src/lib/secrets).          ║
+// ╚════════════════════════════════════════════════════════════════════════════╝
+
+// ── Secret-handling enums ──────────────────────────────────────────────────────
+enum SecretBackend {
+  DB_ENVELOPE // ciphertext = self-describing AES-256-GCM envelope; KEK (env) wraps the DEK — Phase 1 default
+  KMS         // ciphertext = KMS-wrapped data key; externalRef set
+  VAULT       // value held in an external secret manager; ciphertext null, externalRef set
+}
+
+enum SecretPurpose {
+  GROW_BROKER_API_KEY    // Rail B — broker Grow merchant credential (owner: GrowBrokerMerchant)
+  GROW_SAAS_CHARGE_TOKEN // Rail A — SignDeal SaaS billing token      (owner: Subscription)
+  GROW_ONBOARDING_LEAD   // Rail B — onboarding lead payload          (owner: GrowOnboardingSession)
+  PAYER_BANK_ACCOUNT     // Rail B — payer bank details (DEFERRED; only if Grow reconciliation requires)
+}
+
+enum PaymentMethod {
+  APPLE_PAY
+  GOOGLE_PAY
+  BIT
+  CREDIT_CARD
+  BANK_TRANSFER
+}
+
+enum GrowOnboardingStatus {
+  PENDING
+  LINK_ISSUED
+  COMPLETED
+  EXPIRED
+  FAILED
+  // Phase 2A — callback received & merchant provisioned, but NOT yet activated.
+  // Lifecycle position: PENDING → LINK_ISSUED → PENDING_VERIFICATION → COMPLETED.
+  // Appended (not inserted) so the DB enum keeps a stable order and the migration
+  // stays a plain ADD VALUE. While a session sits here the merchant stays
+  // GrowBrokerMerchant.isActive = false; activation is manual
+  // (GROW_ONBOARDING_AUTO_ACTIVATE defaults false).
+  PENDING_VERIFICATION
+}
+
+// ── EncryptedSecret — secret indirection table ─────────────────────────────────
+//
+// Owner rows hold only opaque *SecretRef handles; the encrypted secret material
+// lives here, reachable only through the secret accessor (src/lib/secrets).
+// `id` is APPLICATION-generated (a short cuid-like handle) BEFORE encryption, so
+// it can be bound into the AES-GCM AAD — hence NO @default(cuid()) on it.
+// Migrating to KMS/Vault later is a per-row `backend` swap, not a schema change.
+// Crypto-shred = set purgedAt (+ null the ciphertext).
+model EncryptedSecret {
+  id          String        @id           // app-generated handle (NOT @default) — bound into AAD
+  purpose     SecretPurpose
+  rail        String        // "A" | "B" — must equal purpose's canonical rail (validated in the accessor)
+  ownerType   String        // "GrowBrokerMerchant" | "Subscription" | "GrowOnboardingSession" | "Payment"
+  ownerId     String
+  ciphertext  Bytes?        // opaque AES-256-GCM envelope (DB_ENVELOPE backend); null for KMS/VAULT
+  externalRef String?       // KMS/VAULT key id; null for DB_ENVELOPE
+  encVersion  Int           // envelope format/algorithm version
+  kekVersion  Int           // which KEK wrapped the DEK
+  backend     SecretBackend @default(DB_ENVELOPE)
+  fingerprint String?       // optional HMAC (separate pepper) for idempotency; never the value
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  rotatedAt   DateTime?
+  expiresAt   DateTime?
+  purgedAt    DateTime?
+
+  @@index([ownerType, ownerId])
+  @@index([purpose])
+  @@index([expiresAt])
+  // Single-active invariant is a PARTIAL UNIQUE index:
+  //   UNIQUE ("ownerType","ownerId","purpose") WHERE "purgedAt" IS NULL
+  // Prisma's schema DSL cannot express a partial (WHERE) unique index, so it is
+  // created via raw SQL in the migration (see the migration's migration.sql).
+}
+
+// ── GrowBrokerMerchant (Rail B) ────────────────────────────────────────────────
+model GrowBrokerMerchant {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id])
+  growUserId      String?  // identifier from the onboarding callback (not a secret)
+  trackingCode    String?
+  packageId       String?
+  trackingStatus  String?
+  apiKeySecretRef String?  // handle → EncryptedSecret (purpose = GROW_BROKER_API_KEY)
+  isActive        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([growUserId])
+}
+
+// ── GrowOnboardingSession (Rail B) ─────────────────────────────────────────────
+model GrowOnboardingSession {
+  id             String               @id @default(cuid())
+  // `reference` is a CSPRNG >=128-bit token set by the application (NOT a cuid).
+  // It is the public onboarding handle and is explicitly NOT the sole callback-auth
+  // mechanism (Grow origin-auth is a Phase 2 dependency). `id` stays the internal cuid PK.
+  reference      String               @unique
+  userId         String
+  user           User                 @relation(fields: [userId], references: [id])
+  status         GrowOnboardingStatus @default(PENDING)
+  businessNumber String?
+  phone          String?              // Phase 2A — phone sent to GetLink; secondary callback-correlation key (tracking_code is primary)
+  growUserId     String?              // filled on callback
+  leadSecretRef  String?              // handle → EncryptedSecret (purpose = GROW_ONBOARDING_LEAD)
+  expectedTrackingCode String?        // Phase 2A — tracking_code if echoed by GetLink (doc-inconsistent; may be null); used for correlation
+  statusReason   String?              // Phase 2A — last human-readable status (e.g. callback tracking_status.message)
+  attemptCount   Int                  @default(0) // Phase 2A — number of inbound callbacks correlated to this session
+  expiresAt      DateTime?
+  resolvedAt     DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  callbackEvents GrowOnboardingCallbackEvent[] // Phase 2A back-relation (no SQL column)
+
+  @@index([userId])
+  @@index([status])
+}
+
+// ── GrowOnboardingCallbackEvent (Rail B, Phase 2A) ─────────────────────────────
+//
+// Raw-first audit + idempotency log for the inbound Grow onboarding server-update
+// ("callback"). One row per received delivery. Confirmed Grow contract:
+//   • callback format = application/json
+//   • callback URL = fixed / manually configured on Grow's side (NOT sent in GetLink)
+//   • NO onboarding status API — this callback (and/or email) is the ONLY status
+//     signal; SignDeal status is read from our own DB.
+//
+// SECURITY: the callback body carries `api_key` (secret) and PII (name/phone).
+// `sanitizedPayload` stores the body AFTER secret-redaction (sanitize-metadata);
+// the real api_key is sealed into EncryptedSecret (purpose GROW_BROKER_API_KEY),
+// NEVER inline here. Ingestion is unauthenticated/unsigned until Grow confirms
+// origin auth, so it moves a session to PENDING_VERIFICATION (merchant isActive
+// stays false) — never directly ACTIVE.
+//
+// NOTE: no runtime path reads/writes this yet (Phase 2A contract — schema only).
+model GrowOnboardingCallbackEvent {
+  id               String                 @id @default(cuid())
+  receivedAt       DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  sessionId        String?                // nullable — correlation may fail (uncorrelated callbacks are still stored)
+  session          GrowOnboardingSession? @relation(fields: [sessionId], references: [id])
+  sourceIp         String?                // best-effort; proxy / forwarded-header handling is OUT of Phase 2A scope
+  httpMethod       String
+  contentType      String?                // expected "application/json"
+  contentTypeValid Boolean                @default(false)
+  sanitizedPayload String                 // body AFTER secret-redaction; NO plaintext api_key here (sealed in EncryptedSecret)
+  parsedOk         Boolean                @default(false)
+  dedupKey         String                 @unique // hash of stable identity (tracking_code + tracking_status.id) — NOT of the secret
+  outcome          String                 @default("stored") // stored | correlated | applied | duplicate | uncorrelated | rejected
+
+  @@index([sessionId])
+  @@index([receivedAt])
 }

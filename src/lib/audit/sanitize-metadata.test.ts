@@ -9,8 +9,11 @@ import { describe, it, expect } from "vitest";
 import {
   sanitizeMetadata,
   MAX_STRING_LENGTH,
+  MAX_DEPTH,
+  MAX_BREADTH,
   BLOCKED_KEY_SUBSTRINGS,
 } from "./sanitize-metadata";
+import { RevealableSecret } from "@/lib/secrets/revealable-secret";
 
 // ── Blocked keys ───────────────────────────────────────────────────────────────
 
@@ -282,5 +285,181 @@ describe("edge cases", () => {
     const input = { cardToken: "tok", plan: "STANDARD" };
     sanitizeMetadata(input);
     expect(input).toHaveProperty("cardToken", "tok"); // original untouched
+  });
+});
+
+// ── RevealableSecret detection (Phase 1) ──────────────────────────────────────
+
+describe("RevealableSecret redaction", () => {
+  const makeSecret = () =>
+    new RevealableSecret({
+      plaintext: "live-token-abc",
+      secretRef: "cref0000000000000000000001",
+      purpose: "GROW_BROKER_API_KEY",
+      rail: "B",
+    });
+
+  it("replaces a real RevealableSecret with [secret] before serialization", () => {
+    const result = sanitizeMetadata({ payload: makeSecret() });
+    expect(result.payload).toBe("[secret]");
+  });
+
+  it("replaces a prototype-stripped (spread) copy with [secret] via the brand", () => {
+    const degraded = { ...makeSecret() }; // loses prototype + #private, keeps brand
+    const result = sanitizeMetadata({ payload: degraded });
+    expect(result.payload).toBe("[secret]");
+  });
+
+  it("never throws even though toJSON is hostile (brand check precedes serialization)", () => {
+    expect(() => sanitizeMetadata({ a: { b: makeSecret() } })).not.toThrow();
+  });
+});
+
+// ── Value-pattern masking (Phase 1) ───────────────────────────────────────────
+
+describe("value-pattern masking", () => {
+  it("masks a Luhn-valid PAN to ****last4", () => {
+    const result = sanitizeMetadata({ pan: "4242424242424242" });
+    expect(result.pan).toBe("****4242");
+  });
+
+  it("masks a PAN that contains spaces/dashes", () => {
+    const result = sanitizeMetadata({ pan: "4242-4242 4242-4242" });
+    expect(result.pan).toBe("****4242");
+  });
+
+  it("does not mask a 16-digit non-Luhn number", () => {
+    const result = sanitizeMetadata({ ref: "4242424242424243" });
+    expect(result.ref).toBe("4242424242424243");
+  });
+
+  it("redacts an Israeli IBAN", () => {
+    const result = sanitizeMetadata({ acct: "IL123456789012345678901" });
+    expect(result.acct).toBe("[iban redacted]");
+  });
+
+  it("redacts a long hex blob that contains a digit", () => {
+    const hex = "a1".repeat(150); // 300 hex chars, contains digits
+    const result = sanitizeMetadata({ blob: hex });
+    expect(result.blob).toBe(`[redacted hex len=${hex.length}]`);
+  });
+
+  it("redacts a high-entropy opaque token", () => {
+    const token = "aB3" + "xY7".repeat(13); // 42 chars: letters + digits, not hex-len
+    const result = sanitizeMetadata({ tok: token });
+    expect(result.tok as string).toMatch(/^\[redacted len=\d+\]$/);
+  });
+
+  it("preserves a short cuid-like handle (encRef, < 32 chars)", () => {
+    const ref = "cref0000000000000000000001"; // 26 chars
+    const result = sanitizeMetadata({ encRef: ref });
+    expect(result.encRef).toBe(ref);
+  });
+});
+
+// ── Non-JSON value coercions (Phase 1) ────────────────────────────────────────
+
+describe("non-JSON value coercions", () => {
+  it("redacts an ArrayBuffer as [bytes len=N]", () => {
+    const result = sanitizeMetadata({ buf: new ArrayBuffer(8) });
+    expect(result.buf).toBe("[bytes len=8]");
+  });
+
+  it("redacts a TypedArray as [bytes len=N]", () => {
+    const result = sanitizeMetadata({ arr: new Uint8Array([1, 2, 3, 4]) });
+    expect(result.arr).toBe("[bytes len=4]");
+  });
+
+  it("stringifies a bigint", () => {
+    // BigInt() constructor (not the `n` literal) to stay below the ES2020 target.
+    const result = sanitizeMetadata({ big: BigInt("123456789012345678901234567890") });
+    expect(result.big).toBe("123456789012345678901234567890");
+  });
+
+  it("replaces a function with [unserializable]", () => {
+    const result = sanitizeMetadata({ fn: () => 42 });
+    expect(result.fn).toBe("[unserializable]");
+  });
+
+  it("replaces a symbol with [unserializable]", () => {
+    const result = sanitizeMetadata({ sym: Symbol("x") });
+    expect(result.sym).toBe("[unserializable]");
+  });
+
+  it("converts a Date to an ISO string", () => {
+    const result = sanitizeMetadata({ when: new Date("2026-01-02T03:04:05.000Z") });
+    expect(result.when).toBe("2026-01-02T03:04:05.000Z");
+  });
+
+  it("marks an invalid Date", () => {
+    const result = sanitizeMetadata({ when: new Date("not-a-date") });
+    expect(result.when).toBe("[invalid date]");
+  });
+});
+
+// ── Hostile-input caps (Phase 1) ──────────────────────────────────────────────
+
+describe("depth / breadth / cycle caps", () => {
+  it("collapses nodes beyond MAX_DEPTH to [depth limit]", () => {
+    let deep: Record<string, unknown> = { leaf: "x" };
+    for (let i = 0; i < MAX_DEPTH + 3; i++) deep = { nest: deep };
+    const result = sanitizeMetadata(deep);
+    expect(JSON.stringify(result)).toContain("[depth limit]");
+  });
+
+  it("breaks cycles with [circular]", () => {
+    const a: Record<string, unknown> = { name: "a" };
+    a.self = a;
+    const result = sanitizeMetadata(a);
+    expect(result.name).toBe("a");
+    expect(result.self).toBe("[circular]");
+  });
+
+  it("caps array breadth and appends a +N more marker", () => {
+    const big = Array.from({ length: MAX_BREADTH + 5 }, (_, i) => i);
+    const result = sanitizeMetadata({ list: big });
+    const list = result.list as unknown[];
+    expect(list).toHaveLength(MAX_BREADTH + 1);
+    expect(list[MAX_BREADTH]).toBe("[+5 more]");
+  });
+
+  it("caps object breadth with a [truncated] marker", () => {
+    const wide: Record<string, unknown> = {};
+    for (let i = 0; i < MAX_BREADTH + 5; i++) wide[`k${i}`] = i;
+    const result = sanitizeMetadata(wide);
+    expect(result["[truncated]"]).toBe(true);
+  });
+
+  it("always returns a new tree (no shared references with the input)", () => {
+    const input = { nested: { a: 1 }, list: [{ b: 2 }] };
+    const result = sanitizeMetadata(input);
+    expect(result).not.toBe(input);
+    expect(result.nested).not.toBe(input.nested);
+    expect(result.list).not.toBe(input.list);
+  });
+});
+
+// ── Grow / payments blocked keys (Phase 1 additions) ──────────────────────────
+
+describe("Grow/payments blocked keys", () => {
+  it.each([
+    "iban",
+    "cvv",
+    "cvc",
+    "cardNumber",
+    "accountNumber",
+    "bankAccount",
+    "branchNum",
+    "swift",
+    "routingNum",
+    "authCode",
+    "encryptedLead",
+    "authorization",
+    "bearer",
+    "cookie",
+    "setCookie",
+  ])("strips %s", (key) => {
+    const result = sanitizeMetadata({ [key]: "value" });
+    expect(result).not.toHaveProperty(key);
   });
 });

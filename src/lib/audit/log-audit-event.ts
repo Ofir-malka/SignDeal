@@ -18,6 +18,11 @@
  * This function NEVER throws. Any error during the DB write is caught, logged to
  * console.error, and reported to Sentry. The caller's response is unaffected.
  *
+ * Metadata sanitization is isolated in its own try/catch (AL-1): if sanitizeMetadata
+ * throws (e.g. a hostile toJSON), we substitute { __sanitizeError: true }, raise a
+ * security-tagged Sentry alert, and STILL write the audit row — a serialization
+ * failure can neither suppress the audit trail nor leak the offending value.
+ *
  * ── Privacy ───────────────────────────────────────────────────────────────────
  * sanitizeMetadata() is applied to every `metadata` value before it reaches the
  * DB. It recursively:
@@ -86,10 +91,31 @@ export async function logAuditEvent(input: AuditEventInput): Promise<void> {
       rawMetadata = Object.keys(rest).length > 0 ? rest : null;
     }
 
-    const sanitized =
-      rawMetadata !== null
-        ? sanitizeMetadata(rawMetadata, emailLoggingAllowed)
-        : null;
+    // AL-1 — isolate sanitization. A serialization failure here must neither
+    // suppress the audit row nor leak the offending value: on failure we record
+    // a presence-only marker and raise a security-tagged alert, then continue
+    // so the audit row is still written.
+    let sanitized: Record<string, unknown> | null = null;
+    if (rawMetadata !== null) {
+      try {
+        sanitized = sanitizeMetadata(rawMetadata, emailLoggingAllowed);
+      } catch (sanitizeErr) {
+        sanitized = { __sanitizeError: true };
+        console.error(
+          "[logAuditEvent] metadata sanitization failed; writing presence marker:",
+          sanitizeErr,
+        );
+        Sentry.captureException(sanitizeErr, {
+          level: "error",
+          tags:  { component: "audit_log", security: "true" },
+          extra: {
+            action:     input.action,
+            entityType: input.entityType,
+            entityId:   input.entityId ?? null,
+          },
+        });
+      }
+    }
 
     await prisma.auditLog.create({
       data: {
