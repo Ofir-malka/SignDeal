@@ -85,6 +85,51 @@ export default async function PaymentsSettingsPage() {
       <main dir="rtl" className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="max-w-lg mx-auto space-y-6">
 
+          {/* ════ Grow — PRIMARY payment system (Israeli broker payments) ════════ */}
+          <div className="bg-white rounded-2xl border-2 border-indigo-200 shadow-sm px-6 py-5">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center shrink-0">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <rect x="1" y="4" width="22" height="16" rx="2" ry="2" />
+                    <line x1="1" y1="10" x2="23" y2="10" />
+                  </svg>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">סליקת Grow</p>
+                  <p className="text-xs text-gray-500">תשלומים לברוקרים בישראל</p>
+                </div>
+              </div>
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-700 shrink-0">
+                ראשי · חדש
+              </span>
+            </div>
+
+            <h2 className="text-base font-semibold text-gray-900 mb-2">
+              מערכת הסליקה הראשית לתשלומי ברוקרים בישראל
+            </h2>
+            <p className="text-sm text-gray-600 mb-5 leading-relaxed">
+              Grow היא מערכת הסליקה החדשה והראשית לקבלת תשלומים מלקוחות בישראל. החיבור נמצא כעת בהקמה — ניתן לצפות בסטטוס ולהמשיך מכאן.
+            </p>
+
+            <Link
+              href="/settings/payments/grow"
+              className="inline-flex items-center justify-center gap-2 w-full px-6 py-3.5 rounded-xl
+                         text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700
+                         transition-colors shadow-sm"
+            >
+              מעבר לחיבור Grow ←
+            </Link>
+          </div>
+
+          {/* ════ Stripe — SECONDARY (international) ══════════════════════════════ */}
+          <div className="pt-2">
+            <h3 className="text-sm font-semibold text-gray-700">אפשרות משנית — תשלומים בינלאומיים (Stripe)</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Stripe נשאר זמין כאמצעי משני לתשלומים בינלאומיים. ההגדרות הקיימות נשמרות ללא שינוי.
+            </p>
+          </div>
+
           {/* ── COMPLETE state ─────────────────────────────────────────────── */}
           {status === "COMPLETE" && (
             <>
