@@ -1,18 +1,22 @@
 "use client";
 
 /**
- * GrowConnectionCard — broker-facing Grow connection STATUS UI (Step 2).
+ * GrowConnectionCard — broker-facing Grow connection status + launch entry point.
  *
- * Reads GET /api/grow/onboarding/status on mount and renders one of six states.
- * SAFE FIELDS ONLY (the endpoint never returns secrets): state, isConnected,
- * packageId, trackingStatusId, growUserIdLast4, session status/statusReason,
- * businessNumberPreview, hasTrackingCode, dates.
+ * Reads GET /api/grow/onboarding/status and renders the current state. For states
+ * that can connect, it shows GrowLaunchForm — which (on a real 201) stores the
+ * launch in sessionStorage and navigates to the dedicated full-page screen at
+ * /settings/payments/grow/onboarding. There is NO inline iframe here.
  *
- * ⚠ Step 2 scope: NO iframe, NO postMessage, and the Connect action is DISABLED
- *   ("coming soon"). It does NOT call /api/grow/onboarding/start.
+ * Returning from a successful form submit lands here with ?submitted=1 → we show
+ * an optimistic "Pending Verification" and poll /status (the server flips to
+ * PENDING_VERIFICATION only on the inbound Grow callback — a later step).
+ *
+ * Safe fields only (the status endpoint never returns secrets).
  */
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { GrowLaunchForm } from "./GrowLaunchForm";
 
 type GrowState =
   | "NOT_CONNECTED"
@@ -50,15 +54,15 @@ const STATE_META: Record<
     label: "לא מחובר",
     badge: "bg-gray-100 text-gray-600",
     dot: "bg-gray-400",
-    title: "החשבון אינו מחובר ל-Grow",
-    desc: "חיבור חשבון הסליקה ל-Grow יתאפשר בקרוב, לאחר השלמת ההגדרה מול Grow.",
+    title: "חבר את חשבון הסליקה ל-Grow",
+    desc: "כדי לקבל תשלומים מלקוחות דרך Grow, התחל את החיבור והשלם את טופס ההרשמה של Grow.",
   },
   IN_PROGRESS: {
     label: "בתהליך הרשמה",
     badge: "bg-amber-100 text-amber-700",
     dot: "bg-amber-500",
     title: "ההרשמה ל-Grow בתהליך",
-    desc: "טופס ההרשמה נפתח. הסטטוס יתעדכן כאן לאחר ש-Grow יסיימו את האימות.",
+    desc: "ניתן להמשיך או להתחיל מחדש את תהליך ההרשמה.",
   },
   PENDING_VERIFICATION: {
     label: "ממתין לאימות",
@@ -79,60 +83,84 @@ const STATE_META: Record<
     badge: "bg-red-100 text-red-700",
     dot: "bg-red-500",
     title: "ההרשמה ל-Grow נכשלה",
-    desc: "ההרשמה לא הושלמה. ניתן יהיה לנסות שוב בקרוב.",
+    desc: "ההרשמה לא הושלמה. ניתן לנסות שוב.",
   },
   EXPIRED: {
     label: "פג תוקף",
     badge: "bg-gray-100 text-gray-600",
     dot: "bg-gray-400",
     title: "תוקף ההרשמה פג",
-    desc: "תהליך ההרשמה פג תוקף. ניתן יהיה להתחיל מחדש בקרוב.",
+    desc: "תהליך ההרשמה פג תוקף. ניתן להתחיל מחדש.",
   },
 };
 
+const POLL_INTERVAL_MS = 5000;
+const POLL_MAX = 24; // ~2 minutes
+
 function formatDate(iso: string): string {
   try {
-    return new Date(iso).toLocaleDateString("he-IL", {
-      day: "numeric",
-      month: "short",
-      year: "numeric",
-    });
+    return new Date(iso).toLocaleDateString("he-IL", { day: "numeric", month: "short", year: "numeric" });
   } catch {
     return iso;
   }
 }
 
-export function GrowConnectionCard() {
+export function GrowConnectionCard({ initialSubmitted = false }: { initialSubmitted?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<GrowStatus | null>(null);
+  // `submitted` (optimistic "pending") comes from the server-read ?submitted=1 flag.
+  const [submitted] = useState(initialSubmitted);
+  const [polling, setPolling] = useState(initialSubmitted);
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      try {
-        const res = await fetch("/api/grow/onboarding/status", { credentials: "same-origin" });
-        if (!active) return;
-        if (res.status === 401) {
-          setError("נא להתחבר מחדש כדי לצפות בסטטוס.");
-          return;
-        }
-        if (!res.ok) {
-          setError("טעינת סטטוס Grow נכשלה. נסה לרענן את הדף.");
-          return;
-        }
-        const json = (await res.json()) as GrowStatus;
-        if (active) setData(json);
-      } catch {
-        if (active) setError("טעינת סטטוס Grow נכשלה. נסה לרענן את הדף.");
-      } finally {
-        if (active) setLoading(false);
+  const refresh = useCallback(async (): Promise<GrowState | null> => {
+    try {
+      const res = await fetch("/api/grow/onboarding/status", { credentials: "same-origin" });
+      if (res.status === 401) {
+        setError("נא להתחבר מחדש כדי לצפות בסטטוס.");
+        return null;
       }
-    })();
-    return () => {
-      active = false;
-    };
+      if (!res.ok) {
+        setError("טעינת סטטוס Grow נכשלה. נסה לרענן את הדף.");
+        return null;
+      }
+      const json = (await res.json()) as GrowStatus;
+      setData(json);
+      setError(null);
+      return json.state;
+    } catch {
+      setError("טעינת סטטוס Grow נכשלה. נסה לרענן את הדף.");
+      return null;
+    }
   }, []);
+
+  // Initial load
+  useEffect(() => {
+    (async () => {
+      const st = await refresh();
+      setLoading(false);
+      if (st === "PENDING_VERIFICATION") setPolling(true);
+    })();
+  }, [refresh]);
+
+  // Poll while pending (after submit, or if already pending on the server).
+  useEffect(() => {
+    if (!polling) return;
+    let cancelled = false;
+    let attempts = 0;
+    const id = setInterval(async () => {
+      attempts += 1;
+      const st = await refresh();
+      if (cancelled) return;
+      if (st === "CONNECTED" || st === "FAILED" || st === "EXPIRED" || attempts >= POLL_MAX) {
+        setPolling(false);
+      }
+    }, POLL_INTERVAL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [polling, refresh]);
 
   if (loading) {
     return (
@@ -143,7 +171,7 @@ export function GrowConnectionCard() {
     );
   }
 
-  if (error) {
+  if (error && !data) {
     return (
       <div className="bg-white rounded-2xl border border-red-200 shadow-sm px-6 py-5">
         <p className="text-sm text-gray-700">{error}</p>
@@ -153,9 +181,19 @@ export function GrowConnectionCard() {
 
   if (!data) return null;
 
-  const meta = STATE_META[data.state];
-  const showConnect =
-    data.state === "NOT_CONNECTED" || data.state === "FAILED" || data.state === "EXPIRED";
+  // After a postMessage success the server still reports IN_PROGRESS until the
+  // inbound callback arrives — show Pending Verification optimistically.
+  const effectiveState: GrowState =
+    submitted && (data.state === "NOT_CONNECTED" || data.state === "IN_PROGRESS")
+      ? "PENDING_VERIFICATION"
+      : data.state;
+
+  const meta = STATE_META[effectiveState];
+  const showLaunch =
+    effectiveState === "NOT_CONNECTED" ||
+    effectiveState === "FAILED" ||
+    effectiveState === "EXPIRED" ||
+    effectiveState === "IN_PROGRESS";
 
   return (
     <>
@@ -187,17 +225,10 @@ export function GrowConnectionCard() {
         <h2 className="text-base font-semibold text-gray-900 mb-2">{meta.title}</h2>
         <p className="text-sm text-gray-600 mb-5 leading-relaxed">{meta.desc}</p>
 
-        {showConnect && (
-          <button
-            type="button"
-            disabled
-            aria-disabled="true"
-            title="חיבור ל-Grow יופעל לאחר השלמת ההגדרה מול Grow"
-            className="inline-flex items-center justify-center gap-2 w-full px-6 py-3.5 rounded-xl
-                       text-sm font-bold text-gray-500 bg-gray-200 cursor-not-allowed"
-          >
-            בקרוב — בהמתנה להגדרת Grow
-          </button>
+        {showLaunch && <GrowLaunchForm />}
+
+        {effectiveState === "PENDING_VERIFICATION" && polling && (
+          <p className="text-xs text-gray-400">בודק סטטוס…</p>
         )}
       </div>
 
@@ -209,36 +240,25 @@ export function GrowConnectionCard() {
             <DetailRow label="סטטוס" value={meta.label} />
             <DetailRow label="מחובר" value={data.isConnected ? "כן" : "לא"} />
             {data.session && <DetailRow label="סטטוס הרשמה" value={data.session.status} />}
-            {data.session?.statusReason && (
-              <DetailRow label="הערה" value={data.session.statusReason} />
-            )}
+            {data.session?.statusReason && <DetailRow label="הערה" value={data.session.statusReason} />}
             {data.session?.businessNumberPreview && (
               <DetailRow label="מספר עוסק" value={data.session.businessNumberPreview} />
             )}
-            {data.merchant?.packageId && (
-              <DetailRow label="קוד חבילה" value={data.merchant.packageId} />
-            )}
+            {data.merchant?.packageId && <DetailRow label="קוד חבילה" value={data.merchant.packageId} />}
             {data.merchant?.trackingStatusId && (
               <DetailRow label="קוד סטטוס" value={data.merchant.trackingStatusId} />
             )}
             {data.merchant?.growUserIdLast4 && (
-              <DetailRow
-                label="מזהה סליקה (4 ספרות אחרונות)"
-                value={`••••${data.merchant.growUserIdLast4}`}
-              />
+              <DetailRow label="מזהה סליקה (4 ספרות אחרונות)" value={`••••${data.merchant.growUserIdLast4}`} />
             )}
             {data.session && (
               <DetailRow label="קוד מעקב קיים" value={data.session.hasTrackingCode ? "כן" : "לא"} />
             )}
-            {data.session && (
-              <DetailRow label="נוצר בתאריך" value={formatDate(data.session.createdAt)} />
-            )}
+            {data.session && <DetailRow label="נוצר בתאריך" value={formatDate(data.session.createdAt)} />}
             {data.session?.resolvedAt && (
               <DetailRow label="עודכן בתאריך" value={formatDate(data.session.resolvedAt)} />
             )}
-            {data.merchant && (
-              <DetailRow label="עדכון אחרון" value={formatDate(data.merchant.updatedAt)} />
-            )}
+            {data.merchant && <DetailRow label="עדכון אחרון" value={formatDate(data.merchant.updatedAt)} />}
           </div>
         </div>
       )}

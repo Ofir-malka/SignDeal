@@ -1,12 +1,10 @@
 /**
  * /settings/payments/grow — Grow clearing connection status (Rail B migration target).
  *
- * Server component: auth-gates and renders the layout shell. The live status is
- * loaded client-side by <GrowConnectionCard /> from GET /api/grow/onboarding/status.
- *
- * ⚠ Step 2 scope: STATUS DISPLAY ONLY. No iframe, no postMessage, and the Connect
- *   action is intentionally disabled ("coming soon"). This page does NOT alter the
- *   Stripe Connect flow at /settings/payments.
+ * Server component: auth-gates, renders the layout shell, and reads ?submitted=1
+ * (set when returning from the dedicated onboarding screen) to pass an optimistic
+ * "pending" hint to <GrowConnectionCard />, which loads live status from
+ * GET /api/grow/onboarding/status. Does NOT alter the Stripe flow at /settings/payments.
  */
 
 import type { Metadata } from "next";
@@ -21,9 +19,16 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-export default async function GrowConnectionPage() {
+export default async function GrowConnectionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ submitted?: string }>;
+}) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login?callbackUrl=/settings/payments/grow");
+
+  const { submitted } = await searchParams;
+  const initialSubmitted = submitted === "1";
 
   return (
     <DashboardShell>
@@ -47,7 +52,7 @@ export default async function GrowConnectionPage() {
       {/* ── Content ─────────────────────────────────────────────────────────── */}
       <main dir="rtl" className="flex-1 overflow-y-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="max-w-lg mx-auto space-y-6">
-          <GrowConnectionCard />
+          <GrowConnectionCard initialSubmitted={initialSubmitted} />
         </div>
       </main>
     </DashboardShell>

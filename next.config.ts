@@ -40,7 +40,8 @@ const securityHeaders = [
   // — style-src: Tailwind inlines styles; 'unsafe-inline' required
   // — img-src: allow data: URIs (signatures), blob:, and any https origin (avatars, logos)
   // — connect-src: Stripe, HYP, Vercel, self
-  // — frame-src / frame-ancestors: block all framing
+  // — frame-src: Stripe + the Grow onboarding form (dev.register.meshulam.co.il);
+  //   frame-ancestors 'none': we are never framed by others
   {
     key:   "Content-Security-Policy",
     value: [
@@ -50,7 +51,7 @@ const securityHeaders = [
       "img-src 'self' data: blob: https:",
       "font-src 'self' data:",
       "connect-src 'self' https://api.stripe.com https://hooks.stripe.com https://checkout.stripe.com https://pay.hyp.co.il https://*.vercel-insights.com",
-      "frame-src https://js.stripe.com https://checkout.stripe.com https://hooks.stripe.com",
+      "frame-src https://js.stripe.com https://checkout.stripe.com https://hooks.stripe.com https://dev.register.meshulam.co.il",
       "frame-ancestors 'none'",
       "form-action 'self'",
       "base-uri 'self'",
