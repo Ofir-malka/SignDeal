@@ -11,6 +11,8 @@ import { rateLimit, getRealIp } from "@/lib/rate-limit";
 import { logAuditEvent }         from "@/lib/audit/log-audit-event";
 import { sendEmail, paymentRequestEmail } from "@/lib/email";
 import { parsePropertyAddress } from "@/lib/format-address";
+import { isGrowPaymentsEnabled, shouldUseGrowRail } from "@/lib/payments/providers/grow/config";
+import { createGrowPaymentLink } from "@/lib/payments/providers/grow/createPaymentProcess.http";
 
 export async function POST(
   request: Request,
@@ -78,6 +80,30 @@ export async function POST(
         { error: "Contract is already paid", payment: contract.payment },
         { status: 409 },
       );
+    }
+
+    // ── Rail B: Grow branch (gated, additive) ─────────────────────────────────
+    // Fires ONLY when GROW_PAYMENTS_ENABLED=true AND the broker's GrowBrokerMerchant
+    // is active. PENDING_VERIFICATION / inactive / missing merchants fall through to
+    // the existing Stripe/Rapyd path UNCHANGED. When the flag is off this is a single
+    // boolean check — no extra query, no behavior change.
+    const growEnabled = isGrowPaymentsEnabled();
+    if (growEnabled) {
+      const growMerchant = await prisma.growBrokerMerchant.findUnique({
+        where:  { userId },
+        select: { id: true, isActive: true, growUserId: true },
+      });
+      if (growMerchant && shouldUseGrowRail(growEnabled, growMerchant.isActive)) {
+        return await handleGrowPaymentRequest(
+          id,
+          contract,
+          userId,
+          user,
+          { id: growMerchant.id, growUserId: growMerchant.growUserId },
+          getRealIp(request),
+          request.headers.get("user-agent") ?? null,
+        );
+      }
     }
 
     // ── Provider branch: delegate Stripe payments to dedicated handler ────────
@@ -568,6 +594,146 @@ async function handleStripePaymentRequest(
       user.fullName,
       fees.grossAmount,
     );
+  });
+
+  return NextResponse.json(updated, { status: 201 });
+}
+
+// ── Rail B: Grow payment handler (createPaymentProcess) ──────────────────────
+//
+// Called ONLY from the gated Grow branch (flag on + active merchant). Mirrors
+// handleStripePaymentRequest: fee calc → Payment upsert (PENDING) → Grow
+// createPaymentProcess → persist hosted url + process id/token → Contract
+// PAYMENT_PENDING → reuse the SMS/email delivery.
+//
+// Step 1 scope: create-link only. NO webhook, NO paid-marking (status stays
+// PENDING until the Step-2 webhook confirms). Stripe/Rapyd paths untouched.
+async function handleGrowPaymentRequest(
+  contractId: string,
+  contract: {
+    commission:      number;
+    propertyAddress: string;
+    propertyCity:    string;
+    client: { id: string; name: string; phone: string; email: string };
+  },
+  userId:       string,
+  user:         { fullName: string; email: string },
+  growMerchant: { id: string; growUserId: string | null },
+  ip:           string | null = null,
+  userAgent:    string | null = null,
+): Promise<NextResponse> {
+  if (!growMerchant.growUserId) {
+    return NextResponse.json(
+      { error: "חשבון הסליקה של Grow אינו מוכן (חסר מזהה עסק)." },
+      { status: 422 },
+    );
+  }
+
+  // ── Fee calculation (same calculator as the Stripe/Rapyd paths) ────────────
+  const config = defaultFeeConfig();
+  const fees   = calculateFees(contract.commission, config);
+
+  // ── Upsert Payment (create or reset stale Grow fields to PENDING) ──────────
+  const payment = await prisma.payment.upsert({
+    where:  { contractId },
+    create: {
+      contractId,
+      status:             "PENDING",
+      provider:           "grow",
+      routedProvider:     "grow",
+      amount:             fees.amount,
+      grossAmount:        fees.grossAmount,
+      processorFee:       fees.processorFee,
+      platformFee:        fees.platformFee,
+      netAmount:          fees.netAmount,
+      feePaidBy:          fees.feePaidBy,
+      providerFeePercent: fees.providerFeePercent,
+      platformFeePercent: fees.platformFeePercent,
+    },
+    update: {
+      status:             "PENDING",
+      provider:           "grow",
+      routedProvider:     "grow",
+      paidAt:             null,
+      paymentUrl:         null,
+      providerPaymentId:  null,
+      growProcessId:      null,
+      growProcessToken:   null,
+      amount:             fees.amount,
+      grossAmount:        fees.grossAmount,
+      processorFee:       fees.processorFee,
+      platformFee:        fees.platformFee,
+      netAmount:          fees.netAmount,
+      feePaidBy:          fees.feePaidBy,
+      providerFeePercent: fees.providerFeePercent,
+      platformFeePercent: fees.platformFeePercent,
+    },
+    select: { id: true },
+  });
+
+  // ── Call Grow createPaymentProcess (reveals the broker key internally) ─────
+  const linkResult = await createGrowPaymentLink({
+    merchantId:        growMerchant.id,
+    growUserId:        growMerchant.growUserId,
+    contractId,
+    paymentId:         payment.id,
+    grossAmountAgorot: fees.grossAmount,
+    clientName:        contract.client.name,
+    clientPhone:       contract.client.phone,
+    clientEmail:       contract.client.email || null,
+    description:       `עמלת תיווך — ${parsePropertyAddress(contract.propertyAddress).address}, ${contract.propertyCity}`,
+  });
+
+  if (!linkResult.ok) {
+    console.error(
+      `[payment-request/grow] createPaymentProcess failed contractId=${contractId}: ${linkResult.reason}`,
+    );
+    return NextResponse.json(
+      { error: "שגיאה ביצירת קישור תשלום ב-Grow. נסה שנית." },
+      { status: 502 },
+    );
+  }
+
+  // ── Persist hosted URL + Grow process id/token ─────────────────────────────
+  const updated = await prisma.payment.update({
+    where: { id: payment.id },
+    data:  {
+      paymentUrl:        linkResult.paymentUrl,
+      growProcessId:     linkResult.processId || null,
+      growProcessToken:  linkResult.processToken,
+      providerPaymentId: linkResult.processId || null,
+    },
+  });
+
+  // ── Advance Contract to PAYMENT_PENDING ────────────────────────────────────
+  await prisma.contract.updateMany({
+    where: { id: contractId, status: { in: ["SIGNED", "OPENED"] } },
+    data:  { status: "PAYMENT_PENDING" },
+  });
+
+  await logAuditEvent({
+    userId,
+    action:     "contract.payment_request.created",
+    entityType: "payment",
+    entityId:   updated.id,
+    metadata:   { provider: "grow", amount: fees.amount, feePaidBy: fees.feePaidBy, contractId },
+    ip,
+    userAgent,
+  });
+
+  // ── Send SMS / email with the Grow hosted URL (same helpers as Stripe/Rapyd) ─
+  const notifyContract = {
+    id:              contractId,
+    userId,
+    clientId:        contract.client.id,
+    propertyAddress: parsePropertyAddress(contract.propertyAddress).address,
+    client:          contract.client,
+  };
+  const notifyPayment = { id: updated.id, paymentUrl: updated.paymentUrl };
+
+  await sendPaymentLinkSms(notifyContract, notifyPayment, user.fullName);
+  after(async () => {
+    await sendPaymentLinkEmail(notifyContract, notifyPayment, user.fullName, fees.grossAmount);
   });
 
   return NextResponse.json(updated, { status: 201 });

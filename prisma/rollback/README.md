@@ -8,6 +8,7 @@ manually by an operator.
 |---|---|
 | `20260602120000_grow_phase1_foundation` | `20260602120000_grow_phase1_foundation.down.sql` |
 | `20260603120000_grow_phase2a_onboarding` | `20260603120000_grow_phase2a_onboarding.down.sql` |
+| `20260607120000_grow_rail_b_payment_fields` | `20260607120000_grow_rail_b_payment_fields.down.sql` |
 
 ---
 
@@ -63,6 +64,16 @@ If `CREATE INDEX CONCURRENTLY` is interrupted it can leave an `INVALID` index;
 drop it (`DROP INDEX CONCURRENTLY "<name>";`) and retry.
 
 ---
+
+## Additive-only note (MG-3)
+
+`20260607120000_grow_rail_b_payment_fields` adds **4 nullable columns** to `Payment`
+(`growProcessToken`, `growTransactionToken`, `growAsmachta`, `growRaw`) for the Rail B
+(client→broker) Grow payment path. No enum changes, no indexes on pre-existing tables —
+it drops cleanly. ⚠ Apply it to each environment **before** deploying the code that carries
+the new schema: Prisma's default full-row `Payment` selects reference these columns, so a
+code deploy without the migration would break existing `Payment` reads. The Grow payment
+path itself stays inert while `GROW_PAYMENTS_ENABLED=false`.
 
 ## Applying a rollback
 

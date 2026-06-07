@@ -394,6 +394,12 @@ model Payment {
   growTransactionId    String?        // Grow transaction id (populated in later phases)
   cardLast4            String?        // masked only — never the full PAN
 
+  // ── Grow Rail B — Step 1 (createPaymentProcess) + Step 2 (payment webhook) ──
+  growProcessToken     String?            // Grow process token — stored at create (Step 1)
+  growTransactionToken String?            // Grow transaction token — set by the payment webhook (Step 2)
+  growAsmachta         String?            // Grow approval (asmachta) code — set by the webhook (Step 2)
+  growRaw              String?  @db.Text  // raw verified Grow response snapshot — audit (Step 2)
+
   // Bank transfer — SETTLEMENT TRACKING ONLY (non-PII). Transient-first policy:
   // payer bank details are NOT persisted by default (forwarded to Grow in-request,
   // then discarded). The masked/encrypted payer columns (payerBankAccountLast4,
