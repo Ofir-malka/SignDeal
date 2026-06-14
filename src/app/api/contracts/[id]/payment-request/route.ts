@@ -356,14 +356,33 @@ async function handleStripePaymentRequest(
   });
 
   if (!brokerAccount || brokerAccount.onboardingStatus !== "COMPLETE") {
-    return NextResponse.json(
-      {
-        error:
-          "חשבון הברוקר אינו מוגדר לקבלת תשלומים. " +
-          "השלם את ההרשמה ב-Stripe תחילה (הגדרות → קבלת תשלומים).",
-      },
-      { status: 422 },
-    );
+    // Provider-aware copy: never tell a Grow broker to "finish Stripe onboarding".
+    // We only land in the Stripe handler here because the Grow rail did not claim
+    // the request. Inspect the broker's Grow merchant to choose the right message:
+    //   • active Grow merchant   → the flag is off (active + flag-on would have
+    //                              routed to Grow), so the rail is temporarily down.
+    //   • inactive Grow merchant → Grow onboarding still pending verification.
+    //   • Stripe account present → Stripe really is the rail; keep the Stripe copy.
+    //   • neither                → no rail configured at all (generic setup copy).
+    const growMerchant = await prisma.growBrokerMerchant.findUnique({
+      where:  { userId },
+      select: { isActive: true },
+    });
+
+    let error: string;
+    if (growMerchant?.isActive) {
+      error = "שירות קבלת התשלומים מושבת זמנית. נסה שוב מאוחר יותר או פנה לתמיכה.";
+    } else if (growMerchant) {
+      error = "חשבון הסליקה שלך נמצא בתהליך אימות. נסה שוב לאחר אישור החשבון, או פנה לתמיכה.";
+    } else if (brokerAccount) {
+      error =
+        "חשבון הברוקר אינו מוגדר לקבלת תשלומים. " +
+        "השלם את ההרשמה ב-Stripe תחילה (הגדרות → קבלת תשלומים).";
+    } else {
+      error = "לא הוגדר אמצעי לקבלת תשלומים. עבור להגדרות → קבלת תשלומים כדי להגדיר.";
+    }
+
+    return NextResponse.json({ error }, { status: 422 });
   }
 
   // ── 3. Fee calculation ──────────────────────────────────────────────────────
@@ -629,9 +648,14 @@ async function handleGrowPaymentRequest(
     );
   }
 
-  // ── Fee calculation (same calculator as the Stripe/Rapyd paths) ────────────
-  const config = defaultFeeConfig();
-  const fees   = calculateFees(contract.commission, config);
+  // ── Amount: COMMISSION ONLY (no Stripe gross-up) ───────────────────────────
+  // Rail B business rule: the client pays exactly the brokerage commission. Grow's
+  // processing fees are settled between Grow and the broker and are NEVER grossed
+  // onto the client. We therefore deliberately bypass calculateFees() /
+  // BREAK_EVEN_SPLIT here (that logic models the Stripe cost stack) and store a
+  // flat, provider-blind snapshot: client amount = commission, broker net =
+  // commission, all Stripe-cost fields zeroed, feePaidBy = BROKER.
+  const clientAmount = contract.commission; // agorot
 
   // ── Upsert Payment (create or reset stale Grow fields to PENDING) ──────────
   const payment = await prisma.payment.upsert({
@@ -641,14 +665,14 @@ async function handleGrowPaymentRequest(
       status:             "PENDING",
       provider:           "grow",
       routedProvider:     "grow",
-      amount:             fees.amount,
-      grossAmount:        fees.grossAmount,
-      processorFee:       fees.processorFee,
-      platformFee:        fees.platformFee,
-      netAmount:          fees.netAmount,
-      feePaidBy:          fees.feePaidBy,
-      providerFeePercent: fees.providerFeePercent,
-      platformFeePercent: fees.platformFeePercent,
+      amount:             clientAmount,
+      grossAmount:        clientAmount,
+      processorFee:       0,
+      platformFee:        0,
+      netAmount:          clientAmount,
+      feePaidBy:          "BROKER",
+      providerFeePercent: 0,
+      platformFeePercent: 0,
     },
     update: {
       status:             "PENDING",
@@ -659,14 +683,14 @@ async function handleGrowPaymentRequest(
       providerPaymentId:  null,
       growProcessId:      null,
       growProcessToken:   null,
-      amount:             fees.amount,
-      grossAmount:        fees.grossAmount,
-      processorFee:       fees.processorFee,
-      platformFee:        fees.platformFee,
-      netAmount:          fees.netAmount,
-      feePaidBy:          fees.feePaidBy,
-      providerFeePercent: fees.providerFeePercent,
-      platformFeePercent: fees.platformFeePercent,
+      amount:             clientAmount,
+      grossAmount:        clientAmount,
+      processorFee:       0,
+      platformFee:        0,
+      netAmount:          clientAmount,
+      feePaidBy:          "BROKER",
+      providerFeePercent: 0,
+      platformFeePercent: 0,
     },
     select: { id: true },
   });
@@ -677,7 +701,7 @@ async function handleGrowPaymentRequest(
     growUserId:        growMerchant.growUserId,
     contractId,
     paymentId:         payment.id,
-    grossAmountAgorot: fees.grossAmount,
+    grossAmountAgorot: clientAmount,
     clientName:        contract.client.name,
     clientPhone:       contract.client.phone,
     clientEmail:       contract.client.email || null,
@@ -716,7 +740,7 @@ async function handleGrowPaymentRequest(
     action:     "contract.payment_request.created",
     entityType: "payment",
     entityId:   updated.id,
-    metadata:   { provider: "grow", amount: fees.amount, feePaidBy: fees.feePaidBy, contractId },
+    metadata:   { provider: "grow", amount: clientAmount, feePaidBy: "BROKER", contractId },
     ip,
     userAgent,
   });
@@ -733,7 +757,7 @@ async function handleGrowPaymentRequest(
 
   await sendPaymentLinkSms(notifyContract, notifyPayment, user.fullName);
   after(async () => {
-    await sendPaymentLinkEmail(notifyContract, notifyPayment, user.fullName, fees.grossAmount);
+    await sendPaymentLinkEmail(notifyContract, notifyPayment, user.fullName, clientAmount);
   });
 
   return NextResponse.json(updated, { status: 201 });
@@ -751,9 +775,9 @@ async function sendPaymentLinkEmail(
     propertyAddress: string;
     client:          { name: string; email: string };
   },
-  payment:    { id: string; paymentUrl: string | null },
-  brokerName: string,
-  amountNis:  number,
+  payment:      { id: string; paymentUrl: string | null },
+  brokerName:   string,
+  amountAgorot: number,
 ): Promise<void> {
   try {
     if (!payment.paymentUrl) return;
@@ -762,11 +786,15 @@ async function sendPaymentLinkEmail(
       return;
     }
 
+    // The email template expects NIS (full currency units). Every caller passes the
+    // amount in agorot, so convert exactly once here. This is the fix for the 100×
+    // display bug (₪11,000 was rendering as ₪1,100,000 because agorot reached the
+    // NIS-typed template field unconverted).
     const template = paymentRequestEmail({
       clientName:      contract.client.name,
       brokerName,
       propertyAddress: contract.propertyAddress,
-      amountNis,
+      amountNis:       amountAgorot / 100,
       paymentLink:     payment.paymentUrl,
     });
 
