@@ -54,3 +54,32 @@ export interface CreateGrowPaymentLinkArgs {
 export type GrowCreatePaymentResult =
   | { ok: true; paymentUrl: string; processId: string; processToken: string | null }
   | { ok: false; reason: string; errId?: number | null };
+
+/**
+ * Input to the pure CreatePaymentLink builder (Step 1b — managed long-lived link).
+ *
+ * The broker apiKey is a BODY field here (the account credential); the product
+ * `x-api-key` is an HTTP HEADER set in createPaymentLink.http.ts and NEVER appears
+ * in this map. notifyUrl is P3-ready: included only when non-empty.
+ */
+export interface BuildCreatePaymentLinkArgs {
+  /** Broker's Grow userId — WHO RECEIVES the money. */
+  userId: string;
+  /** Revealed broker apiKey — BODY field. NEVER logged. */
+  apiKey: string;
+  /** Link-compatible pageCode (GROW_PAYMENT_LINK_PAGECODE; sandbox 12796f74fc4f). */
+  pageCode: string;
+  /** Client amount in shekels (commission only — agorot→shekels, no VAT/fees added). */
+  sumShekels: string;
+  /** Link title + product line name (e.g. "עמלת תיווך — …"). */
+  title: string;
+  productName: string;
+  fullName: string;
+  phone: string;
+  email?: string | null;
+  /**
+   * Server-to-server callback target. Step 1b: null → field omitted. P3: set to the
+   * flat https://www.signdeal.co.il/api/grow/webhook. Included only when non-empty.
+   */
+  notifyUrl?: string | null;
+}
