@@ -70,3 +70,27 @@ export function parseCreatePaymentLinkResponse(json: unknown): GrowCreatePayment
   if (err) return { ok: false, reason: asString(err.message) ?? "Grow error", errId: asNum(err.id) };
   return { ok: false, reason: asString(root.err) ?? "Grow returned a non-success status" };
 }
+
+/**
+ * Parse a getPaymentLinkInfo response (P3b verify-then-trust). Success (status 1)
+ * returns the raw `data` object for transaction extraction; anything else → ok:false.
+ */
+export function parsePaymentLinkInfoResponse(
+  json: unknown,
+):
+  | { ok: true; data: Record<string, unknown> }
+  | { ok: false; reason: string; errId?: number | null } {
+  const root = asRecord(json);
+  if (!root) return { ok: false, reason: "empty or non-JSON response" };
+
+  const statusOne = root.status === 1 || root.status === "1";
+  if (statusOne) {
+    const data = asRecord(root.data);
+    if (!data) return { ok: false, reason: "success status but no data in response" };
+    return { ok: true, data };
+  }
+
+  const err = asRecord(root.err);
+  if (err) return { ok: false, reason: asString(err.message) ?? "Grow error", errId: asNum(err.id) };
+  return { ok: false, reason: asString(root.err) ?? "Grow returned a non-success status" };
+}
