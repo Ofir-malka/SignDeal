@@ -136,3 +136,26 @@ export function getGrowPaymentLinkPageCode(): string {
 export function getGrowPaymentLinkNotifyUrl(): string | null {
   return optEnv("GROW_PAYMENT_LINK_NOTIFY_URL");
 }
+
+// ── getPaymentLinkInfo (verify-then-trust) + approveTransaction — P3b ──────────
+// Both live on the MESHULAM host family (NOT grow.link) and authenticate by the
+// broker apiKey in the BODY — there is NO x-api-key header for these.
+
+/** getPaymentLinkInfo URL — authoritative status re-fetch for verify-then-trust. */
+export function getGetPaymentLinkInfoUrl(): string {
+  return `https://${getGrowPaymentHost()}/api/light/server/1.0/getPaymentLinkInfo`;
+}
+
+/** approveTransaction URL — best-effort ACK after PAID. */
+export function getApproveTransactionUrl(): string {
+  return `https://${getGrowPaymentHost()}/api/light/server/1.0/approveTransaction`;
+}
+
+/**
+ * Best-effort ApproveTransaction toggle. Default OFF: the exact endpoint/params
+ * are not yet probe-confirmed, and Grow processes the payment regardless of the
+ * ACK. Flip GROW_PAYMENT_LINK_APPROVE_ENABLED=true once confirmed.
+ */
+export function isGrowApproveTransactionEnabled(): boolean {
+  return boolEnv("GROW_PAYMENT_LINK_APPROVE_ENABLED");
+}

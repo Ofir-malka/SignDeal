@@ -85,3 +85,22 @@ export interface BuildCreatePaymentLinkArgs {
    */
   notifyUrl?: string | null;
 }
+
+/**
+ * A PAID transaction extracted from the getPaymentLinkInfo re-fetch — the
+ * AUTHORITATIVE source for P3b's PAID decision. Token fields are persisted to the
+ * Payment row / used for ApproveTransaction but are NEVER logged.
+ */
+export interface VerifiedGrowTransaction {
+  paid: boolean;
+  statusCode: string | null;
+  cField1: string | null;
+  sumShekels: string | null;
+  paymentLinkProcessId: string | null;
+  transactionId: string | null;
+  transactionToken: string | null;
+  asmachta: string | null;
+  cardSuffix: string | null;
+  processId: string | null;
+  processToken: string | null;
+}
