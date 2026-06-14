@@ -69,6 +69,8 @@ export interface BuildCreatePaymentLinkArgs {
   apiKey: string;
   /** Link-compatible pageCode (GROW_PAYMENT_LINK_PAGECODE; sandbox 12796f74fc4f). */
   pageCode: string;
+  /** Our Payment.id → sent as cField1 (P3a webhook CORRELATION handle). */
+  paymentId: string;
   /** Client amount in shekels (commission only — agorot→shekels, no VAT/fees added). */
   sumShekels: string;
   /** Link title + product line name (e.g. "עמלת תיווך — …"). */

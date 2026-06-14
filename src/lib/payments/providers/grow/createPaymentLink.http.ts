@@ -47,6 +47,7 @@ export async function createManagedPaymentLink(
       userId: growUserId,
       apiKey: creds.apiKey.reveal(), // broker key — BODY field; reveal ONLY here
       pageCode: getGrowPaymentLinkPageCode(),
+      paymentId: args.paymentId, // P3a: → cField1 (webhook correlation)
       sumShekels: agorotToShekels(args.grossAmountAgorot), // commission only (P0)
       title: args.description,
       productName: args.description,

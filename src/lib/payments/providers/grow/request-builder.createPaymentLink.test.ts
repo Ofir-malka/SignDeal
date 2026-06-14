@@ -7,6 +7,7 @@ function base(partial: Partial<BuildCreatePaymentLinkArgs> = {}): BuildCreatePay
     userId: "broker-user-1",
     apiKey: "FAKE_BROKER_KEY",
     pageCode: "12796f74fc4f",
+    paymentId: "pay_123",
     sumShekels: "11000.00",
     title: "עמלת תיווך — הרצל 1, תל אביב",
     productName: "עמלת תיווך — הרצל 1, תל אביב",
@@ -26,6 +27,10 @@ describe("buildCreatePaymentLinkFields", () => {
     expect(f.isActive).toBe("1");
     expect(f.chargeType).toBe("1");
     expect(f["paymentTypes[0][type]"]).toBe("payments");
+  });
+
+  it("sends cField1 = Payment.id for webhook correlation (P3a)", () => {
+    expect(buildCreatePaymentLinkFields(base()).cField1).toBe("pay_123");
   });
 
   it("sends commission-only price with vatType=1 (no VAT/fees added)", () => {

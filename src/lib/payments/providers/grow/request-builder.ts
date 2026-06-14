@@ -76,6 +76,7 @@ export function buildCreatePaymentLinkFields(
     userId: args.userId,
     apiKey: args.apiKey, // BODY field — the broker's account key (header key is separate)
     pageCode: args.pageCode,
+    cField1: args.paymentId, // P3a: our Payment.id — webhook correlation handle
     paymentLinkType: "2",
     isActive: "1",
     chargeType: "1",
