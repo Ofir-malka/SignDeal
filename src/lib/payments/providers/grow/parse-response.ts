@@ -42,3 +42,31 @@ export function parseCreatePaymentProcessResponse(json: unknown): GrowCreatePaym
   if (err) return { ok: false, reason: asString(err.message) ?? "Grow error", errId: asNum(err.id) };
   return { ok: false, reason: asString(root.err) ?? "Grow returned a non-success status" };
 }
+
+/**
+ * Parse a CreatePaymentLink response (Step 1b). Success (status 1) maps
+ * { url, paymentLinkProcessId, paymentLinkProcessToken } onto the shared result
+ * shape (processId / processToken), so the route's persist block is reused as-is.
+ * Anything else → ok:false (carrying errId for 852 / 701 / 784 diagnosis).
+ */
+export function parseCreatePaymentLinkResponse(json: unknown): GrowCreatePaymentResult {
+  const root = asRecord(json);
+  if (!root) return { ok: false, reason: "empty or non-JSON response" };
+
+  const statusOne = root.status === 1 || root.status === "1";
+  if (statusOne) {
+    const data = asRecord(root.data);
+    const url = data ? asString(data.url) : null;
+    if (!url) return { ok: false, reason: "success status but no payment link url in response" };
+    return {
+      ok: true,
+      paymentUrl: url,
+      processId: (data && asString(data.paymentLinkProcessId)) ?? "",
+      processToken: data ? asString(data.paymentLinkProcessToken) : null,
+    };
+  }
+
+  const err = asRecord(root.err);
+  if (err) return { ok: false, reason: asString(err.message) ?? "Grow error", errId: asNum(err.id) };
+  return { ok: false, reason: asString(root.err) ?? "Grow returned a non-success status" };
+}

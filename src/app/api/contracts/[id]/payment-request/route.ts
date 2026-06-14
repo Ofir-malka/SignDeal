@@ -11,8 +11,9 @@ import { rateLimit, getRealIp } from "@/lib/rate-limit";
 import { logAuditEvent }         from "@/lib/audit/log-audit-event";
 import { sendEmail, paymentRequestEmail } from "@/lib/email";
 import { parsePropertyAddress } from "@/lib/format-address";
-import { isGrowPaymentsEnabled, shouldUseGrowRail } from "@/lib/payments/providers/grow/config";
+import { isGrowPaymentsEnabled, shouldUseGrowRail, isGrowPaymentLinkEnabled } from "@/lib/payments/providers/grow/config";
 import { createGrowPaymentLink } from "@/lib/payments/providers/grow/createPaymentProcess.http";
+import { createManagedPaymentLink } from "@/lib/payments/providers/grow/createPaymentLink.http";
 
 export async function POST(
   request: Request,
@@ -695,8 +696,13 @@ async function handleGrowPaymentRequest(
     select: { id: true },
   });
 
-  // ── Call Grow createPaymentProcess (reveals the broker key internally) ─────
-  const linkResult = await createGrowPaymentLink({
+  // ── Call Grow to create the client payment link (reveals the broker key internally) ─
+  // GROW_PAYMENT_LINK_ENABLED selects the flow WITHIN the Grow rail:
+  //   on  → CreatePaymentLink   (managed, long-lived link on grow.link)
+  //   off → createPaymentProcess (hosted checkout on meshulam.co.il) — fallback
+  // Both return the same GrowCreatePaymentResult, so the persist / SMS / email below
+  // is shared and unchanged. grossAmountAgorot carries the commission only (P0).
+  const linkArgs = {
     merchantId:        growMerchant.id,
     growUserId:        growMerchant.growUserId,
     contractId,
@@ -706,7 +712,10 @@ async function handleGrowPaymentRequest(
     clientPhone:       contract.client.phone,
     clientEmail:       contract.client.email || null,
     description:       `עמלת תיווך — ${parsePropertyAddress(contract.propertyAddress).address}, ${contract.propertyCity}`,
-  });
+  };
+  const linkResult = isGrowPaymentLinkEnabled()
+    ? await createManagedPaymentLink(linkArgs)
+    : await createGrowPaymentLink(linkArgs);
 
   if (!linkResult.ok) {
     console.error(

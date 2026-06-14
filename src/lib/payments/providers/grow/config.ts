@@ -83,3 +83,56 @@ export function buildCancelUrl(contractId: string): string {
 export function getPaymentNotifyUrl(): string | null {
   return null;
 }
+
+// ── CreatePaymentLink (Rail B managed long-lived link) — Step 1b ──────────────
+// A SEPARATE flow + SEPARATE env from createPaymentProcess. Selected WITHIN the
+// Grow rail by GROW_PAYMENT_LINK_ENABLED; the outer rail gate (isGrowPaymentsEnabled
+// + shouldUseGrowRail) is unchanged. Do NOT reuse GROW_PAYMENT_PAGECODE here —
+// that pageCode belongs to createPaymentProcess hosted checkout.
+
+/** Sub-flag: use CreatePaymentLink instead of createPaymentProcess. Default OFF. */
+export function isGrowPaymentLinkEnabled(): boolean {
+  return boolEnv("GROW_PAYMENT_LINK_ENABLED");
+}
+
+/**
+ * CreatePaymentLink host — a DIFFERENT host family than createPaymentProcess
+ * (grow.link, not meshulam.co.il). Explicit GROW_PAYMENT_LINK_HOST wins; else
+ * derived from GROW_ENVIRONMENT.
+ */
+export function getGrowPaymentLinkHost(): string {
+  return (
+    optEnv("GROW_PAYMENT_LINK_HOST") ??
+    (growEnvironment() === "production" ? "secure.grow.link" : "sandboxapi.grow.link")
+  );
+}
+
+export function getCreatePaymentLinkUrl(): string {
+  return `https://${getGrowPaymentLinkHost()}/api/light/server/1.0/CreatePaymentLink`;
+}
+
+/**
+ * CreatePaymentLink product/integration key — the HTTP `x-api-key` HEADER.
+ * NOT the broker apiKey (that goes in the BODY) and NOT GROW_PLATFORM_API_KEY
+ * (the GetLink/onboarding key — proven to 403 here). Sandbox: the documented
+ * product key; production: the per-account production key from Grow.
+ */
+export function getGrowPaymentLinkXApiKey(): string {
+  return reqEnv("GROW_PAYMENT_LINK_X_API_KEY");
+}
+
+/** Link-compatible pageCode (sandbox 12796f74fc4f). Separate from GROW_PAYMENT_PAGECODE. */
+export function getGrowPaymentLinkPageCode(): string {
+  return reqEnv("GROW_PAYMENT_LINK_PAGECODE");
+}
+
+/**
+ * P3-ready notifyUrl for the CreatePaymentLink server-to-server callback.
+ * Per Grow docs the callback is POSTed to the notifyUrl sent IN the request.
+ *   Step 1b: returns null (webhook paused) → the field is OMITTED.
+ *   P3:      set GROW_PAYMENT_LINK_NOTIFY_URL to EXACTLY
+ *            https://www.signdeal.co.il/api/grow/webhook   (flat URL — NO token path).
+ */
+export function getGrowPaymentLinkNotifyUrl(): string | null {
+  return optEnv("GROW_PAYMENT_LINK_NOTIFY_URL");
+}
