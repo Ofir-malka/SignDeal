@@ -137,6 +137,15 @@ export function getGrowPaymentLinkNotifyUrl(): string | null {
   return optEnv("GROW_PAYMENT_LINK_NOTIFY_URL");
 }
 
+/**
+ * UX-only success-redirect URL for CreatePaymentLink — Grow sends the client here
+ * after paying. Derived from the canonical APP_BASE_URL (no new env var). The page
+ * is read-only and NEVER marks paid; the webhook remains the source of truth.
+ */
+export function getGrowPaymentLinkSuccessUrl(contractId: string): string {
+  return `${appBaseUrl()}/pay/thank-you?contractId=${encodeURIComponent(contractId)}`;
+}
+
 // ── getPaymentLinkInfo (verify-then-trust) + approveTransaction — P3b ──────────
 // Both live on the MESHULAM host family (NOT grow.link) and authenticate by the
 // broker apiKey in the BODY — there is NO x-api-key header for these.

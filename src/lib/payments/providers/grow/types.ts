@@ -84,6 +84,11 @@ export interface BuildCreatePaymentLinkArgs {
    * flat https://www.signdeal.co.il/api/grow/webhook. Included only when non-empty.
    */
   notifyUrl?: string | null;
+  /**
+   * UX-only success-redirect URL (the /pay/thank-you page). Included only when
+   * non-empty. Never a source of truth — the webhook marks paid, not this redirect.
+   */
+  successUrl?: string | null;
 }
 
 /**

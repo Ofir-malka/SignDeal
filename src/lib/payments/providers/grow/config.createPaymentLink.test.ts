@@ -6,6 +6,7 @@ import {
   getGrowPaymentLinkPageCode,
   getGrowPaymentLinkXApiKey,
   getGrowPaymentLinkNotifyUrl,
+  getGrowPaymentLinkSuccessUrl,
 } from "./config";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -62,5 +63,20 @@ describe("notifyUrl is P3-ready (omitted in Step 1b)", () => {
     expect(getGrowPaymentLinkNotifyUrl()).toBeNull();
     vi.stubEnv("GROW_PAYMENT_LINK_NOTIFY_URL", "https://www.signdeal.co.il/api/grow/webhook");
     expect(getGrowPaymentLinkNotifyUrl()).toBe("https://www.signdeal.co.il/api/grow/webhook");
+  });
+});
+
+describe("getGrowPaymentLinkSuccessUrl (UX redirect, derived from APP_BASE_URL)", () => {
+  it("builds /pay/thank-you?contractId=… from APP_BASE_URL", () => {
+    vi.stubEnv("APP_BASE_URL", "https://app.example");
+    expect(getGrowPaymentLinkSuccessUrl("c_123")).toBe(
+      "https://app.example/pay/thank-you?contractId=c_123",
+    );
+  });
+  it("strips a trailing slash and URL-encodes the contractId", () => {
+    vi.stubEnv("APP_BASE_URL", "https://app.example/");
+    expect(getGrowPaymentLinkSuccessUrl("a/b")).toBe(
+      "https://app.example/pay/thank-you?contractId=a%2Fb",
+    );
   });
 });

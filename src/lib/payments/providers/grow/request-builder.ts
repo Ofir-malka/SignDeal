@@ -108,5 +108,10 @@ export function buildCreatePaymentLinkFields(
     fields.notifyUrl = args.notifyUrl.trim();
   }
 
+  // UX-only client success redirect (the /pay/thank-you page) — only when provided.
+  if (args.successUrl && args.successUrl.trim()) {
+    fields.successUrl = args.successUrl.trim();
+  }
+
   return fields;
 }

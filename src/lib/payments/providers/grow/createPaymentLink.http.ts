@@ -24,6 +24,7 @@ import {
   getGrowPaymentLinkXApiKey,
   getGrowPaymentLinkPageCode,
   getGrowPaymentLinkNotifyUrl,
+  getGrowPaymentLinkSuccessUrl,
 } from "./config";
 import type { CreateGrowPaymentLinkArgs, GrowCreatePaymentResult } from "./types";
 
@@ -55,6 +56,7 @@ export async function createManagedPaymentLink(
       phone: args.clientPhone,
       email: args.clientEmail ?? null,
       notifyUrl: getGrowPaymentLinkNotifyUrl(), // null in Step 1b; P3 sets the flat URL
+      successUrl: getGrowPaymentLinkSuccessUrl(args.contractId), // UX-only client redirect
     });
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : "config/credentials error" };

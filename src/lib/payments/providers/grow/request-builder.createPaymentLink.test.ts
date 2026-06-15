@@ -73,4 +73,12 @@ describe("buildCreatePaymentLinkFields", () => {
     );
     expect(withNotify.notifyUrl).toBe("https://www.signdeal.co.il/api/grow/webhook");
   });
+
+  it("includes successUrl only when provided (UX redirect, gated)", () => {
+    expect(buildCreatePaymentLinkFields(base()).successUrl).toBeUndefined();
+    const withSuccess = buildCreatePaymentLinkFields(
+      base({ successUrl: "https://app.example/pay/thank-you?contractId=c1" }),
+    );
+    expect(withSuccess.successUrl).toBe("https://app.example/pay/thank-you?contractId=c1");
+  });
 });
