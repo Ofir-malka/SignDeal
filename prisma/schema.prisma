@@ -1147,8 +1147,10 @@ model GrowBrokerMerchant {
   userId          String   @unique
   user            User     @relation(fields: [userId], references: [id])
   growUserId      String?  // identifier from the onboarding callback (not a secret)
+  businessTitle   String?  // broker business title from onboarding callback (data.business_title)
   trackingCode    String?
   packageId       String?
+  packageName     String?  // human-readable Grow package name from callback (data.package_name)
   trackingStatus  String?
   apiKeySecretRef String?  // handle → EncryptedSecret (purpose = GROW_BROKER_API_KEY)
   isActive        Boolean  @default(false)

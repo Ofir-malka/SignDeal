@@ -42,9 +42,21 @@ describe("parseOnboardingCallback", () => {
     expect(r.update.growUserId).toBe("beasuser123");
     expect(r.update.trackingCode).toBe("TRK-9");
     expect(r.update.packageId).toBe("1997");
+    expect(r.update.packageName).toBe("Pro");
+    expect(r.update.businessTitle).toBe("Test LTD");
     expect(r.update.statusRaw).toBe("1");
     expect(r.update.trackingStatus).toEqual({ id: "3", message: "העסק הוקם בהצלחה" });
     expect(r.update.apiKey).toBe("84dhsecret");
+  });
+
+  it("leaves businessTitle/packageName null when the callback omits them", () => {
+    const minimal = JSON.stringify({ data: { user_id: "u2", tracking_code: "T2" }, status: "1" });
+    const r = parseOnboardingCallback(minimal, "application/json");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.update.businessTitle).toBeNull();
+    expect(r.update.packageName).toBeNull();
+    expect(r.update.growUserId).toBe("u2"); // existing fields still parse
   });
 
   it("supports a flat (un-nested) variant", () => {
