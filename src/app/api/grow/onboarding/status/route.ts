@@ -61,7 +61,9 @@ export async function GET() {
       // Their full values are NEVER returned. apiKeySecretRef is NOT selected.
       select: {
         isActive: true,
+        businessTitle: true,
         packageId: true,
+        packageName: true,
         trackingStatus: true,
         growUserId: true,
         trackingCode: true,
@@ -93,7 +95,9 @@ export async function GET() {
       isConnected,
       merchant: merchant
         ? {
+            businessTitle: merchant.businessTitle, // broker's own business name (owner-scoped)
             packageId: merchant.packageId,
+            packageName: merchant.packageName,
             trackingStatusId: merchant.trackingStatus,
             growUserIdLast4: merchant.growUserId ? merchant.growUserId.slice(-4) : null,
             updatedAt: merchant.updatedAt.toISOString(),
