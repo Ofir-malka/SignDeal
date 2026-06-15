@@ -65,7 +65,7 @@ const STATE_META: Record<
     desc: "ניתן להמשיך או להתחיל מחדש את תהליך ההרשמה.",
   },
   PENDING_VERIFICATION: {
-    label: "ממתין לאימות",
+    label: "ממתין לאישור Grow",
     badge: "bg-blue-100 text-blue-700",
     dot: "bg-blue-500",
     title: "ההרשמה נשלחה — ממתינה לאימות Grow",
@@ -96,14 +96,6 @@ const STATE_META: Record<
 
 const POLL_INTERVAL_MS = 5000;
 const POLL_MAX = 24; // ~2 minutes
-
-function formatDate(iso: string): string {
-  try {
-    return new Date(iso).toLocaleDateString("he-IL", { day: "numeric", month: "short", year: "numeric" });
-  } catch {
-    return iso;
-  }
-}
 
 export function GrowConnectionCard({ initialSubmitted = false }: { initialSubmitted?: boolean }) {
   const [loading, setLoading] = useState(true);
@@ -231,46 +223,6 @@ export function GrowConnectionCard({ initialSubmitted = false }: { initialSubmit
           <p className="text-xs text-gray-400">בודק סטטוס…</p>
         )}
       </div>
-
-      {/* Safe details (only rendered when there is something to show) */}
-      {(data.merchant || data.session) && (
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm px-6 py-5">
-          <h2 className="text-base font-semibold text-gray-900 mb-4">פרטי חיבור</h2>
-          <div className="space-y-0 divide-y divide-gray-100">
-            <DetailRow label="סטטוס" value={meta.label} />
-            <DetailRow label="מחובר" value={data.isConnected ? "כן" : "לא"} />
-            {data.session && <DetailRow label="סטטוס הרשמה" value={data.session.status} />}
-            {data.session?.statusReason && <DetailRow label="הערה" value={data.session.statusReason} />}
-            {data.session?.businessNumberPreview && (
-              <DetailRow label="מספר עוסק" value={data.session.businessNumberPreview} />
-            )}
-            {data.merchant?.packageId && <DetailRow label="קוד חבילה" value={data.merchant.packageId} />}
-            {data.merchant?.trackingStatusId && (
-              <DetailRow label="קוד סטטוס" value={data.merchant.trackingStatusId} />
-            )}
-            {data.merchant?.growUserIdLast4 && (
-              <DetailRow label="מזהה סליקה (4 ספרות אחרונות)" value={`••••${data.merchant.growUserIdLast4}`} />
-            )}
-            {data.session && (
-              <DetailRow label="קוד מעקב קיים" value={data.session.hasTrackingCode ? "כן" : "לא"} />
-            )}
-            {data.session && <DetailRow label="נוצר בתאריך" value={formatDate(data.session.createdAt)} />}
-            {data.session?.resolvedAt && (
-              <DetailRow label="עודכן בתאריך" value={formatDate(data.session.resolvedAt)} />
-            )}
-            {data.merchant && <DetailRow label="עדכון אחרון" value={formatDate(data.merchant.updatedAt)} />}
-          </div>
-        </div>
-      )}
     </>
-  );
-}
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between py-2.5">
-      <span className="text-sm text-gray-500">{label}</span>
-      <span className="text-sm font-medium text-gray-900">{value}</span>
-    </div>
   );
 }
