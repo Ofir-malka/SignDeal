@@ -20,6 +20,7 @@ import { sendEmail, paymentReceivedEmail } from "@/lib/email";
 import { parsePropertyAddress } from "@/lib/format-address";
 import { parseCallbackBody, sanitizeForCapture } from "./webhook-capture";
 import { extractCallbackTrigger, findPaidTransaction } from "./webhook-parse";
+import { webhookStatusUpdateWhere } from "./webhook-status";
 import { getGrowPaymentLinkInfo } from "./getPaymentLinkInfo.http";
 import { approveGrowTransaction } from "./approveTransaction.http";
 
@@ -209,8 +210,11 @@ async function setEventStatus(
   error?: string,
 ): Promise<void> {
   try {
+    // Non-downgrading + race-safe: a duplicate/already-paid IGNORED|FAILED must not
+    // overwrite a terminal PROCESSED (the row that recorded the real PAID). The
+    // guard is in the WHERE, so it matches 0 rows instead of clobbering PROCESSED.
     await prisma.webhookEvent.updateMany({
-      where: { provider: PROVIDER, eventId },
+      where: webhookStatusUpdateWhere(PROVIDER, eventId, status),
       data: { status, error: error ?? null },
     });
   } catch {
