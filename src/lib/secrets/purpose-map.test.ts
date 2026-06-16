@@ -96,3 +96,43 @@ describe("assertPurposeRailOwner (R1 + R2 + R3)", () => {
     }
   });
 });
+
+describe("GROW_SAAS_MERCHANT_API_KEY (Rail A platform secret)", () => {
+  it("maps to rail A / ownerType Platform / ttl none", () => {
+    expect(specForPurpose("GROW_SAAS_MERCHANT_API_KEY")).toEqual({
+      rail: "A",
+      ownerType: "Platform",
+      ttlPolicy: "none",
+    });
+  });
+
+  it("accepts (A, Platform)", () => {
+    expect(() =>
+      assertPurposeRailOwner({
+        purpose: "GROW_SAAS_MERCHANT_API_KEY",
+        rail: "A",
+        ownerType: "Platform",
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects Rail B access (R2)", () => {
+    expect(() =>
+      assertPurposeRailOwner({
+        purpose: "GROW_SAAS_MERCHANT_API_KEY",
+        rail: "B",
+        ownerType: "Platform",
+      }),
+    ).toThrow(SecretRailMismatchError);
+  });
+
+  it("rejects a non-Platform ownerType (R3)", () => {
+    expect(() =>
+      assertPurposeRailOwner({
+        purpose: "GROW_SAAS_MERCHANT_API_KEY",
+        rail: "A",
+        ownerType: "Subscription",
+      }),
+    ).toThrow(SecretValidationError);
+  });
+});

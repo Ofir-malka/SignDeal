@@ -12,13 +12,18 @@
 
 import { SecretPurpose } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { storeSecret, readSecret } from "@/lib/secrets/accessor";
+import { storeSecret, readSecret, findActiveSecretRef } from "@/lib/secrets/accessor";
 import type { RevealableSecret } from "@/lib/secrets/revealable-secret";
 import { SecretNotFoundError } from "@/lib/secrets/errors";
 
 const RAIL = "A" as const;
 const OWNER_TYPE = "Subscription" as const;
 const PURPOSE = SecretPurpose.GROW_SAAS_CHARGE_TOKEN;
+
+// ── Platform singleton: SignDeal's OWN Grow SaaS merchant API key (Rail A) ──────
+const MERCHANT_PURPOSE = SecretPurpose.GROW_SAAS_MERCHANT_API_KEY;
+const PLATFORM_OWNER_TYPE = "Platform" as const;
+const PLATFORM_OWNER_ID = "grow_saas" as const;
 
 export interface StoreGrowSaasTokenArgs {
   /** Subscription.id */
@@ -90,4 +95,61 @@ export async function getGrowSaasBillingCredentials(args: {
   });
 
   return { growSaasCustomerId: subscription.growSaasCustomerId, chargeToken };
+}
+
+// ── SignDeal's OWN Grow SaaS merchant API key (platform singleton) ──────────────
+
+export interface StoreGrowSaasMerchantApiKeyArgs {
+  /** SignDeal's OWN Grow SaaS merchant API key (plaintext). */
+  plaintext: string;
+  reason: string;
+  expiresAt?: Date | null;
+}
+
+/**
+ * Encrypt + store SignDeal's OWN Grow SaaS merchant API key as the single active
+ * platform secret (ownerType="Platform", ownerId="grow_saas"). The partial unique
+ * index admits exactly one active row; a second store throws SecretConflictError
+ * until the first is purged/rotated (use rotateSecret to rotate). No owner-row
+ * update → no $transaction needed.
+ */
+export async function storeGrowSaasMerchantApiKey(
+  args: StoreGrowSaasMerchantApiKeyArgs,
+): Promise<string> {
+  return storeSecret({
+    purpose: MERCHANT_PURPOSE,
+    rail: RAIL,
+    ownerType: PLATFORM_OWNER_TYPE,
+    ownerId: PLATFORM_OWNER_ID,
+    plaintext: args.plaintext,
+    reason: args.reason,
+    expiresAt: args.expiresAt ?? null,
+  });
+}
+
+/**
+ * Load + decrypt SignDeal's OWN Grow SaaS merchant API key. Finds the single active
+ * platform secret by owner-tuple (rotation-safe — no pinned secretRef) and returns a
+ * RevealableSecret. `.reveal()` ONLY inside the Rail A charge adapter (*.http.ts).
+ */
+export async function getGrowSaasMerchantApiKey(): Promise<RevealableSecret> {
+  const secretRef = await findActiveSecretRef({
+    purpose: MERCHANT_PURPOSE,
+    rail: RAIL,
+    ownerType: PLATFORM_OWNER_TYPE,
+    ownerId: PLATFORM_OWNER_ID,
+  });
+  if (!secretRef) {
+    throw new SecretNotFoundError("SignDeal Grow SaaS merchant API key not stored", {
+      ownerType: PLATFORM_OWNER_TYPE,
+      rail: RAIL,
+    });
+  }
+  return readSecret({
+    secretRef,
+    purpose: MERCHANT_PURPOSE,
+    rail: RAIL,
+    ownerType: PLATFORM_OWNER_TYPE,
+    ownerId: PLATFORM_OWNER_ID,
+  });
 }

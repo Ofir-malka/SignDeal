@@ -270,6 +270,35 @@ export async function readSecret(args: ReadSecretArgs): Promise<RevealableSecret
   });
 }
 
+// ── findActiveSecretRef (owner-tuple lookup for singleton owners) ─────────────
+
+/**
+ * Resolve the handle of the single active (non-purged) secret for an owner tuple —
+ * for singleton owners that do NOT store the secretRef on an owner row (e.g. the
+ * Platform Grow-SaaS merchant key). The partial unique index guarantees at most one
+ * active row. Returns the secretRef, or null if none. (EncryptedSecret access is
+ * intentionally confined to this Layer-1 module by the import-boundary lint, so
+ * Layer-2 facades resolve singleton handles through here, not via prisma directly.)
+ */
+export async function findActiveSecretRef(args: {
+  purpose: string;
+  rail: string;
+  ownerType: string;
+  ownerId: string;
+}): Promise<string | null> {
+  assertPurposeRailOwner(args); // R1/R2/R3 on the tuple
+  const row = await prisma.encryptedSecret.findFirst({
+    where: {
+      ownerType: args.ownerType,
+      ownerId: args.ownerId,
+      purpose: args.purpose as SecretPurpose,
+      purgedAt: null,
+    },
+    select: { id: true },
+  });
+  return row?.id ?? null;
+}
+
 // ── rotateSecret ────────────────────────────────────────────────────────────
 
 export interface RotateSecretArgs extends OwnerIdentity {

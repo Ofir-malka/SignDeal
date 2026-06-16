@@ -1081,6 +1081,7 @@ enum SecretPurpose {
   GROW_SAAS_CHARGE_TOKEN // Rail A — SignDeal SaaS billing token      (owner: Subscription)
   GROW_ONBOARDING_LEAD   // Rail B — onboarding lead payload          (owner: GrowOnboardingSession)
   PAYER_BANK_ACCOUNT     // Rail B — payer bank details (DEFERRED; only if Grow reconciliation requires)
+  GROW_SAAS_MERCHANT_API_KEY // Rail A — SignDeal's OWN Grow SaaS merchant API key (owner: Platform singleton)
 }
 
 enum PaymentMethod {
