@@ -34,6 +34,7 @@ export interface PurposeSpec {
  * | GROW_ONBOARDING_LEAD     | B    | GrowOnboardingSession | short  |
  * | PAYER_BANK_ACCOUNT       | B    | Payment               | short  |
  * | GROW_SAAS_CHARGE_TOKEN   | A    | Subscription          | none   |
+ * | GROW_SAAS_MERCHANT_API_KEY| A   | Platform              | none   |
  */
 export const SECRET_PURPOSE_MAP: Record<SecretPurpose, PurposeSpec> = {
   [SecretPurpose.GROW_BROKER_API_KEY]: {
@@ -54,6 +55,11 @@ export const SECRET_PURPOSE_MAP: Record<SecretPurpose, PurposeSpec> = {
   [SecretPurpose.GROW_SAAS_CHARGE_TOKEN]: {
     rail: "A",
     ownerType: "Subscription",
+    ttlPolicy: "none",
+  },
+  [SecretPurpose.GROW_SAAS_MERCHANT_API_KEY]: {
+    rail: "A",
+    ownerType: "Platform",
     ttlPolicy: "none",
   },
 };
