@@ -53,10 +53,11 @@ const PUBLIC_PREFIXES = [
  * Admins bypass this list entirely.
  */
 const INCOMPLETE_ALLOWED_PREFIXES = [
-  "/onboarding/billing", // billing onboarding — pick plan + enter card
-  "/billing/success",    // HYP success redirect
-  "/billing/error",      // HYP error redirect
-  "/settings/billing",   // fallback: users who navigate here directly can still subscribe
+  "/onboarding/billing",   // billing onboarding — pick plan + enter card
+  "/billing/success",      // HYP success redirect
+  "/billing/grow/success", // Grow Rail A verification/activation bridge (user still INCOMPLETE here)
+  "/billing/error",        // HYP error redirect
+  "/settings/billing",     // fallback: users who navigate here directly can still subscribe
 ];
 
 function isPublicPath(pathname: string): boolean {

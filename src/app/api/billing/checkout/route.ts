@@ -71,7 +71,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // ── Build redirect URLs ───────────────────────────────────────────────────
   const base       = (process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
-  const successUrl = `${base}/billing/success`;
+  // Grow (Rail A) verifies the saved card on its own bridge page, not HYP's /billing/success.
+  const providerName = (process.env.BILLING_PROVIDER ?? "stub").trim().toLowerCase();
+  const successUrl = providerName === "grow" ? `${base}/billing/grow/success` : `${base}/billing/success`;
   const errorUrl   = `${base}/billing/error`;
   const cancelUrl  = `${base}/pricing`;
 
@@ -109,11 +111,13 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       await prisma.billingCheckout.create({
         data: {
           userId,
-          order:     result.order,
-          plan:      validPlan,
-          interval:  validInterval,
-          status:    "PENDING",
-          expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes
+          order:            result.order,
+          plan:             validPlan,
+          interval:         validInterval,
+          status:           "PENDING",
+          growProcessId:    result.growProcessId ?? null,
+          growProcessToken: result.growProcessToken ?? null,
+          expiresAt:        new Date(Date.now() + 30 * 60 * 1000), // 30 minutes
         },
       });
     } catch (err) {
