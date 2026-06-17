@@ -846,6 +846,10 @@ model BillingCheckout {
   authNumber String?
   errorCode  String?
 
+  // ── Grow Rail A token-setup (Phase 1) ──────────────────────────────────────
+  growProcessId    String?  // createPaymentProcess processId — for getPaymentProcessInfo verify
+  growProcessToken String?  // createPaymentProcess processToken — paired handle
+
   // ── Timestamps ─────────────────────────────────────────────────────────────
   createdAt  DateTime  @default(now())
   expiresAt  DateTime              // createdAt + 30 min; HYP hosted-page sessions expire

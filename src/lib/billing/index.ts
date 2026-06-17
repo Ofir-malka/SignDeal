@@ -12,6 +12,7 @@
 
 import { StubBillingProvider } from "./providers/stub";
 import { HypBillingProvider }  from "./providers/hyp";
+import { GrowBillingProvider } from "./providers/grow/provider";
 
 // ── Shared types ──────────────────────────────────────────────────────────────
 
@@ -37,7 +38,7 @@ export interface CheckoutParams {
 }
 
 export type CheckoutResult =
-  | { ok: true;  checkoutUrl: string; order?: string }
+  | { ok: true;  checkoutUrl: string; order?: string; growProcessId?: string; growProcessToken?: string }
   | { ok: false; reason: string };
 
 // ── Provider interface ────────────────────────────────────────────────────────
@@ -61,6 +62,9 @@ export function getBillingProvider(): BillingProvider {
 
     case "hyp":
       return new HypBillingProvider();
+
+    case "grow":
+      return new GrowBillingProvider();
 
     default:
       console.warn(
