@@ -59,10 +59,10 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const validPlan     = plan     as BillablePlan;
   const validInterval = interval as BillingInterval;
 
-  // ── Fetch user email (needed for provider customer creation) ──────────────
+  // ── Fetch user identity (email + name + phone for the provider's hosted page) ──
   const user = await prisma.user.findUnique({
     where:  { id: userId },
-    select: { email: true },
+    select: { email: true, fullName: true, phone: true },
   });
 
   if (!user) {
@@ -77,6 +77,16 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const errorUrl   = `${base}/billing/error`;
   const cancelUrl  = `${base}/pricing`;
 
+  // ── Grow's hosted page requires a valid name + phone. Fail fast with a clear
+  //    400 BEFORE any Grow call when the broker's profile phone is missing/invalid. ──
+  const userPhone = (user.phone ?? "").replace(/\D/g, "");
+  if (providerName === "grow" && !/^0\d{8,9}$/.test(userPhone)) {
+    return NextResponse.json(
+      { error: "מספר טלפון חסר או אינו תקין בפרופיל. עדכן/י את פרטי הפרופיל ונסה/י שוב." },
+      { status: 400 },
+    );
+  }
+
   // ── Create checkout session via active billing provider ───────────────────
   let provider;
   try {
@@ -90,6 +100,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const result = await provider.createCheckoutSession({
     userId,
     userEmail: user.email,
+    userName:  user.fullName,
+    userPhone: userPhone || null,
     plan:      validPlan,
     interval:  validInterval,
     successUrl,

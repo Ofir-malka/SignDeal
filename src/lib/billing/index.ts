@@ -27,6 +27,10 @@ export interface CheckoutParams {
   userId:    string;
   /** User's email address — needed for provider customer creation later. */
   userEmail: string;
+  /** Broker's display name (User.fullName) — used by Grow's pageField[fullName]. */
+  userName?:  string;
+  /** Broker's phone (User.phone, digits) — used by Grow's pageField[phone]. */
+  userPhone?: string | null;
   plan:      BillablePlan;
   interval:  BillingInterval;
   /** Full URL HYP/stub should redirect to on success. */
