@@ -24,6 +24,11 @@ describe("buildTokenSetupFields", () => {
   it("includes phone only when provided", () => {
     expect(buildTokenSetupFields({ ...base, phone: "0500000000" })["pageField[phone]"]).toBe("0500000000");
   });
+  it("sends pageField[fullName] and pageField[phone] with the given values", () => {
+    const f = buildTokenSetupFields({ ...base, fullName: "Broker Name", phone: "0501234567" });
+    expect(f["pageField[fullName]"]).toBe("Broker Name");
+    expect(f["pageField[phone]"]).toBe("0501234567");
+  });
 });
 
 describe("buildProcessInfoFields", () => {

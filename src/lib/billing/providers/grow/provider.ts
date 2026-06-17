@@ -30,10 +30,10 @@ export class GrowBillingProvider implements BillingProvider {
       description: PLAN_LABELS[params.plan],
       successUrl: params.successUrl,
       cancelUrl: params.cancelUrl,
-      // SaaS billing: cardholder identity comes from the card; a display name is enough.
-      fullName: params.userEmail.split("@")[0] || "SignDeal",
+      // Real broker identity from the profile (the route guarantees a valid phone for Grow).
+      fullName: params.userName?.trim() || params.userEmail.split("@")[0] || "SignDeal",
       email: params.userEmail,
-      phone: null,
+      phone: params.userPhone ?? null,
     });
 
     if (!res.ok) return { ok: false, reason: res.reason };

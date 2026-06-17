@@ -7,7 +7,8 @@ vi.mock("./createPaymentProcess.http", () => ({ createGrowSaasTokenCheckout: moc
 import { GrowBillingProvider } from "./provider";
 
 const params = {
-  userId: "u1", userEmail: "broker@x.com", plan: "STANDARD" as const, interval: "MONTHLY" as const,
+  userId: "u1", userEmail: "broker@x.com", userName: "Broker Name", userPhone: "0501234567",
+  plan: "STANDARD" as const, interval: "MONTHLY" as const,
   successUrl: "https://app/billing/grow/success", errorUrl: "https://app/billing/error", cancelUrl: "https://app/pricing",
 };
 
@@ -28,7 +29,7 @@ describe("GrowBillingProvider", () => {
     expect(r).toMatchObject({ ok: true, checkoutUrl: "https://pay", growProcessId: "pid", growProcessToken: "ptok" });
     if (r.ok) expect(r.order).toMatch(/^sd-/);
     expect(mocks.checkout).toHaveBeenCalledWith(
-      expect.objectContaining({ sumShekels: "39.00", email: "broker@x.com" }),
+      expect.objectContaining({ sumShekels: "39.00", email: "broker@x.com", fullName: "Broker Name", phone: "0501234567" }),
     );
   });
 
