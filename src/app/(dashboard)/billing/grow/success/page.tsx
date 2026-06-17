@@ -11,6 +11,7 @@
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import { verifyAndActivateGrowTokenSetup } from "@/lib/billing/providers/grow/activate";
+import { GrowActivated } from "./GrowActivated";
 import { GrowVerifying } from "./GrowVerifying";
 
 export const dynamic = "force-dynamic";
@@ -21,8 +22,10 @@ export default async function GrowBillingSuccessPage() {
 
   const result = await verifyAndActivateGrowTokenSetup({ userId: session.user.id });
 
-  // Invisible bridge: immediate success → dashboard, no intermediate screen.
-  if (result.state === "trial_started") redirect("/dashboard");
+  // Invisible bridge: immediate success → refresh the JWT (so middleware sees
+  // TRIALING), then client-replace to /dashboard. A server redirect("/dashboard")
+  // here would carry the stale INCOMPLETE JWT and bounce back to /onboarding/billing.
+  if (result.state === "trial_started") return <GrowActivated />;
   // Nothing to verify (stale/expired entry) → back to the start.
   if (result.state === "no_checkout") redirect("/onboarding/billing");
 

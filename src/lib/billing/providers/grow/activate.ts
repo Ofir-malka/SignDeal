@@ -29,6 +29,15 @@ export interface GrowActivationResult {
 export async function verifyAndActivateGrowTokenSetup(args: {
   userId: string;
 }): Promise<GrowActivationResult> {
+  const result = await resolveGrowTokenActivation(args);
+  // No-secret breadcrumb: activation STATE only — never cardToken / processToken / apiKey.
+  console.log(`[billing/grow/activate] state=${result.state} userId=${args.userId.slice(0, 8)}…`);
+  return result;
+}
+
+async function resolveGrowTokenActivation(args: {
+  userId: string;
+}): Promise<GrowActivationResult> {
   // Latest pending Grow token-setup checkout for this user.
   const checkout = await prisma.billingCheckout.findFirst({
     where: { userId: args.userId, status: "PENDING", growProcessId: { not: null } },

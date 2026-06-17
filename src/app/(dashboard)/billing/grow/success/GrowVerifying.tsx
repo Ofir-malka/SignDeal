@@ -8,8 +8,9 @@
  * server bridge does, behind getPaymentProcessInfo verification.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 
 const POLL_MS = 3000;
 const MAX_ATTEMPTS = 5;
@@ -18,6 +19,11 @@ type State = "pending" | "failed" | "timeout";
 
 export function GrowVerifying({ initialState }: { initialState: "pending" | "failed" }) {
   const router = useRouter();
+  // Latest-ref for update() so the polling effect below never restarts on its identity.
+  const { update } = useSession();
+  const updateRef = useRef(update);
+  useEffect(() => { updateRef.current = update; }, [update]);
+
   const [state, setState] = useState<State>(initialState);
 
   useEffect(() => {
@@ -32,7 +38,10 @@ export function GrowVerifying({ initialState }: { initialState: "pending" | "fai
         if (cancelled) return;
         if (json.state === "trial_started") {
           clearInterval(id);
-          router.push("/dashboard");
+          // Refresh the JWT so middleware sees TRIALING before navigating
+          // (mirrors HYP DashboardLink); otherwise /dashboard bounces to onboarding.
+          await updateRef.current({ refreshSubscription: true });
+          if (!cancelled) router.replace("/dashboard");
           return;
         }
         if (json.state === "failed") {
