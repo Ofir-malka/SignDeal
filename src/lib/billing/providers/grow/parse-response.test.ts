@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseTokenCheckoutResponse, findSavedToken } from "./parse-response";
+import { parseTokenCheckoutResponse, findSavedToken, parseTokenChargeResponse } from "./parse-response";
 
 describe("parseTokenCheckoutResponse", () => {
   it("ok → url + process handles", () => {
@@ -37,5 +37,23 @@ describe("findSavedToken", () => {
   });
   it("returns null when neither statusCode nor cardToken is present", () => {
     expect(findSavedToken({ foo: "bar" })).toBeNull();
+  });
+});
+
+describe("parseTokenChargeResponse (createTransactionWithToken — server→Grow recurring charge)", () => {
+  it("paid → status 1 + statusCode 2 + transaction/approval ids", () => {
+    const r = parseTokenChargeResponse({ status: "1", data: { statusCode: "2", transactionId: "tx99", asmachta: "appr1" } });
+    expect(r).toEqual({ status: "1", statusCode: "2", errId: null, transactionId: "tx99", approvalCode: "appr1" });
+  });
+  it("request/config error → errId surfaced, statusCode null", () => {
+    const r = parseTokenChargeResponse({ status: "0", err: { id: 54, message: "missing paymentType" } });
+    expect(r.status).toBe("0");
+    expect(r.errId).toBe(54);
+    expect(r.statusCode).toBeNull();
+  });
+  it("missing fields → all nulls (no throw)", () => {
+    expect(parseTokenChargeResponse({})).toEqual({
+      status: null, statusCode: null, errId: null, transactionId: null, approvalCode: null,
+    });
   });
 });

@@ -1,14 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   isGrowSaasEnabled,
+  isGrowSaasRecurringEnabled,
   getGrowSaasHost,
   getGrowSaasCreatePaymentProcessUrl,
   getGrowSaasGetPaymentProcessInfoUrl,
+  getGrowSaasCreateTransactionWithTokenUrl,
   getGrowSaasUserId,
   getGrowSaasPageCode,
 } from "./config";
 
-const KEYS = ["GROW_SAAS_ENABLED", "GROW_SAAS_ENVIRONMENT", "GROW_SAAS_HOST", "GROW_SAAS_USER_ID", "GROW_SAAS_PAGECODE"];
+const KEYS = ["GROW_SAAS_ENABLED", "ENABLE_GROW_RECURRING_CHARGES", "GROW_SAAS_ENVIRONMENT", "GROW_SAAS_HOST", "GROW_SAAS_USER_ID", "GROW_SAAS_PAGECODE"];
 const saved: Record<string, string | undefined> = {};
 
 beforeEach(() => { for (const k of KEYS) { saved[k] = process.env[k]; delete process.env[k]; } });
@@ -36,6 +38,15 @@ describe("grow saas config", () => {
     expect(getGrowSaasGetPaymentProcessInfoUrl()).toBe(
       "https://sandbox.meshulam.co.il/api/light/server/1.0/getPaymentProcessInfo",
     );
+    expect(getGrowSaasCreateTransactionWithTokenUrl()).toBe(
+      "https://sandbox.meshulam.co.il/api/light/server/1.0/createTransactionWithToken",
+    );
+  });
+
+  it("isGrowSaasRecurringEnabled defaults off, true when 'true'", () => {
+    expect(isGrowSaasRecurringEnabled()).toBe(false);
+    process.env.ENABLE_GROW_RECURRING_CHARGES = "true";
+    expect(isGrowSaasRecurringEnabled()).toBe(true);
   });
 
   it("userId / pageCode are required", () => {

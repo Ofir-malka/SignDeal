@@ -2,7 +2,7 @@
  * src/lib/billing/providers/grow/parse-response.ts — PURE parsers. No I/O, no logging.
  */
 
-import type { GrowSaasTokenCheckoutResult, GrowSaasSavedToken } from "./types";
+import type { GrowSaasTokenCheckoutResult, GrowSaasSavedToken, ParsedGrowChargeResponse } from "./types";
 
 function rec(v: unknown): Record<string, unknown> | null {
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
@@ -63,5 +63,24 @@ export function findSavedToken(data: unknown): GrowSaasSavedToken | null {
     cardSuffix: str(deepFind(data, /card_?suffix|last_?4/i)),
     cField1: str(deepFind(data, /^cfield1$/i)),
     processId: str(deepFind(data, /^processid$/i)),
+  };
+}
+
+/**
+ * Parse a createTransactionWithToken response body (SignDeal → Grow Rail A recurring charge).
+ * Pure; deep-scans for the few fields we need (shape is field-level confirmed). This is the
+ * SERVER-TO-GROW CHARGE response ONLY — NOT a Grow → SignDeal webhook payload.
+ */
+export function parseTokenChargeResponse(json: unknown): ParsedGrowChargeResponse {
+  const root = rec(json);
+  const status = root ? str(root.status) : null;
+  const err = root ? rec(root.err) : null;
+  const errId = err && typeof err.id === "number" ? err.id : null;
+  return {
+    statusCode: str(deepFind(json, /^statuscode$/i)),
+    status,
+    errId,
+    transactionId: str(deepFind(json, /^transaction_?id$/i)),
+    approvalCode: str(deepFind(json, /^(asmachta|approval_?(number|code))$/i)),
   };
 }
