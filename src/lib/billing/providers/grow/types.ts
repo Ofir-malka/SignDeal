@@ -29,3 +29,26 @@ export interface GrowSaasSavedToken {
   cField1: string | null;
   processId: string | null;
 }
+
+/**
+ * Parsed body of a createTransactionWithToken response (SignDeal → Grow Rail A recurring charge).
+ * Models the SERVER-TO-GROW CHARGE response ONLY — NOT a Grow → SignDeal webhook payload.
+ */
+export interface ParsedGrowChargeResponse {
+  statusCode: string | null; // per-transaction status ("2" = charged/paid, "11" = saved-not-charged)
+  status: string | null; // top-level request status ("1" = request accepted)
+  errId: number | null; // top-level err.id (request/config error, e.g. 54 / 1013)
+  transactionId: string | null; // Grow transaction id (non-secret, safe to store)
+  approvalCode: string | null; // asmachta / approval code (non-secret, safe to store)
+}
+
+/**
+ * Result of the SignDeal → Grow createTransactionWithToken HTTP call (Rail A recurring charge).
+ * Request/response contract for SERVER-INITIATED charges — NOT a Grow → SignDeal webhook payload.
+ * The `ok` variant carries the parsed body; the other variants are transport-level failures
+ * surfaced by the HTTP layer (added in a later step). Consumed by classifyGrowCharge().
+ */
+export type GrowChargeHttpResult =
+  | ({ transport: "ok" } & ParsedGrowChargeResponse)
+  | { transport: "token_missing"; reason: string }
+  | { transport: "network_error"; reason: string };

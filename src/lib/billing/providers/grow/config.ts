@@ -25,6 +25,15 @@ export function isGrowSaasEnabled(): boolean {
   return boolEnv("GROW_SAAS_ENABLED");
 }
 
+/**
+ * Master gate for Rail A Grow RECURRING charging (server → Grow createTransactionWithToken).
+ * SEPARATE from isGrowSaasEnabled() (checkout / token-setup). Default OFF — the recurring
+ * engine skips the Grow scan entirely unless this is "true". Server-initiated charges only.
+ */
+export function isGrowSaasRecurringEnabled(): boolean {
+  return boolEnv("ENABLE_GROW_RECURRING_CHARGES");
+}
+
 function growSaasEnvironment(): "sandbox" | "production" {
   const v = (process.env.GROW_SAAS_ENVIRONMENT ?? "sandbox").trim().toLowerCase();
   return v === "production" ? "production" : "sandbox";
@@ -43,6 +52,10 @@ export function getGrowSaasCreatePaymentProcessUrl(): string {
 }
 export function getGrowSaasGetPaymentProcessInfoUrl(): string {
   return `https://${getGrowSaasHost()}/api/light/server/1.0/getPaymentProcessInfo`;
+}
+/** Endpoint for the SERVER-INITIATED recurring charge of a saved cardToken (Rail A). */
+export function getGrowSaasCreateTransactionWithTokenUrl(): string {
+  return `https://${getGrowSaasHost()}/api/light/server/1.0/createTransactionWithToken`;
 }
 
 /** SignDeal's OWN Grow merchant userId (money routes to SignDeal). */

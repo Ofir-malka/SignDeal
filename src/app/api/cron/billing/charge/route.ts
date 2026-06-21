@@ -64,28 +64,50 @@ export async function GET(request: Request) {
       ` eligible=${result.eligible}` +
       ` charged=${result.charged}` +
       ` failed=${result.failed}` +
+      ` errored=${result.errored}` +
       ` skipped=${result.skipped}` +
       ` noToken=${result.noToken}` +
       ` dryRunMode=${result.dryRunMode}` +
       ` realChargesEnabled=${result.realChargesEnabled}` +
-      ` recurringProvider=${result.recurringProvider}`,
+      ` recurringProvider=${result.recurringProvider}` +
+      ` growRecurringEnabled=${result.growRecurringEnabled}` +
+      ` byProvider=${JSON.stringify(result.byProvider)}`,
     );
 
-    // Alert when one or more charges failed — this is revenue-impacting.
-    // Counts only; no subscription IDs or customer PII in the event.
+    // Alert on DECLINED charges — revenue-impacting (card refused). Counts only; no PII.
     if (result.failed > 0) {
       Sentry.captureMessage(
-        `[billing-cron] ${result.failed} charge(s) failed out of ${result.eligible} eligible`,
+        `[billing-cron] ${result.failed} declined charge(s) out of ${result.eligible} eligible`,
         {
           level: "error",
-          tags:  { component: "billing_cron" },
+          tags:  { component: "billing_cron", kind: "declines" },
           extra: {
-            eligible: result.eligible,
-            charged:  result.charged,
-            failed:   result.failed,
-            skipped:  result.skipped,
-            noToken:  result.noToken,
+            eligible:   result.eligible,
+            charged:    result.charged,
+            failed:     result.failed,
+            errored:    result.errored,
+            skipped:    result.skipped,
+            noToken:    result.noToken,
             dryRunMode: result.dryRunMode,
+            byProvider: result.byProvider,
+            growRecurringEnabled: result.growRecurringEnabled,
+          },
+        },
+      );
+    }
+
+    // Separate alert on INTEGRATION ERRORS (config/transport/token) — our fault, NOT a card
+    // decline. Distinct signal so ops triage these differently (no customer dunning happened).
+    if (result.errored > 0) {
+      Sentry.captureMessage(
+        `[billing-cron] ${result.errored} integration error(s) (config/transport/token) — investigate`,
+        {
+          level: "error",
+          tags:  { component: "billing_cron", kind: "integration_error" },
+          extra: {
+            errored:    result.errored,
+            byProvider: result.byProvider,
+            growRecurringEnabled: result.growRecurringEnabled,
           },
         },
       );
