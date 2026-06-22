@@ -22,6 +22,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireUserId }             from "@/lib/require-user";
 import { prisma }                    from "@/lib/prisma";
 import { getBillingProvider }        from "@/lib/billing";
+import { normalizeGrowPhone, isValidGrowPhone } from "@/lib/billing/grow-phone";
 import type { BillablePlan, BillingInterval } from "@/lib/billing";
 
 const VALID_PLANS:     readonly BillablePlan[]    = ["STANDARD", "GROWTH", "PRO"];
@@ -79,8 +80,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   // ── Grow's hosted page requires a valid name + phone. Fail fast with a clear
   //    400 BEFORE any Grow call when the broker's profile phone is missing/invalid. ──
-  const userPhone = (user.phone ?? "").replace(/\D/g, "");
-  if (providerName === "grow" && !/^0\d{8,9}$/.test(userPhone)) {
+  const userPhone = normalizeGrowPhone(user.phone);
+  if (providerName === "grow" && !isValidGrowPhone(userPhone)) {
     return NextResponse.json(
       { error: "מספר טלפון חסר או אינו תקין בפרופיל. עדכן/י את פרטי הפרופיל ונסה/י שוב." },
       { status: 400 },

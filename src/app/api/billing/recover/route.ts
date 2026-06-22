@@ -21,6 +21,7 @@ import { NextResponse }       from "next/server";
 import { requireUserId }      from "@/lib/require-user";
 import { prisma }             from "@/lib/prisma";
 import { getBillingProvider } from "@/lib/billing";
+import { normalizeGrowPhone, isValidGrowPhone } from "@/lib/billing/grow-phone";
 import type { BillablePlan, BillingInterval } from "@/lib/billing";
 
 const BILLABLE_PLANS: readonly BillablePlan[] = ["STANDARD", "GROWTH", "PRO"];
@@ -83,7 +84,17 @@ export async function POST(): Promise<NextResponse> {
   const successUrl = `${base}/billing/grow/payment-method/success`;
   const errorUrl   = `${base}/billing/error`;
   const cancelUrl  = `${base}/settings/billing/recover`; // back to recovery page on cancel
-  const userPhone  = (user.phone ?? "").replace(/\D/g, "");
+
+  // Grow's hosted page requires a valid name + phone. Fail fast with a clear 400 BEFORE
+  // any Grow call when the broker's profile phone is missing/invalid (mirrors /api/billing/checkout).
+  const providerName = (process.env.BILLING_PROVIDER ?? "stub").trim().toLowerCase();
+  const userPhone    = normalizeGrowPhone(user.phone);
+  if (providerName === "grow" && !isValidGrowPhone(userPhone)) {
+    return NextResponse.json(
+      { error: "מספר טלפון חסר או אינו תקין בפרופיל. עדכן/י את פרטי הפרופיל ונסה/י שוב." },
+      { status: 400 },
+    );
+  }
 
   // ── Create checkout session via active billing provider ───────────────────
   let provider;
