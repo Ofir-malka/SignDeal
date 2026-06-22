@@ -78,61 +78,79 @@ async function resolve(args: { userId: string }): Promise<GrowCardUpdateResult> 
   });
   if (!sub) return { state: "failed" };
 
-  // ── CLAIM the checkout (the gate). Atomic PENDING→SUCCEEDED: only ONE concurrent
-  //    runner wins (count===1) and rotates; losers (count===0) return without rotating. ──
-  const claim = await prisma.billingCheckout.updateMany({
-    where: { id: checkout.id, status: "PENDING" },
-    data: { status: "SUCCEEDED", resolvedAt: new Date(), cardMask: saved.cardSuffix },
-  });
-  if (claim.count === 0) return { state: "applied" }; // already applied by another runner
-
-  // ── Winner: rotate the sealed token to the NEW value (re-points growSaasChargeSecretRef) ──
-  await rotateGrowSaasToken({
-    subscriptionId: sub.id,
-    plaintext: saved.cardToken as string,
-    reason: checkout.purpose === "recovery" ? "grow saas billing recovery" : "grow saas card update",
-  });
-
   const now = new Date();
 
-  if (checkout.purpose === "recovery") {
-    // Recovery: re-seal + clear failures + ACTIVE + re-arm so the cron charges the new card.
-    await prisma.subscription.update({
-      where: { id: sub.id },
-      data: {
-        cardLast4: saved.cardSuffix,
-        tokenCreatedAt: now,
-        billingFailures: 0,
-        status: "ACTIVE",
-        nextBillingAt: now,
+  // ── ONE transaction: claim (the gate) → rotate → subscription update → event. ──
+  // The atomic PENDING→SUCCEEDED claim means only ONE concurrent runner wins
+  // (count===1) and rotates; losers (count===0) commit the no-op and return without
+  // rotating (no double-rotate). The rotation re-points growSaasChargeSecretRef on the
+  // SAME txn, so the token can never rotate without the subscription update committing
+  // too. The Grow network verify already happened ABOVE, OUTSIDE this txn.
+  const outcome = await prisma.$transaction(async (tx) => {
+    const claim = await tx.billingCheckout.updateMany({
+      where: { id: checkout.id, status: "PENDING" },
+      data: { status: "SUCCEEDED", resolvedAt: now, cardMask: saved.cardSuffix },
+    });
+    if (claim.count === 0) return { rotated: false }; // already applied by another runner
+
+    // Winner: rotate the sealed token to the NEW value, inside this txn.
+    await rotateGrowSaasToken(
+      {
+        subscriptionId: sub.id,
+        plaintext: saved.cardToken as string,
+        reason: checkout.purpose === "recovery" ? "grow saas billing recovery" : "grow saas card update",
       },
-    });
-    await prisma.subscriptionEvent.create({
-      data: { subscriptionId: sub.id, event: "payment_recovered", toStatus: "ACTIVE", source: "system" },
-    });
-    await logAuditEvent({
-      userId: args.userId,
-      action: "subscription.payment.recovered",
-      entityType: "subscription",
-      entityId: sub.id,
-      metadata: { provider: "grow", source: "card_update", cardLast4: saved.cardSuffix },
-    });
-  } else {
-    // payment_method_update: card fields ONLY — never touch status/billingFailures/nextBillingAt.
-    await prisma.subscription.update({
-      where: { id: sub.id },
-      data: { cardLast4: saved.cardSuffix, tokenCreatedAt: now },
-    });
-    await prisma.subscriptionEvent.create({
-      data: { subscriptionId: sub.id, event: "payment_method_updated", source: "system" },
-    });
-    await logAuditEvent({
-      userId: args.userId,
-      action: "subscription.payment_method.updated",
-      entityType: "subscription",
-      entityId: sub.id,
-      metadata: { provider: "grow", source: "card_update", cardLast4: saved.cardSuffix },
-    });
+      { tx },
+    );
+
+    if (checkout.purpose === "recovery") {
+      // Recovery: re-seal + clear failures + ACTIVE + re-arm so the cron charges the new card.
+      await tx.subscription.update({
+        where: { id: sub.id },
+        data: {
+          cardLast4: saved.cardSuffix,
+          tokenCreatedAt: now,
+          billingFailures: 0,
+          status: "ACTIVE",
+          nextBillingAt: now,
+        },
+      });
+      await tx.subscriptionEvent.create({
+        data: { subscriptionId: sub.id, event: "payment_recovered", toStatus: "ACTIVE", source: "system" },
+      });
+    } else {
+      // payment_method_update: card fields ONLY — never touch status/billingFailures/nextBillingAt.
+      await tx.subscription.update({
+        where: { id: sub.id },
+        data: { cardLast4: saved.cardSuffix, tokenCreatedAt: now },
+      });
+      await tx.subscriptionEvent.create({
+        data: { subscriptionId: sub.id, event: "payment_method_updated", source: "system" },
+      });
+    }
+
+    return { rotated: true };
+  });
+
+  // Audit AFTER commit (best-effort, never inside the txn). Only the winning runner audits.
+  if (outcome.rotated) {
+    await logAuditEvent(
+      checkout.purpose === "recovery"
+        ? {
+            userId: args.userId,
+            action: "subscription.payment.recovered",
+            entityType: "subscription",
+            entityId: sub.id,
+            metadata: { provider: "grow", source: "card_update", cardLast4: saved.cardSuffix },
+          }
+        : {
+            userId: args.userId,
+            action: "subscription.payment_method.updated",
+            entityType: "subscription",
+            entityId: sub.id,
+            metadata: { provider: "grow", source: "card_update", cardLast4: saved.cardSuffix },
+          },
+    );
   }
 
   return { state: "applied" };

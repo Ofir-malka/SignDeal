@@ -8,14 +8,22 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  storeSecret: vi.fn(),
-  readSecret: vi.fn(),
-  findActiveSecretRef: vi.fn(),
-  rotateSecret: vi.fn(),
-  subFindUnique: vi.fn(),
-  subUpdate: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  const subFindUnique = vi.fn();
+  const subUpdate = vi.fn();
+  // Sentinel tx handed to $transaction(run): lets us prove rotate + ref-update share one tx.
+  const tx = { subscription: { findUnique: subFindUnique, update: subUpdate } };
+  return {
+    storeSecret: vi.fn(),
+    readSecret: vi.fn(),
+    findActiveSecretRef: vi.fn(),
+    rotateSecret: vi.fn(),
+    subFindUnique,
+    subUpdate,
+    tx,
+    transaction: vi.fn((fn: (db: unknown) => unknown) => fn(tx)),
+  };
+});
 
 vi.mock("@/lib/secrets/accessor", () => ({
   storeSecret: mocks.storeSecret,
@@ -26,7 +34,7 @@ vi.mock("@/lib/secrets/accessor", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: {
     subscription: { findUnique: mocks.subFindUnique, update: mocks.subUpdate },
-    $transaction: (fn: (tx: unknown) => unknown) => fn({ subscription: { update: mocks.subUpdate } }),
+    $transaction: mocks.transaction,
   },
 }));
 
@@ -95,6 +103,7 @@ describe("rotateGrowSaasToken (card-update / recovery)", () => {
     const ref = await rotateGrowSaasToken({ subscriptionId: "sub1", plaintext: "newtok", reason: "card update" });
 
     expect(ref).toBe("newRef");
+    expect(mocks.transaction).toHaveBeenCalledTimes(1); // one transaction wraps the whole rotate
     expect(mocks.rotateSecret).toHaveBeenCalledWith(
       expect.objectContaining({
         secretRef: "oldRef",
@@ -105,6 +114,7 @@ describe("rotateGrowSaasToken (card-update / recovery)", () => {
         newPlaintext: "newtok",
         reason: "card update",
       }),
+      { tx: mocks.tx }, // SAME tx the ref-update runs on → rotate + ref-update are atomic
     );
     expect(mocks.subUpdate).toHaveBeenCalledWith({ where: { id: "sub1" }, data: { growSaasChargeSecretRef: "newRef" } });
     expect(mocks.storeSecret).not.toHaveBeenCalled();
@@ -136,5 +146,28 @@ describe("rotateGrowSaasToken (card-update / recovery)", () => {
     mocks.subFindUnique.mockResolvedValue(null);
     await expect(rotateGrowSaasToken({ subscriptionId: "missing", plaintext: "t", reason: "r" }))
       .rejects.toBeInstanceOf(SecretNotFoundError);
+  });
+
+  it("composes with a caller tx (uses it; opens no nested $transaction)", async () => {
+    const callerSub = {
+      findUnique: vi.fn().mockResolvedValue({ growSaasChargeSecretRef: "oldRef" }),
+      update: vi.fn(),
+    };
+    const callerTx = { subscription: callerSub };
+    mocks.rotateSecret.mockResolvedValue("newRef");
+
+    const ref = await rotateGrowSaasToken(
+      { subscriptionId: "sub1", plaintext: "t", reason: "r" },
+      { tx: callerTx as never },
+    );
+
+    expect(ref).toBe("newRef");
+    expect(mocks.transaction).not.toHaveBeenCalled(); // reused the caller tx, opened none of our own
+    expect(mocks.rotateSecret).toHaveBeenCalledWith(
+      expect.objectContaining({ secretRef: "oldRef" }),
+      { tx: callerTx }, // rotate ran on the caller's tx
+    );
+    expect(callerSub.update).toHaveBeenCalledWith({ where: { id: "sub1" }, data: { growSaasChargeSecretRef: "newRef" } });
+    expect(mocks.subFindUnique).not.toHaveBeenCalled(); // read ran on the caller tx, not base prisma
   });
 });

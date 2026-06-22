@@ -1,21 +1,35 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const mocks = vi.hoisted(() => ({
-  findFirst: vi.fn(),
-  checkoutUpdateMany: vi.fn(),
-  subFindUnique: vi.fn(),
-  subUpdate: vi.fn(),
-  eventCreate: vi.fn(),
-  processInfo: vi.fn(),
-  rotateToken: vi.fn(),
-  audit: vi.fn(),
-}));
+const mocks = vi.hoisted(() => {
+  const checkoutUpdateMany = vi.fn();
+  const subUpdate = vi.fn();
+  const eventCreate = vi.fn();
+  // Sentinel tx handed to $transaction(run): proves claim/rotate/update/event share one tx.
+  const tx = {
+    billingCheckout: { updateMany: checkoutUpdateMany },
+    subscription: { update: subUpdate },
+    subscriptionEvent: { create: eventCreate },
+  };
+  return {
+    findFirst: vi.fn(),
+    subFindUnique: vi.fn(),
+    processInfo: vi.fn(),
+    rotateToken: vi.fn(),
+    audit: vi.fn(),
+    checkoutUpdateMany,
+    subUpdate,
+    eventCreate,
+    tx,
+    transaction: vi.fn((fn: (db: unknown) => unknown) => fn(tx)),
+  };
+});
 
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    billingCheckout: { findFirst: mocks.findFirst, updateMany: mocks.checkoutUpdateMany },
-    subscription: { findUnique: mocks.subFindUnique, update: mocks.subUpdate },
-    subscriptionEvent: { create: mocks.eventCreate },
+    // Reads run on the base client (outside the txn); mutations run on the sentinel tx below.
+    billingCheckout: { findFirst: mocks.findFirst },
+    subscription: { findUnique: mocks.subFindUnique },
+    $transaction: mocks.transaction,
   },
 }));
 vi.mock("./getPaymentProcessInfo.http", () => ({ getGrowSaasProcessInfo: mocks.processInfo }));
@@ -84,7 +98,11 @@ describe("verifyAndApplyGrowCardUpdate", () => {
   it("payment_method_update: rotates + card-only update (NO status/billingFailures/nextBillingAt)", async () => {
     const r = await verifyAndApplyGrowCardUpdate({ userId: "u" });
     expect(r.state).toBe("applied");
-    expect(mocks.rotateToken).toHaveBeenCalledWith(expect.objectContaining({ subscriptionId: "sub1", plaintext: "x".repeat(40) }));
+    expect(mocks.transaction).toHaveBeenCalledTimes(1); // claim+rotate+update+event in one txn
+    expect(mocks.rotateToken).toHaveBeenCalledWith(
+      expect.objectContaining({ subscriptionId: "sub1", plaintext: "x".repeat(40) }),
+      { tx: mocks.tx }, // rotate participates in the SAME txn as the claim + subscription update
+    );
     const data = lastSubData();
     expect(data).toMatchObject({ cardLast4: "4580" });
     expect(data.tokenCreatedAt).toBeInstanceOf(Date);
@@ -99,9 +117,24 @@ describe("verifyAndApplyGrowCardUpdate", () => {
     const r = await verifyAndApplyGrowCardUpdate({ userId: "u" });
     expect(r.state).toBe("applied");
     expect(mocks.rotateToken).toHaveBeenCalledTimes(1);
+    expect(mocks.rotateToken).toHaveBeenCalledWith(
+      expect.objectContaining({ subscriptionId: "sub1" }),
+      { tx: mocks.tx }, // recovery rotate also participates in the one txn
+    );
     const data = lastSubData();
     expect(data).toMatchObject({ cardLast4: "4580", billingFailures: 0, status: "ACTIVE" });
     expect(data.nextBillingAt).toBeInstanceOf(Date);
     expect(mocks.eventCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ event: "payment_recovered" }) }));
+  });
+
+  it("never logs the plaintext cardToken or processToken", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await verifyAndApplyGrowCardUpdate({ userId: "user-abcdef12" });
+    const logged = [...logSpy.mock.calls, ...errSpy.mock.calls].flat().map(String).join(" ");
+    expect(logged).not.toContain("x".repeat(40)); // the cardToken plaintext
+    expect(logged).not.toContain("ptok");          // the processToken
+    logSpy.mockRestore();
+    errSpy.mockRestore();
   });
 });

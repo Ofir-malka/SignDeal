@@ -78,49 +78,69 @@ export interface RotateGrowSaasTokenArgs {
  * Subscription.growSaasChargeSecretRef. For the card-update / recovery flow where an
  * active token already exists (so storeGrowSaasToken would throw SecretConflictError).
  *
- * rotateSecret value-rotation purges the old row + inserts a new one atomically and
- * returns the NEW ref; we then update the owner row. If no active token is on file yet,
- * or the referenced secret is missing, we fall back to a fresh storeGrowSaasToken seal.
+ * Runs the lookup + rotate + owner-ref update as ONE transaction: the caller's when
+ * `opts.tx` is supplied (so it composes atomically with the card-update claim/update),
+ * otherwise its own — so even a standalone rotate can never split the secret rotation
+ * from the owner-ref update. rotateSecret value-rotation purges the old row + inserts a
+ * new one and returns the NEW ref; if no active token is on file yet, or the referenced
+ * secret is missing, we fall back to a fresh storeGrowSaasToken seal (on the same txn).
  * NEVER logs the plaintext (audit is delegated to the Layer-1 accessor; `reason` is static).
  */
-export async function rotateGrowSaasToken(args: RotateGrowSaasTokenArgs): Promise<string> {
-  const subscription = await prisma.subscription.findUnique({
-    where: { id: args.subscriptionId },
-    select: { growSaasChargeSecretRef: true },
-  });
-  if (!subscription) {
-    throw new SecretNotFoundError("Subscription not found", { ownerType: OWNER_TYPE, rail: RAIL });
-  }
-
-  // No active token yet → seal a fresh one (no rotate).
-  if (!subscription.growSaasChargeSecretRef) {
-    return storeGrowSaasToken({ subscriptionId: args.subscriptionId, plaintext: args.plaintext, reason: args.reason });
-  }
-
-  let newRef: string;
-  try {
-    newRef = await rotateSecret({
-      secretRef: subscription.growSaasChargeSecretRef,
-      purpose: PURPOSE,
-      rail: RAIL,
-      ownerType: OWNER_TYPE,
-      ownerId: args.subscriptionId,
-      newPlaintext: args.plaintext,
-      reason: args.reason,
+export async function rotateGrowSaasToken(
+  args: RotateGrowSaasTokenArgs,
+  opts?: { tx?: Prisma.TransactionClient },
+): Promise<string> {
+  const run = async (tx: Prisma.TransactionClient): Promise<string> => {
+    const subscription = await tx.subscription.findUnique({
+      where: { id: args.subscriptionId },
+      select: { growSaasChargeSecretRef: true },
     });
-  } catch (err) {
-    // Self-heal a dangling ref (referenced secret missing) by sealing a fresh token.
-    if (err instanceof SecretNotFoundError) {
-      return storeGrowSaasToken({ subscriptionId: args.subscriptionId, plaintext: args.plaintext, reason: args.reason });
+    if (!subscription) {
+      throw new SecretNotFoundError("Subscription not found", { ownerType: OWNER_TYPE, rail: RAIL });
     }
-    throw err;
-  }
 
-  await prisma.subscription.update({
-    where: { id: args.subscriptionId },
-    data: { growSaasChargeSecretRef: newRef },
-  });
-  return newRef;
+    // No active token yet → seal a fresh one (no rotate), on the same txn.
+    if (!subscription.growSaasChargeSecretRef) {
+      return storeGrowSaasToken(
+        { subscriptionId: args.subscriptionId, plaintext: args.plaintext, reason: args.reason },
+        { tx },
+      );
+    }
+
+    let newRef: string;
+    try {
+      newRef = await rotateSecret(
+        {
+          secretRef: subscription.growSaasChargeSecretRef,
+          purpose: PURPOSE,
+          rail: RAIL,
+          ownerType: OWNER_TYPE,
+          ownerId: args.subscriptionId,
+          newPlaintext: args.plaintext,
+          reason: args.reason,
+        },
+        { tx },
+      );
+    } catch (err) {
+      // Self-heal a dangling ref (referenced secret missing) by sealing a fresh token.
+      if (err instanceof SecretNotFoundError) {
+        return storeGrowSaasToken(
+          { subscriptionId: args.subscriptionId, plaintext: args.plaintext, reason: args.reason },
+          { tx },
+        );
+      }
+      throw err;
+    }
+
+    await tx.subscription.update({
+      where: { id: args.subscriptionId },
+      data: { growSaasChargeSecretRef: newRef },
+    });
+    return newRef;
+  };
+
+  // Compose with the caller's txn when provided (no nested $transaction); else open our own.
+  return opts?.tx ? run(opts.tx) : prisma.$transaction(run);
 }
 
 export interface GrowSaasBillingCredentials {
