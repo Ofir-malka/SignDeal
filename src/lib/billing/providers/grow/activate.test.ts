@@ -93,4 +93,11 @@ describe("verifyAndActivateGrowTokenSetup", () => {
     expect(r.state).toBe("trial_started");
     expect(mocks.eventCreate).not.toHaveBeenCalled();
   });
+
+  it("queries ONLY onboarding checkouts (purpose='checkout') — ignores card-update/recovery", async () => {
+    await verifyAndActivateGrowTokenSetup({ userId: "u" });
+    expect(mocks.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ purpose: "checkout" }) }),
+    );
+  });
 });

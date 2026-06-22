@@ -10,9 +10,9 @@
  * the active SaaS-billing provider); no Grow API calls; no behavior change.
  */
 
-import { SecretPurpose } from "@/generated/prisma";
+import { SecretPurpose, type Prisma } from "@/generated/prisma";
 import { prisma } from "@/lib/prisma";
-import { storeSecret, readSecret, findActiveSecretRef } from "@/lib/secrets/accessor";
+import { storeSecret, readSecret, findActiveSecretRef, rotateSecret } from "@/lib/secrets/accessor";
 import type { RevealableSecret } from "@/lib/secrets/revealable-secret";
 import { SecretNotFoundError } from "@/lib/secrets/errors";
 
@@ -37,9 +37,13 @@ export interface StoreGrowSaasTokenArgs {
 /**
  * Encrypt + store the SaaS charge token and set
  * Subscription.growSaasChargeSecretRef — atomically, in one transaction.
+ * Accepts an optional caller transaction so it can compose inside a larger unit of work.
  */
-export async function storeGrowSaasToken(args: StoreGrowSaasTokenArgs): Promise<string> {
-  return prisma.$transaction(async (tx) => {
+export async function storeGrowSaasToken(
+  args: StoreGrowSaasTokenArgs,
+  opts?: { tx?: Prisma.TransactionClient },
+): Promise<string> {
+  const run = async (tx: Prisma.TransactionClient): Promise<string> => {
     const secretRef = await storeSecret(
       {
         purpose: PURPOSE,
@@ -57,7 +61,66 @@ export async function storeGrowSaasToken(args: StoreGrowSaasTokenArgs): Promise<
       data: { growSaasChargeSecretRef: secretRef },
     });
     return secretRef;
+  };
+  return opts?.tx ? run(opts.tx) : prisma.$transaction(run);
+}
+
+export interface RotateGrowSaasTokenArgs {
+  /** Subscription.id */
+  subscriptionId: string;
+  /** The NEW SignDeal SaaS recurring-charge token (plaintext). */
+  plaintext: string;
+  reason: string;
+}
+
+/**
+ * Rotate the SaaS charge token to a NEW value and re-point
+ * Subscription.growSaasChargeSecretRef. For the card-update / recovery flow where an
+ * active token already exists (so storeGrowSaasToken would throw SecretConflictError).
+ *
+ * rotateSecret value-rotation purges the old row + inserts a new one atomically and
+ * returns the NEW ref; we then update the owner row. If no active token is on file yet,
+ * or the referenced secret is missing, we fall back to a fresh storeGrowSaasToken seal.
+ * NEVER logs the plaintext (audit is delegated to the Layer-1 accessor; `reason` is static).
+ */
+export async function rotateGrowSaasToken(args: RotateGrowSaasTokenArgs): Promise<string> {
+  const subscription = await prisma.subscription.findUnique({
+    where: { id: args.subscriptionId },
+    select: { growSaasChargeSecretRef: true },
   });
+  if (!subscription) {
+    throw new SecretNotFoundError("Subscription not found", { ownerType: OWNER_TYPE, rail: RAIL });
+  }
+
+  // No active token yet → seal a fresh one (no rotate).
+  if (!subscription.growSaasChargeSecretRef) {
+    return storeGrowSaasToken({ subscriptionId: args.subscriptionId, plaintext: args.plaintext, reason: args.reason });
+  }
+
+  let newRef: string;
+  try {
+    newRef = await rotateSecret({
+      secretRef: subscription.growSaasChargeSecretRef,
+      purpose: PURPOSE,
+      rail: RAIL,
+      ownerType: OWNER_TYPE,
+      ownerId: args.subscriptionId,
+      newPlaintext: args.plaintext,
+      reason: args.reason,
+    });
+  } catch (err) {
+    // Self-heal a dangling ref (referenced secret missing) by sealing a fresh token.
+    if (err instanceof SecretNotFoundError) {
+      return storeGrowSaasToken({ subscriptionId: args.subscriptionId, plaintext: args.plaintext, reason: args.reason });
+    }
+    throw err;
+  }
+
+  await prisma.subscription.update({
+    where: { id: args.subscriptionId },
+    data: { growSaasChargeSecretRef: newRef },
+  });
+  return newRef;
 }
 
 export interface GrowSaasBillingCredentials {

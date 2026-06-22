@@ -11,7 +11,7 @@ import { randomUUID } from "node:crypto";
 import type { BillingProvider, CheckoutParams, CheckoutResult } from "../../index";
 import { PLAN_AMOUNTS, PLAN_LABELS } from "../../amounts";
 import { isGrowSaasEnabled } from "./config";
-import { agorotToShekels } from "./request-builder";
+import { agorotToShekels, tokenSetupCField1, cardUpdateCField1 } from "./request-builder";
 import { createGrowSaasTokenCheckout } from "./createPaymentProcess.http";
 
 export class GrowBillingProvider implements BillingProvider {
@@ -24,6 +24,13 @@ export class GrowBillingProvider implements BillingProvider {
     const amountAgorot =
       PLAN_AMOUNTS[params.plan][params.interval === "YEARLY" ? "yearly" : "monthly"];
 
+    // Onboarding (default/"checkout") → saas_token_setup; card-update/recovery → saas_card_update.
+    // The cField1 prefix is chosen HERE because the route never sees `order` (generated above).
+    const cField1 =
+      params.purpose && params.purpose !== "checkout"
+        ? cardUpdateCField1(order)
+        : tokenSetupCField1(order);
+
     const res = await createGrowSaasTokenCheckout({
       order,
       sumShekels: agorotToShekels(amountAgorot),
@@ -34,6 +41,7 @@ export class GrowBillingProvider implements BillingProvider {
       fullName: params.userName?.trim() || params.userEmail.split("@")[0] || "SignDeal",
       email: params.userEmail,
       phone: params.userPhone ?? null,
+      cField1,
     });
 
     if (!res.ok) return { ok: false, reason: res.reason };

@@ -82,7 +82,7 @@ export async function POST(): Promise<NextResponse> {
   // ── Fetch user email ──────────────────────────────────────────────────────
   const user = await prisma.user.findUnique({
     where:  { id: userId },
-    select: { email: true },
+    select: { email: true, fullName: true, phone: true },
   });
 
   if (!user) {
@@ -92,11 +92,11 @@ export async function POST(): Promise<NextResponse> {
   // ── Build redirect URLs ───────────────────────────────────────────────────
   const base = (process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
 
-  // CRITICAL: successUrl MUST match the GoodURL configured in the HYP portal
-  // (/billing/success). HYP strips all query params if they differ.
-  const successUrl = `${base}/billing/success`;
+  // Grow (Rail A) verifies the new card on its own card-update bridge page.
+  const successUrl = `${base}/billing/grow/payment-method/success`;
   const errorUrl   = `${base}/billing/error`;
   const cancelUrl  = `${base}/settings/billing/payment-method`; // back to PMU page on cancel
+  const userPhone  = (user.phone ?? "").replace(/\D/g, "");
 
   // ── Create checkout session via active billing provider ───────────────────
   let provider;
@@ -111,6 +111,9 @@ export async function POST(): Promise<NextResponse> {
   const result = await provider.createCheckoutSession({
     userId,
     userEmail: user.email,
+    userName:  user.fullName,
+    userPhone: userPhone || null,
+    purpose:   "payment_method_update",
     plan:      subscription.plan            as BillablePlan,
     interval:  subscription.billingInterval as BillingInterval,
     successUrl,
@@ -137,12 +140,14 @@ export async function POST(): Promise<NextResponse> {
       await prisma.billingCheckout.create({
         data: {
           userId,
-          order:     result.order,
-          plan:      subscription.plan            as BillablePlan,
-          interval:  subscription.billingInterval as BillingInterval,
-          status:    "PENDING",
-          purpose:   "payment_method_update",
-          expiresAt: new Date(Date.now() + 30 * 60 * 1000), // 30 minutes
+          order:            result.order,
+          plan:             subscription.plan            as BillablePlan,
+          interval:         subscription.billingInterval as BillingInterval,
+          status:           "PENDING",
+          purpose:          "payment_method_update",
+          growProcessId:    result.growProcessId ?? null,
+          growProcessToken: result.growProcessToken ?? null,
+          expiresAt:        new Date(Date.now() + 30 * 60 * 1000), // 30 minutes
         },
       });
     } catch (err) {

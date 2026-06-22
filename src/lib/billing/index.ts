@@ -30,6 +30,8 @@ export interface CheckoutParams {
   userName?:  string;
   /** Broker's phone (User.phone, digits) — used by Grow's pageField[phone]. */
   userPhone?: string | null;
+  /** Checkout intent — selects the Grow cField1 namespace (onboarding vs card-update/recovery). */
+  purpose?:  "checkout" | "payment_method_update" | "recovery";
   plan:      BillablePlan;
   interval:  BillingInterval;
   /** Full URL HYP/stub should redirect to on success. */

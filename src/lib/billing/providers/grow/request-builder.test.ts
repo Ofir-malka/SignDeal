@@ -4,6 +4,7 @@ import {
   buildProcessInfoFields,
   agorotToShekels,
   tokenSetupCField1,
+  cardUpdateCField1,
   growTransactionUid,
   tokenChargeCField1,
   buildTokenChargeFields,
@@ -87,5 +88,19 @@ describe("growTransactionUid", () => {
       expect(Number(uid)).toBeGreaterThan(0);
       expect(Number(uid)).toBeLessThanOrEqual(2147483647);
     }
+  });
+});
+
+describe("cardUpdateCField1 + cField1 override (card-update / recovery)", () => {
+  it("cardUpdateCField1 uses the saas_card_update namespace", () => {
+    expect(cardUpdateCField1("sd-x")).toBe("saas_card_update:sd-x");
+  });
+  it("buildTokenSetupFields defaults cField1 to the token-setup namespace", () => {
+    expect(buildTokenSetupFields(base).cField1).toBe("saas_token_setup:sd-1");
+  });
+  it("buildTokenSetupFields honors a cField1 override (still no notifyUrl)", () => {
+    const f = buildTokenSetupFields({ ...base, cField1: cardUpdateCField1(base.order) });
+    expect(f.cField1).toBe("saas_card_update:sd-1");
+    expect(f.notifyUrl).toBeUndefined();
   });
 });

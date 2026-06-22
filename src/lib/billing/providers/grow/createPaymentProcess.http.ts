@@ -36,6 +36,7 @@ export async function createGrowSaasTokenCheckout(
       fullName: args.fullName,
       email: args.email,
       phone: args.phone ?? null,
+      cField1: args.cField1,
     });
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : "config/credentials error" };

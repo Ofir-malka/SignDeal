@@ -11,8 +11,9 @@ export function agorotToShekels(agorot: number): string {
 
 /**
  * Token-only createPaymentProcess fields (Get Token Only): chargeType=3 +
- * saveCardToken=1 save the card WITHOUT charging. cField1 is namespaced for the
- * future webhook dispatcher (Phase 1 verifies by polling). NO notifyUrl.
+ * saveCardToken=1 save the card WITHOUT charging. cField1 is namespaced (default
+ * "saas_token_setup:<order>"; card-update/recovery pass "saas_card_update:<order>")
+ * and verified on return. Verification is by polling getPaymentProcessInfo — NO notifyUrl.
  */
 export function buildTokenSetupFields(args: {
   pageCode: string;
@@ -26,6 +27,8 @@ export function buildTokenSetupFields(args: {
   fullName: string;
   email: string;
   phone?: string | null;
+  /** Override the cField1 namespace; defaults to `saas_token_setup:<order>` (onboarding). */
+  cField1?: string;
 }): Record<string, string> {
   const fields: Record<string, string> = {
     pageCode: args.pageCode,
@@ -39,7 +42,7 @@ export function buildTokenSetupFields(args: {
     cancelUrl: args.cancelUrl,
     "pageField[fullName]": args.fullName,
     "pageField[email]": args.email,
-    cField1: `saas_token_setup:${args.order}`,
+    cField1: args.cField1 ?? `saas_token_setup:${args.order}`,
   };
   if (args.phone && args.phone.trim()) fields["pageField[phone]"] = args.phone.trim();
   return fields;
@@ -62,9 +65,14 @@ export function buildProcessInfoFields(args: {
   };
 }
 
-/** The cField1 value we send for a token-setup with the given checkout order. */
+/** The cField1 value we send for a token-setup (onboarding) with the given checkout order. */
 export function tokenSetupCField1(order: string): string {
   return `saas_token_setup:${order}`;
+}
+
+/** The cField1 value we send for a card-update / recovery token setup (distinct namespace). */
+export function cardUpdateCField1(order: string): string {
+  return `saas_card_update:${order}`;
 }
 
 // ── Recurring charge (server → Grow createTransactionWithToken) ────────────────

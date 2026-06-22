@@ -12,21 +12,25 @@ const mocks = vi.hoisted(() => ({
   storeSecret: vi.fn(),
   readSecret: vi.fn(),
   findActiveSecretRef: vi.fn(),
+  rotateSecret: vi.fn(),
+  subFindUnique: vi.fn(),
+  subUpdate: vi.fn(),
 }));
 
 vi.mock("@/lib/secrets/accessor", () => ({
   storeSecret: mocks.storeSecret,
   readSecret: mocks.readSecret,
   findActiveSecretRef: mocks.findActiveSecretRef,
+  rotateSecret: mocks.rotateSecret,
 }));
 vi.mock("@/lib/prisma", () => ({
   prisma: {
-    subscription: { findUnique: vi.fn(), update: vi.fn() },
-    $transaction: (fn: (tx: unknown) => unknown) => fn({}),
+    subscription: { findUnique: mocks.subFindUnique, update: mocks.subUpdate },
+    $transaction: (fn: (tx: unknown) => unknown) => fn({ subscription: { update: mocks.subUpdate } }),
   },
 }));
 
-import { storeGrowSaasMerchantApiKey, getGrowSaasMerchantApiKey } from "./index";
+import { storeGrowSaasMerchantApiKey, getGrowSaasMerchantApiKey, rotateGrowSaasToken } from "./index";
 import { SecretNotFoundError } from "@/lib/secrets/errors";
 
 beforeEach(() => vi.clearAllMocks());
@@ -80,5 +84,57 @@ describe("getGrowSaasMerchantApiKey", () => {
         ownerId: "grow_saas",
       }),
     );
+  });
+});
+
+describe("rotateGrowSaasToken (card-update / recovery)", () => {
+  it("rotates the active token (rail A / Subscription / charge purpose) and re-points the ref", async () => {
+    mocks.subFindUnique.mockResolvedValue({ growSaasChargeSecretRef: "oldRef" });
+    mocks.rotateSecret.mockResolvedValue("newRef");
+
+    const ref = await rotateGrowSaasToken({ subscriptionId: "sub1", plaintext: "newtok", reason: "card update" });
+
+    expect(ref).toBe("newRef");
+    expect(mocks.rotateSecret).toHaveBeenCalledWith(
+      expect.objectContaining({
+        secretRef: "oldRef",
+        purpose: "GROW_SAAS_CHARGE_TOKEN",
+        rail: "A",
+        ownerType: "Subscription",
+        ownerId: "sub1",
+        newPlaintext: "newtok",
+        reason: "card update",
+      }),
+    );
+    expect(mocks.subUpdate).toHaveBeenCalledWith({ where: { id: "sub1" }, data: { growSaasChargeSecretRef: "newRef" } });
+    expect(mocks.storeSecret).not.toHaveBeenCalled();
+  });
+
+  it("falls back to a fresh store when no active token exists yet", async () => {
+    mocks.subFindUnique.mockResolvedValue({ growSaasChargeSecretRef: null });
+    mocks.storeSecret.mockResolvedValue("storedRef");
+
+    const ref = await rotateGrowSaasToken({ subscriptionId: "sub1", plaintext: "tok", reason: "card update" });
+
+    expect(ref).toBe("storedRef");
+    expect(mocks.rotateSecret).not.toHaveBeenCalled();
+    expect(mocks.storeSecret).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: "GROW_SAAS_CHARGE_TOKEN", rail: "A", ownerType: "Subscription", ownerId: "sub1", plaintext: "tok" }),
+      expect.anything(),
+    );
+  });
+
+  it("self-heals a dangling ref (rotateSecret throws SecretNotFound) by sealing fresh", async () => {
+    mocks.subFindUnique.mockResolvedValue({ growSaasChargeSecretRef: "danglingRef" });
+    mocks.rotateSecret.mockRejectedValue(new SecretNotFoundError("gone", { ownerType: "Subscription", rail: "A" }));
+    mocks.storeSecret.mockResolvedValue("healedRef");
+
+    expect(await rotateGrowSaasToken({ subscriptionId: "sub1", plaintext: "tok", reason: "card update" })).toBe("healedRef");
+  });
+
+  it("throws SecretNotFoundError when the subscription is missing", async () => {
+    mocks.subFindUnique.mockResolvedValue(null);
+    await expect(rotateGrowSaasToken({ subscriptionId: "missing", plaintext: "t", reason: "r" }))
+      .rejects.toBeInstanceOf(SecretNotFoundError);
   });
 });
