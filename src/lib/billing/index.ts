@@ -11,7 +11,6 @@
  */
 
 import { StubBillingProvider } from "./providers/stub";
-import { HypBillingProvider }  from "./providers/hyp";
 import { GrowBillingProvider } from "./providers/grow/provider";
 
 // ── Shared types ──────────────────────────────────────────────────────────────
@@ -63,9 +62,6 @@ export function getBillingProvider(): BillingProvider {
   switch (name) {
     case "stub":
       return new StubBillingProvider();
-
-    case "hyp":
-      return new HypBillingProvider();
 
     case "grow":
       return new GrowBillingProvider();

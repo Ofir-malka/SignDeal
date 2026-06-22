@@ -10,14 +10,11 @@
 
 import type { PaymentProvider } from "./provider";
 import { StubPaymentProvider }  from "./providers/stub";
-import { RapydPaymentProvider } from "./providers/rapyd";
 
 export function getPaymentProvider(): PaymentProvider {
   const name = process.env.PAYMENT_PROVIDER?.trim() ?? "stub";
 
   switch (name) {
-    case "rapyd":
-      return new RapydPaymentProvider();
     case "stub":
       return new StubPaymentProvider();
     // future:
@@ -37,5 +34,3 @@ export type {
   WebhookResult,
   MappedStatus,
 } from "./provider";
-
-export { WebhookSignatureError } from "./providers/rapyd";
