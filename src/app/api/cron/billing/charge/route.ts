@@ -66,7 +66,6 @@ export async function GET(request: Request) {
       ` failed=${result.failed}` +
       ` errored=${result.errored}` +
       ` skipped=${result.skipped}` +
-      ` noToken=${result.noToken}` +
       ` dryRunMode=${result.dryRunMode}` +
       ` realChargesEnabled=${result.realChargesEnabled}` +
       ` recurringProvider=${result.recurringProvider}` +
@@ -87,7 +86,6 @@ export async function GET(request: Request) {
             failed:     result.failed,
             errored:    result.errored,
             skipped:    result.skipped,
-            noToken:    result.noToken,
             dryRunMode: result.dryRunMode,
             byProvider: result.byProvider,
             growRecurringEnabled: result.growRecurringEnabled,

@@ -5,9 +5,8 @@
  * Can also be triggered manually via curl for testing.
  *
  * Provider-neutral: the per-provider charge call is delegated to the charger seam
- * (getRecurringCharger → HYP | Grow | stub). This engine NEVER calls callHypSoft or the Grow
- * .http.ts directly. HYP is TEMPORARY rollback code during the Grow transition; the final state
- * is Grow-only (the "hyp" branches are tagged TEMPORARY(hyp-removal)).
+ * (getRecurringCharger → Grow | stub). This engine NEVER calls the Grow .http.ts directly —
+ * the charger owns the provider call.
  *
  * ── Safety gates (both must be satisfied for a real charge to execute) ────────
  *
@@ -24,14 +23,13 @@
  *
  * ── Grow participation gate ───────────────────────────────────────────────────
  *   ENABLE_GROW_RECURRING_CHARGES=true → the Grow scan runs (separate from checkout's
- *   GROW_SAAS_ENABLED). When off, NO Grow subscriptions are scanned → HYP unaffected.
+ *   GROW_SAAS_ENABLED). When off, NO subscriptions are scanned → nothing is charged.
  *
  * ── Eligibility criteria ─────────────────────────────────────────────────────
  *   plan          IN (STANDARD, GROWTH, PRO)    ← AGENCY uses custom billing
  *   status        IN (TRIALING, ACTIVE, PAST_DUE)
  *   nextBillingAt <= now()
- *   HYP:  billingProvider="hyp"  AND chargeToken IS NOT NULL
- *   Grow: billingProvider="grow" AND growSaasChargeSecretRef IS NOT NULL (gated)
+ *   billingProvider="grow" AND growSaasChargeSecretRef IS NOT NULL (gated)
  *
  * ── Idempotency ───────────────────────────────────────────────────────────────
  *   Primary:   a successful charge advances nextBillingAt → a second run finds it not-due.
@@ -40,9 +38,8 @@
  *              periodStart]) P2002 guard against concurrent cron invocations.
  *
  * ── Security ──────────────────────────────────────────────────────────────────
- *   HYP chargeToken is fetched in a targeted query (HYP-only preflight), never selected into
- *   the broad scan. The Grow cardToken is never touched here — it is loaded + revealed only
- *   inside the Grow .http.ts. Raw provider response bodies are never stored or logged.
+ *   The Grow cardToken is never touched here — it is loaded + revealed only inside the Grow
+ *   .http.ts. Raw provider response bodies are never stored or logged.
  */
 
 import { prisma }                                                       from "@/lib/prisma";
@@ -87,7 +84,7 @@ export interface ProviderCounts {
 }
 
 export interface RecurringChargeResult {
-  /** All subscriptions where nextBillingAt <= now (HYP with-token + Grow + HYP no-token). */
+  /** All Grow subscriptions where nextBillingAt <= now. */
   eligible:           number;
   /** Charge succeeded (provider reported paid). */
   charged:            number;
@@ -97,20 +94,18 @@ export interface RecurringChargeResult {
   skipped:            number;
   /** Integration fault (config/transport/token) — re-armed, NOT dunned. */
   errored:            number;
-  /** Due HYP subs missing chargeToken — cannot charge; needs investigation. */
-  noToken:            number;
   /** Subscriptions logged as CHARGE_DRY_RUN (only when BILLING_CHARGE_DRY_RUN=true). */
   dryRunLogged:       number;
   /** Whether BILLING_CHARGE_DRY_RUN=true was active for this run. */
   dryRunMode:         boolean;
   /** Whether ENABLE_REAL_RECURRING_CHARGES=true was active for this run. */
   realChargesEnabled: boolean;
-  /** Stub-vs-real execution switch: "stub" (no provider call) or "hyp"/real. */
-  recurringProvider:  "stub" | "hyp";
+  /** Stub-vs-real execution switch: "stub" (no provider call) or "grow" (real). */
+  recurringProvider:  "stub" | "grow";
   /** Whether the Grow recurring scan ran (ENABLE_GROW_RECURRING_CHARGES). */
   growRecurringEnabled: boolean;
   /** Per-provider counters. */
-  byProvider:         { hyp: ProviderCounts; grow: ProviderCounts };
+  byProvider:         { grow: ProviderCounts };
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -144,10 +139,10 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
 
   // RECURRING_BILLING_PROVIDER=stub → full DB flow, no provider network call (both rails).
   const rawProvider       = process.env.RECURRING_BILLING_PROVIDER?.trim().toLowerCase();
-  const recurringProvider = rawProvider === "stub" ? "stub" : "hyp";
+  const recurringProvider = rawProvider === "stub" ? "stub" : "grow";
   const stubMode          = recurringProvider === "stub";
   // Grow participation gate (separate from checkout's GROW_SAAS_ENABLED). When off, the Grow
-  // scan is skipped entirely → zero Grow behavior, HYP unaffected.
+  // scan is skipped entirely → zero subscriptions scanned, nothing is charged.
   const growRecurringEnabled = isGrowSaasRecurringEnabled();
 
   console.log(
@@ -158,41 +153,6 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
     ` recurringProvider=${recurringProvider}` +
     ` growRecurringEnabled=${growRecurringEnabled}`,
   );
-
-  // ── Scan: due HYP subs + chargeToken present (TEMPORARY(hyp-removal)) ─────
-  const dueWithToken = await prisma.subscription.findMany({
-    where: {
-      billingProvider: "hyp",
-      plan:            { in: ["STANDARD", "GROWTH", "PRO"] },
-      status:          { in: ["TRIALING", "ACTIVE", "PAST_DUE"] },
-      nextBillingAt:   { lte: now },
-      chargeToken:     { not: null },
-    },
-    select: {
-      id:              true,
-      userId:          true,
-      plan:            true,
-      billingInterval: true,
-      status:          true,
-      nextBillingAt:   true,
-      billingFailures: true,
-      cardExpMonth:    true,
-      cardExpYear:     true,
-      firstPaymentAt:  true,
-      // chargeToken intentionally NOT selected — fetched per-subscription below
-    },
-  });
-
-  // ── Scan: due HYP subs but no chargeToken ─────────────────────────────────
-  const noTokenCount = await prisma.subscription.count({
-    where: {
-      billingProvider: "hyp",
-      plan:            { in: ["STANDARD", "GROWTH", "PRO"] },
-      status:          { in: ["TRIALING", "ACTIVE", "PAST_DUE"] },
-      nextBillingAt:   { lte: now },
-      chargeToken:     null,
-    },
-  });
 
   // ── Scan: due Grow subs (gated; skipped entirely when Grow recurring is off) ──
   // growSaasChargeSecretRef is an opaque handle (safe to select); the cardToken itself is
@@ -214,37 +174,21 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
           status:          true,
           nextBillingAt:   true,
           billingFailures: true,
-          cardExpMonth:    true,
-          cardExpYear:     true,
           firstPaymentAt:  true,
         },
       })
     : [];
 
-  // Merge both rails into one due list, tagged by provider. The HYP query above is byte-identical
-  // to its pre-transition form; the Grow rows are additive and gated. The loop dispatches per provider.
-  const due = [
-    ...dueWithToken.map((s) => ({ ...s, billingProvider: "hyp" as const })),
-    ...growDue.map((s)      => ({ ...s, billingProvider: "grow" as const })),
-  ];
+  // Grow-only due list (gated by ENABLE_GROW_RECURRING_CHARGES). The loop dispatches per provider.
+  const due = growDue.map((s) => ({ ...s, billingProvider: "grow" as const }));
 
-  const eligible = due.length + noTokenCount;
+  const eligible = due.length;
 
   console.log(
     `[billing/recurring] SCAN_RESULT` +
     ` eligible=${eligible}` +
-    ` hypWithToken=${dueWithToken.length}` +
-    ` growDue=${growDue.length}` +
-    ` noToken=${noTokenCount}`,
+    ` growDue=${growDue.length}`,
   );
-
-  if (noTokenCount > 0) {
-    console.warn(
-      `[billing/recurring] NO_TOKEN_WARNING` +
-      ` count=${noTokenCount}` +
-      ` — HYP subscriptions are due but missing chargeToken.`,
-    );
-  }
 
   // ── Per-subscription charge loop ──────────────────────────────────────────
 
@@ -254,7 +198,6 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
   let errored      = 0;
   let dryRunLogged = 0;
   const byProvider = {
-    hyp:  { charged: 0, failed: 0, errored: 0 },
     grow: { charged: 0, failed: 0, errored: 0 },
   };
 
@@ -329,38 +272,6 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
       continue;
     }
 
-    // ── HYP-only preflight (TEMPORARY(hyp-removal)) ────────────────────────
-    // Runs BEFORE the PENDING create so a missing token/expiry skips WITHOUT leaving a
-    // spurious PENDING row (which would occupy the @@unique slot forever). Grow has no
-    // chargeToken column — its token is revealed later inside the Grow .http.ts.
-    let hypChargeToken: string | null = null;
-    if (sub.billingProvider === "hyp") {
-      const tokenRow = await prisma.subscription.findUnique({
-        where:  { id: sub.id },
-        select: { chargeToken: true },
-      });
-      if (!tokenRow?.chargeToken) {
-        console.warn(
-          `[billing/recurring] SKIP_TOKEN_GONE` +
-          ` subscriptionId=${sub.id}` +
-          ` — chargeToken was present at scan but missing at charge time`,
-        );
-        skipped++;
-        continue;
-      }
-      if (!sub.cardExpMonth || !sub.cardExpYear) {
-        console.warn(
-          `[billing/recurring] SKIP_MISSING_EXPIRY` +
-          ` subscriptionId=${sub.id}` +
-          ` cardExpMonth=${sub.cardExpMonth ?? "(null)"}` +
-          ` cardExpYear=${sub.cardExpYear ?? "(null)"}`,
-        );
-        skipped++;
-        continue;
-      }
-      hypChargeToken = tokenRow.chargeToken;
-    }
-
     // ── Pre-create PENDING BillingCharge ───────────────────────────────────
     // Created before the charge call so a crash between the call and the DB update still
     // leaves an audit record. P2002 on @@unique([subscriptionId, periodStart]) → idempotent skip.
@@ -420,9 +331,9 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
     );
 
     // ── Execute charge through the provider-neutral seam ───────────────────
-    // recurring.ts NEVER calls callHypSoft or the Grow .http.ts directly — the charger owns the
-    // provider call and returns a neutral RecurringChargeOutcome. Stub mode runs the full DB flow
-    // with no provider network call.
+    // recurring.ts NEVER calls the Grow .http.ts directly — the charger owns the provider call
+    // and returns a neutral RecurringChargeOutcome. Stub mode runs the full DB flow with no
+    // provider network call.
     const ctx: RecurringChargeContext = {
       billingProvider: sub.billingProvider,
       subscriptionId:  sub.id,
@@ -431,9 +342,6 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
       amountAgorot,
       amountShekels,
       info:            `${planLabel} · ${intervalLabel}`,
-      hypChargeToken,                       // HYP-only; null for Grow
-      hypCardExpMonth: sub.cardExpMonth,
-      hypCardExpYear:  sub.cardExpYear,
     };
     const result: RecurringChargeOutcome = await getRecurringCharger(
       sub.billingProvider,
@@ -447,10 +355,10 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
           where: { id: charge.id },
           data: {
             status: "SUCCEEDED",
-            // Provider-scoped columns. growRaw/hypRaw never stored.
-            ...(sub.billingProvider === "grow"
-              ? { growStatusCode: result.providerCode, growTransId: result.providerTxId, growApprovalCode: result.authCode }
-              : { hypCCode: result.providerCode, hypTransId: result.providerTxId, hypAuthCode: result.authCode }),
+            // Grow-scoped columns. growRaw never stored.
+            growStatusCode:   result.providerCode,
+            growTransId:      result.providerTxId,
+            growApprovalCode: result.authCode,
           },
         });
 
@@ -478,10 +386,7 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
             actorId:        null,
             metadata: JSON.stringify({
               chargeId: charge.id,
-              // provider-scoped tx id key (HYP keeps hypTransId; Grow uses growTransId)
-              ...(sub.billingProvider === "grow"
-                ? { growTransId: result.providerTxId }
-                : { hypTransId: result.providerTxId }),
+              growTransId: result.providerTxId,
               amountAgorot,
               plan:        sub.plan,
               interval:    sub.billingInterval,
@@ -550,9 +455,8 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
           where: { id: charge.id },
           data: {
             status: "FAILED",
-            ...(sub.billingProvider === "grow"
-              ? { growStatusCode: result.providerCode, growTransId: result.providerTxId }
-              : { hypCCode: result.providerCode, hypTransId: result.providerTxId }),
+            growStatusCode: result.providerCode,
+            growTransId:    result.providerTxId,
             nextRetryAt: retryDate,
           },
         });
@@ -579,9 +483,7 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
             actorId:        null,
             metadata: JSON.stringify({
               chargeId: charge.id,
-              ...(sub.billingProvider === "grow"
-                ? { growStatusCode: result.providerCode }
-                : { hypCCode: result.providerCode }),
+              growStatusCode: result.providerCode,
               reasonTag:     result.reasonTag ?? null,
               attemptNumber: newFailures,
               isMaxFailures,
@@ -646,9 +548,7 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
           where: { id: charge.id },
           data: {
             status: "FAILED",
-            ...(sub.billingProvider === "grow"
-              ? { growStatusCode: result.reasonTag ?? result.providerCode ?? null }
-              : { hypCCode: result.reasonTag ?? result.providerCode ?? null }),
+            growStatusCode: result.reasonTag ?? result.providerCode ?? null,
             nextRetryAt: retryAt,
           },
         });
@@ -701,7 +601,6 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
     ` errored=${errored}` +
     ` skipped=${skipped}` +
     ` dryRunLogged=${dryRunLogged}` +
-    ` noToken=${noTokenCount}` +
     ` realChargesEnabled=${realChargesEnabled}` +
     ` isDryRun=${isDryRun}` +
     ` recurringProvider=${recurringProvider}` +
@@ -715,7 +614,6 @@ export async function processRecurringCharges(): Promise<RecurringChargeResult> 
     failed,
     skipped,
     errored,
-    noToken:            noTokenCount,
     dryRunLogged,
     dryRunMode:         isDryRun,
     realChargesEnabled,

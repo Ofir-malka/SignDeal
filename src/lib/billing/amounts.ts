@@ -1,12 +1,12 @@
 /**
  * Billing plan amounts and labels.
  *
- * Extracted from providers/hyp.ts so both the HYP checkout provider and the
- * recurring billing engine can import without creating circular dependencies.
+ * A standalone module (no provider imports) so both the checkout provider and the
+ * recurring billing engine can import it without creating circular dependencies.
  *
  * Convention: amounts are stored in agorot (100 agorot = ₪1), matching the
  * DB column convention used everywhere in the codebase.
- * Convert to whole shekels (÷ 100) before sending to HYP — all plan prices
+ * Convert to whole shekels (÷ 100) before sending to the provider — all plan prices
  * are exact multiples of 100 agorot so integer division is lossless.
  *
  * AGENCY uses manual / custom billing — the recurring engine never charges it.
