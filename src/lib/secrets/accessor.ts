@@ -311,11 +311,21 @@ export interface RotateSecretArgs extends OwnerIdentity {
  * rewrap (no newPlaintext): re-wrap the DEK under the active KEK; ref stable.
  * value rotation (newPlaintext): purge the old row + insert a new one atomically;
  * returns the NEW ref (caller must update the owner's *SecretRef).
+ *
+ * Pass `opts.tx` to run every read+write on a caller transaction so the rotation
+ * commits/rolls back atomically with the caller's other work (no nested $transaction).
+ * The audit event is still emitted after the rotation, outside any caller txn —
+ * matching storeSecret's behavior.
  */
-export async function rotateSecret(args: RotateSecretArgs): Promise<string> {
+export async function rotateSecret(
+  args: RotateSecretArgs,
+  opts?: { tx?: Prisma.TransactionClient },
+): Promise<string> {
   assertPurposeRailOwner(args); // R1/R2/R3
 
-  const row = await prisma.encryptedSecret.findUnique({
+  const db: SecretDb = opts?.tx ?? prisma;
+
+  const row = await db.encryptedSecret.findUnique({
     where: { id: args.secretRef },
   });
   if (!row) {
@@ -343,7 +353,7 @@ export async function rotateSecret(args: RotateSecretArgs): Promise<string> {
     };
     const { envelope, encVersion, kekVersion } = encryptSecret(args.newPlaintext, aad);
 
-    await prisma.$transaction(async (tx) => {
+    const run = async (tx: Prisma.TransactionClient): Promise<void> => {
       // Purge the old row first so the partial unique index admits the new one.
       await tx.encryptedSecret.update({
         where: { id: args.secretRef },
@@ -362,7 +372,10 @@ export async function rotateSecret(args: RotateSecretArgs): Promise<string> {
           expiresAt: row.expiresAt,
         },
       });
-    });
+    };
+    // Reuse the caller txn when provided (no nested $transaction); else open our own.
+    if (opts?.tx) await run(opts.tx);
+    else await prisma.$transaction(run);
 
     await logAuditEvent({
       userId: null,
@@ -396,7 +409,7 @@ export async function rotateSecret(args: RotateSecretArgs): Promise<string> {
     throw err;
   }
 
-  await prisma.encryptedSecret.update({
+  await db.encryptedSecret.update({
     where: { id: args.secretRef },
     data: {
       ciphertext: toBytes(rewrapped.envelope),

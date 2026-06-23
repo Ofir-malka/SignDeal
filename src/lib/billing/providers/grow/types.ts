@@ -15,6 +15,8 @@ export interface GrowSaasTokenCheckoutArgs {
   fullName: string;
   email: string;
   phone?: string | null;
+  /** Override the cField1 namespace (default `saas_token_setup:<order>`). */
+  cField1?: string;
 }
 
 export type GrowSaasTokenCheckoutResult =

@@ -38,9 +38,11 @@ export async function verifyAndActivateGrowTokenSetup(args: {
 async function resolveGrowTokenActivation(args: {
   userId: string;
 }): Promise<GrowActivationResult> {
-  // Latest pending Grow token-setup checkout for this user.
+  // Latest pending Grow token-setup (onboarding) checkout for this user. The purpose
+  // filter is load-bearing: without it, this descending findFirst could grab a newer
+  // card-update / recovery checkout (which is sealed by the separate card-update bridge).
   const checkout = await prisma.billingCheckout.findFirst({
-    where: { userId: args.userId, status: "PENDING", growProcessId: { not: null } },
+    where: { userId: args.userId, status: "PENDING", growProcessId: { not: null }, purpose: "checkout" },
     orderBy: { createdAt: "desc" },
     select: { id: true, order: true, plan: true, interval: true, growProcessId: true, growProcessToken: true },
   });
