@@ -23,6 +23,7 @@ import { requireUserId }             from "@/lib/require-user";
 import { prisma }                    from "@/lib/prisma";
 import { getBillingProvider }        from "@/lib/billing";
 import { normalizeGrowPhone, isValidGrowPhone } from "@/lib/billing/grow-phone";
+import { requiresRecovery, USE_RECOVERY_CODE } from "@/lib/billing/onboarding-eligibility";
 import type { BillablePlan, BillingInterval } from "@/lib/billing";
 
 const VALID_PLANS:     readonly BillablePlan[]    = ["STANDARD", "GROWTH", "PRO"];
@@ -59,6 +60,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const validPlan     = plan     as BillablePlan;
   const validInterval = interval as BillingInterval;
+
+  // ── Existing PAST_DUE subscribers must RECOVER, not start a new onboarding/upgrade
+  //    checkout. The onboarding bridge only activates INCOMPLETE→TRIALING, so a PAST_DUE
+  //    user routed here would dead-end (and a stray purpose="checkout" session is created).
+  //    Send them to the recovery flow instead — BEFORE any Grow call or BillingCheckout. ──
+  const existing = await prisma.subscription.findUnique({
+    where:  { userId },
+    select: { status: true },
+  });
+  if (requiresRecovery(existing?.status)) {
+    console.log(`[api/billing/checkout] PAST_DUE → recovery redirect userId=${userId}`);
+    return NextResponse.json(
+      { error: "Account is past due. Use the recovery flow to restore access.", code: USE_RECOVERY_CODE },
+      { status: 400 },
+    );
+  }
 
   // ── Fetch user identity (email + name + phone for the provider's hosted page) ──
   const user = await prisma.user.findUnique({

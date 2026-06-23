@@ -493,7 +493,9 @@ async function sendSubscriptionSuspendedEmail(
     }
 
     const baseUrl       = process.env.APP_BASE_URL?.trim() || "https://www.signdeal.co.il";
-    const reactivateUrl = `${baseUrl}/onboarding/billing`;
+    // Suspended = PAST_DUE→EXPIRED, recover-eligible via billingFailures>=1. Route to the
+    // recovery flow (the onboarding bridge can't reactivate a non-INCOMPLETE user).
+    const reactivateUrl = `${baseUrl}/settings/billing/recover`;
 
     // Resolve human-readable labels (plan may be "STANDARD", "GROWTH", "PRO").
     const planLabel     = (PLAN_LABELS as Record<string, string>)[plan] ?? plan;

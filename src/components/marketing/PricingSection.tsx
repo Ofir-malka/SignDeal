@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { USE_RECOVERY_CODE, RECOVERY_PATH } from "@/lib/billing/onboarding-eligibility";
 import { SectionWrapper } from "@/components/marketing/ui/SectionWrapper";
 import { SectionBadge }   from "@/components/marketing/ui/SectionBadge";
 import { AnimateIn }      from "@/components/marketing/ui/AnimateIn";
@@ -500,7 +501,11 @@ export function PricingSection({ isLoggedIn = false }: PricingSectionProps) {
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ plan: backendId, interval }),
       });
-      const data = await res.json() as { checkoutUrl?: string; error?: string };
+      const data = await res.json() as { checkoutUrl?: string; error?: string; code?: string };
+      if (data.code === USE_RECOVERY_CODE) {
+        window.location.assign(RECOVERY_PATH);   // existing PAST_DUE subscriber → recovery
+        return;
+      }
       if (!res.ok || !data.checkoutUrl) {
         setCheckoutError(data.error ?? "שגיאה בפתיחת עמוד התשלום. נסה שוב.");
         return;
