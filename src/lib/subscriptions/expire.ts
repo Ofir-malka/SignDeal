@@ -5,9 +5,10 @@
  * safely perform (it only handles active charge attempts):
  *
  *   expireTrialingSubscriptions()
- *     TRIALING → EXPIRED for users whose trial ended and have no chargeToken.
- *     If a chargeToken IS present the billing cron is responsible — this job
- *     does not touch those rows.
+ *     TRIALING → EXPIRED for users whose trial ended with NO card on file on
+ *     either rail (chargeToken IS NULL for HYP, growSaasChargeSecretRef IS NULL
+ *     for Grow). If a token is present on either rail the billing cron is
+ *     responsible — this job does not touch those rows.
  *
  *   expirePastDueSubscriptions()
  *     PAST_DUE → EXPIRED for users who exhausted all retry attempts (indicated
@@ -27,13 +28,13 @@
  *
  * ── Timing ────────────────────────────────────────────────────────────────────
  *   Called by /api/cron/subscriptions/expire at 08:00 UTC daily — 2 hours
- *   after the billing cron so any TRIALING subscription with a chargeToken has
- *   had at least one charge attempt before we declare it expired.
+ *   after the billing cron so any TRIALING subscription with a card on file (a
+ *   token on either rail) has had at least one charge attempt before expiry.
  *
  * ── Grace periods (env-overridable for testing) ───────────────────────────────
- *   TRIAL_EXPIRY_GRACE_HOURS  (default: 48) — hours after trialEndsAt before
- *     a no-token TRIALING subscription is expired. Ensures the billing cron has
- *     had at least two runs after the trial end date.
+ *   TRIAL_EXPIRY_GRACE_HOURS  (default: 48) — hours after trialEndsAt before a
+ *     TRIALING subscription with no card on file (no token on either rail) is
+ *     expired. Ensures the billing cron has had at least two runs after trial end.
  *
  *   PAST_DUE_GRACE_DAYS (default: 14) — days after a subscription hits
  *     MAX_BILLING_FAILURES (nextBillingAt = null) before it is expired.
@@ -106,7 +107,9 @@ function formatHeDate(date: Date): string {
 
 /**
  * Expires TRIALING subscriptions where:
- *   • chargeToken IS NULL  (if present, billing cron handles it)
+ *   • NO card on file on EITHER rail — chargeToken IS NULL (HYP) AND
+ *     growSaasChargeSecretRef IS NULL (Grow). If a token is present on either
+ *     rail, the billing cron owns the trial-end charge — don't expire.
  *   • trialEndsAt < now - TRIAL_EXPIRY_GRACE_HOURS
  *
  * Per-subscription: $transaction → audit → email. Never throws.
@@ -123,13 +126,15 @@ export async function expireTrialingSubscriptions(): Promise<ExpiryResult> {
     ` (TRIAL_EXPIRY_GRACE_HOURS=${TRIAL_EXPIRY_GRACE_HOURS})`,
   );
 
-  // Fetch eligible subscriptions. chargeToken intentionally NOT selected —
-  // the WHERE clause already filters chargeToken IS NULL.
+  // Fetch eligible subscriptions — only trials with NO card on file on EITHER rail.
+  // chargeToken (HYP) + growSaasChargeSecretRef (Grow) intentionally NOT selected —
+  // the WHERE clause already filters both IS NULL.
   const candidates = await prisma.subscription.findMany({
     where: {
-      status:      "TRIALING",
-      chargeToken: null,
-      trialEndsAt: { lt: graceCutoff },
+      status:                  "TRIALING",
+      chargeToken:             null,   // HYP: no HYP token
+      growSaasChargeSecretRef: null,   // Grow: no Grow token (Rail A sealed-token handle)
+      trialEndsAt:             { lt: graceCutoff },
     },
     select: {
       id:          true,
