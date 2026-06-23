@@ -21,6 +21,7 @@
 
 import { useState }         from "react";
 import { signOut }          from "next-auth/react";
+import { USE_RECOVERY_CODE, RECOVERY_PATH } from "@/lib/billing/onboarding-eligibility";
 
 // ── Plan data ─────────────────────────────────────────────────────────────────
 
@@ -178,8 +179,12 @@ export default function OnboardingBillingPage() {
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ plan, interval }),
       });
-      const data = await res.json() as { checkoutUrl?: string; error?: string };
+      const data = await res.json() as { checkoutUrl?: string; error?: string; code?: string };
 
+      if (data.code === USE_RECOVERY_CODE) {
+        window.location.assign(RECOVERY_PATH);   // existing PAST_DUE subscriber → recovery
+        return;
+      }
       if (!res.ok || !data.checkoutUrl) {
         setError(data.error ?? "שגיאה בפתיחת עמוד התשלום — נסה שנית");
         return;
