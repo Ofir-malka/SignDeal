@@ -9,11 +9,9 @@
  *
  * ── Security ──────────────────────────────────────────────────────────────────
  * Every query is scoped to the current session userId.
- * The following fields are intentionally excluded from every select:
+ * The following field is intentionally excluded from every select:
  *   Subscription.chargeToken  — 19-digit HYP charge token; never expose to browser
- *   Subscription.cardToken    — HYP HKId recurring agreement ID; never expose
- *   BillingCharge.hypRaw      — raw HYP response; may contain card-adjacent data
- * All three are commented below at the exact point they were considered and rejected.
+ * It is commented below at the exact point it was considered and rejected.
  */
 
 import type { Metadata }         from "next";
@@ -152,7 +150,6 @@ export default async function BillingSettingsPage() {
 
         // ── Intentionally NOT selected ───────────────────────────────────────
         // chargeToken — 19-digit HYP charge token; treat as sensitive credential
-        // cardToken   — HYP HKId recurring agreement ID; treat as sensitive
       },
     }),
 
@@ -170,9 +167,6 @@ export default async function BillingSettingsPage() {
         periodStart: true,
         periodEnd:   true,
         createdAt:   true,
-        // ── Intentionally NOT selected ─────────────────────────────────────
-        // hypRaw  — raw HYP response body; may contain card-adjacent values
-        // (field exists in schema but intentionally never populated or exposed)
       },
     }),
 
