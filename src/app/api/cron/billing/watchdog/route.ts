@@ -13,10 +13,10 @@
  *                No immediate action required; monitor for escalation.
  *
  *   "error"    — age > BILLING_WATCHDOG_CRITICAL_HOURS  (default: 2 h)
- *                Almost certainly stuck. Admin must inspect HYP dashboard for
- *                the BillingCharge.id (used as Order param in callHypSoft),
- *                verify whether HYP charged the card, and manually update the
- *                BillingCharge row (FAILED or SUCCEEDED).
+ *                Almost certainly stuck. Admin must inspect the provider dashboard
+ *                for the BillingCharge.id (used as the charge Order/identifier),
+ *                verify whether the provider charged the card, and manually update
+ *                the BillingCharge row (FAILED or SUCCEEDED).
  *
  * ── Why no auto-fail ─────────────────────────────────────────────────────────
  *   See src/lib/billing/watchdog.ts for the full rationale.
