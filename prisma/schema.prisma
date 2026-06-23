@@ -658,8 +658,8 @@ model Message {
 //            charge fields are placeholders for Phase 2B.
 // Phase 2B — /billing/success bifurcation: INCOMPLETE → TRIALING with card;
 //            TRIALING/ACTIVE → ACTIVE for paid upgrades.
-// Phase 3  — Recurring billing engine reads cardToken + nextBillingAt to
-//            charge via HYP HK module. billingFailures drives retry/suspend logic.
+// Phase 3  — Recurring billing engine reads growSaasChargeSecretRef + nextBillingAt
+//            to charge via Grow. billingFailures drives retry/suspend logic.
 
 model Subscription {
   id     String @id @default(cuid())
@@ -685,28 +685,21 @@ model Subscription {
 
   // ── Billing provider ───────────────────────────────────────────────────────
   billingProvider       String?  // "hyp" | "grow" | future provider slug
-  billingCustomerId     String?  // provider's customer object ID (future)
-  billingSubscriptionId String?  // provider's subscription/agreement object ID
 
   // ── Grow SaaS billing (Rail A — Phase 1 foundation; additive, no runtime reads yet) ──
   growSaasCustomerId      String?  // Grow SaaS customer identifier (populated in later phases)
   growSaasChargeSecretRef String?  // handle → EncryptedSecret (purpose = GROW_SAAS_CHARGE_TOKEN)
 
-  // ── Card-on-file (Phase 2A placeholder — written in Phase 2B) ─────────────
+  // ── Card-on-file ──────────────────────────────────────────────────────────
   //
-  // These fields are populated during the INCOMPLETE → TRIALING transition
-  // when HYP returns callback params (HK module: cardToken = HKId).
+  // Card metadata captured when a card is stored (Grow token-setup / card-update;
+  // legacy HYP rows also populated these). The recurring engine charges via the
+  // Grow sealed token (growSaasChargeSecretRef); `billingFailures` drives the
+  // retry / suspend / cancel logic, and `nextBillingAt` is the cron cursor —
+  // charge all rows where nextBillingAt <= now() and status IN (TRIALING, ACTIVE).
   //
-  // ▶ Phase 3 CONNECT POINT: the recurring billing engine reads `cardToken`
-  //   and calls HYP's charge endpoint to collect the subscription fee.
-  //   `billingFailures` drives the retry / suspend / cancel logic.
-  //   `nextBillingAt` is the cron job's cursor — charge all rows where
-  //   nextBillingAt <= now() and status IN (TRIALING, ACTIVE).
-  //
-  cardToken    String?    // HYP HKId recurring agreement ID — used for Phase 3 charges.
-                          // Treat as sensitive: do not log, do not expose to client.
   chargeToken  String?    // 19-digit token from action=getToken — used for Phase 3B action=soft charges.
-                          // Different from cardToken (HKId). Treat as sensitive: never log, never expose to client.
+                          // Treat as sensitive: never log, never expose to client.
   cardBrand    String?    // e.g. "VISA", "MASTERCARD" — populated if provider returns it.
   cardLast4    String?    // Last 4 digits extracted from HYP cardMask (e.g. "1111").
   cardExpMonth Int?       // Card expiry month 1-12.
@@ -837,14 +830,8 @@ model BillingCheckout {
   //                          updates card fields only, no billing-state changes
   purpose  String  @default("checkout")
 
-  // ── Populated on callback (Phase 3 Step 2+) ────────────────────────────────
-  txId       String?  // HYP transaction ID
-  hkId       String?  // HYP recurring agreement ID (from HK module)
-  cardToken  String?  // encrypted — for recurring charges (Phase 4)
-  cardExp    String?  // encrypted MMYY — for recurring charges (Phase 4)
+  // ── Grow card mask (set when the Grow token-setup checkout is claimed) ──────
   cardMask   String?  // safe to store plain, e.g. "4111****1111"
-  authNumber String?
-  errorCode  String?
 
   // ── Grow Rail A token-setup (Phase 1) ──────────────────────────────────────
   growProcessId    String?  // createPaymentProcess processId — for getPaymentProcessInfo verify
@@ -900,17 +887,15 @@ model BillingCharge {
   periodStart    DateTime            // currentPeriodEnd before this charge
   periodEnd      DateTime            // new currentPeriodEnd after a successful charge
 
-  // ── HYP response fields (populated by Phase 3C soft-charge) ───────────────
-  hypTransId     String?             // HYP transaction ID (TransId) returned on success; may be null if HYP omits it
-  hypCCode       String?             // raw CCode returned by HYP (0 = success)
-  hypAuthCode    String?             // HYP authorization code (ACode) returned on success
-  hypRaw         String? @db.Text    // intentionally never populated — raw HYP response may contain card-adjacent values
+  // ── HYP response fields (legacy — historical rows only; no longer written) ──
+  hypCCode       String?             // raw CCode returned by HYP (0 = success) — historical
+  hypAuthCode    String?             // HYP authorization code (ACode) — historical
 
   // ── Grow response fields (Rail A — Phase 1 foundation; additive, no runtime reads yet) ──
   growTransId      String?            // Grow transaction id (populated in later phases)
   growStatusCode   String?            // Grow status/result code (populated in later phases)
   growApprovalCode String?            // Grow approval code (populated in later phases)
-  growRaw          String? @db.Text   // intentionally never populated (mirrors hypRaw)
+  growRaw          String? @db.Text   // intentionally never populated — raw provider response may contain card-adjacent values
 
   // ── Retry state ────────────────────────────────────────────────────────────
   attemptNumber  Int       @default(1)  // 1 = first attempt; incremented on each retry
