@@ -3,12 +3,12 @@ import { NextResponse, after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sendSms, getSmsProviderName } from "@/lib/messaging/sms-provider";
 import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
-import { requireUserId }          from "@/lib/require-user";
-import { canCreateContract }      from "@/lib/subscription";
+import { requireUserId } from "@/lib/require-user";
+import { canCreateContract } from "@/lib/subscription";
 import { resolveTemplate, buildContext } from "@/lib/contracts/resolve-template";
 import { rateLimit, getRealIp } from "@/lib/rate-limit";
-import { logAuditEvent }         from "@/lib/audit/log-audit-event";
-import { parsePositiveInt, parseNonNegativeInt, parseEnum, firstError } from "@/lib/validate";
+import { logAuditEvent } from "@/lib/audit/log-audit-event";
+import { parsePositiveInt, parseNonNegativeInt, parseEnum, parseOptionalEnum, firstError } from "@/lib/validate";
 import { sendEmail, contractSigningEmail } from "@/lib/email";
 import { parsePropertyAddress } from "@/lib/format-address";
 
@@ -19,20 +19,20 @@ import { parsePropertyAddress } from "@/lib/format-address";
 
 async function sendContractSms(
   contract: {
-    id:              string;
-    signatureToken:  string;
+    id: string;
+    signatureToken: string;
     propertyAddress: string;
-    userId:          string;
-    clientId:        string;
+    userId: string;
+    clientId: string;
   },
   clientPhone: string,
-  clientName:  string,
-  brokerName:  string,
+  clientName: string,
+  brokerName: string,
 ): Promise<void> {
   try {
-    const baseUrl         = process.env.APP_BASE_URL?.trim() || "http://localhost:3000";
-    const testPhone       = process.env.SMS_TEST_PHONE?.trim() || "";
-    const signingLink     = `${baseUrl}/contracts/sign/${contract.signatureToken}`;
+    const baseUrl = process.env.APP_BASE_URL?.trim() || "http://localhost:3000";
+    const testPhone = process.env.SMS_TEST_PHONE?.trim() || "";
+    const signingLink = `${baseUrl}/contracts/sign/${contract.signatureToken}`;
     const normalizedPhone = normalizeIsraeliPhone(clientPhone);
 
     const body =
@@ -51,17 +51,17 @@ async function sendContractSms(
       );
       await prisma.message.create({
         data: {
-          type:           "CONTRACT_SIGNING_LINK",
-          channel:        "SMS",
-          provider:       getSmsProviderName(),
+          type: "CONTRACT_SIGNING_LINK",
+          channel: "SMS",
+          provider: getSmsProviderName(),
           body,
-          contractId:     contract.id,
-          clientId:       contract.clientId,
-          userId:         contract.userId,
+          contractId: contract.id,
+          clientId: contract.clientId,
+          userId: contract.userId,
           recipientPhone: normalizedPhone,
-          status:         "CANCELED",
-          failureReason:  "skipped: phone does not match SMS_TEST_PHONE",
-          attempts:       0,
+          status: "CANCELED",
+          failureReason: "skipped: phone does not match SMS_TEST_PHONE",
+          attempts: 0,
         },
       });
       return;
@@ -71,16 +71,16 @@ async function sendContractSms(
     // still leaves an auditable record.
     const message = await prisma.message.create({
       data: {
-        type:           "CONTRACT_SIGNING_LINK",
-        channel:        "SMS",
-        provider:       getSmsProviderName(),
+        type: "CONTRACT_SIGNING_LINK",
+        channel: "SMS",
+        provider: getSmsProviderName(),
         body,
-        contractId:     contract.id,
-        clientId:       contract.clientId,
-        userId:         contract.userId,
+        contractId: contract.id,
+        clientId: contract.clientId,
+        userId: contract.userId,
         recipientPhone: normalizedPhone,
-        status:         "PENDING",
-        attempts:       0,
+        status: "PENDING",
+        attempts: 0,
       },
     });
 
@@ -90,17 +90,17 @@ async function sendContractSms(
       where: { id: message.id },
       data: result.ok
         ? {
-            status:            "SENT",
-            providerMessageId: result.messageId,
-            attempts:          1,
-            lastAttemptAt:     new Date(),
-          }
+          status: "SENT",
+          providerMessageId: result.messageId,
+          attempts: 1,
+          lastAttemptAt: new Date(),
+        }
         : {
-            status:        "FAILED",
-            failureReason: result.reason,
-            attempts:      1,
-            lastAttemptAt: new Date(),
-          },
+          status: "FAILED",
+          failureReason: result.reason,
+          attempts: 1,
+          lastAttemptAt: new Date(),
+        },
     });
 
     if (!result.ok) {
@@ -123,15 +123,15 @@ async function sendContractSms(
 
 async function sendContractEmail(
   contract: {
-    id:              string;
-    signatureToken:  string;
+    id: string;
+    signatureToken: string;
     propertyAddress: string;
-    userId:          string;
-    clientId:        string;
+    userId: string;
+    clientId: string;
   },
   clientEmail: string,
-  clientName:  string,
-  brokerName:  string,
+  clientName: string,
+  brokerName: string,
 ): Promise<void> {
   try {
     if (!clientEmail.trim()) {
@@ -139,7 +139,7 @@ async function sendContractEmail(
       return;
     }
 
-    const baseUrl     = process.env.APP_BASE_URL?.trim() || "http://localhost:3000";
+    const baseUrl = process.env.APP_BASE_URL?.trim() || "http://localhost:3000";
     const signingLink = `${baseUrl}/contracts/sign/${contract.signatureToken}`;
 
     const template = contractSigningEmail({
@@ -153,17 +153,17 @@ async function sendContractEmail(
     // still leaves an auditable record.
     const message = await prisma.message.create({
       data: {
-        type:           "CONTRACT_SIGNING_LINK",
-        channel:        "EMAIL",
-        provider:       "resend",
-        subject:        template.subject,
-        body:           template.text,
-        contractId:     contract.id,
-        clientId:       contract.clientId,
-        userId:         contract.userId,
+        type: "CONTRACT_SIGNING_LINK",
+        channel: "EMAIL",
+        provider: "resend",
+        subject: template.subject,
+        body: template.text,
+        contractId: contract.id,
+        clientId: contract.clientId,
+        userId: contract.userId,
         recipientEmail: clientEmail.trim(),
-        status:         "PENDING",
-        attempts:       0,
+        status: "PENDING",
+        attempts: 0,
       },
     });
 
@@ -173,17 +173,17 @@ async function sendContractEmail(
       where: { id: message.id },
       data: result.ok
         ? {
-            status:            "SENT",
-            providerMessageId: result.messageId ?? null,
-            attempts:          1,
-            lastAttemptAt:     new Date(),
-          }
+          status: "SENT",
+          providerMessageId: result.messageId ?? null,
+          attempts: 1,
+          lastAttemptAt: new Date(),
+        }
         : {
-            status:        "FAILED",
-            failureReason: result.reason,
-            attempts:      1,
-            lastAttemptAt: new Date(),
-          },
+          status: "FAILED",
+          failureReason: result.reason,
+          attempts: 1,
+          lastAttemptAt: new Date(),
+        },
     });
 
     if (!result.ok) {
@@ -207,7 +207,7 @@ export async function GET() {
     const { userId } = result;
 
     const contracts = await prisma.contract.findMany({
-      where:   { userId },
+      where: { userId },
       include: { client: true, payment: true },
       orderBy: { createdAt: "desc" },
     });
@@ -267,12 +267,13 @@ export async function POST(request: Request) {
       propertyId,
       existingClientDbId,
       hideFullAddressFromClient,
+      rentalCommissionMode,   // "ONE_MONTH" | "FIXED" — only meaningful for the rental interested flow
       language: rawLanguage,
     } = body;
 
     // Validate language — default HE, fallback to HE for any unknown value
     const VALID_LANGS = new Set(["HE", "EN", "FR", "RU", "AR"]);
-    const language    = typeof rawLanguage === "string" && VALID_LANGS.has(rawLanguage.toUpperCase())
+    const language = typeof rawLanguage === "string" && VALID_LANGS.has(rawLanguage.toUpperCase())
       ? rawLanguage.toUpperCase()
       : "HE";
 
@@ -285,20 +286,23 @@ export async function POST(request: Request) {
     }
 
     // ── Numeric + enum validation ─────────────────────────────────────────────
-    const vDealType      = parseEnum(dealType,      ["SALE", "RENTAL", "BOTH"] as const, "סוג העסקה");
+    const vDealType = parseEnum(dealType, ["SALE", "RENTAL", "BOTH"] as const, "סוג העסקה");
     const vPropertyPrice = parsePositiveInt(propertyPrice, "מחיר הנכס");
-    const vCommission    = parseNonNegativeInt(commission, "עמלה");
-    const validationError = firstError(vDealType, vPropertyPrice, vCommission);
+    const vCommission = parseNonNegativeInt(commission, "עמלה");
+    // Optional: how the rental fee was chosen. Only persisted for the rental
+    // interested template (see resolvedRentalMode below); null for everything else.
+    const vRentalMode = parseOptionalEnum(rentalCommissionMode, ["ONE_MONTH", "FIXED"] as const, "אופן דמי התיווך");
+    const validationError = firstError(vDealType, vPropertyPrice, vCommission, vRentalMode);
     if (validationError) {
       return NextResponse.json({ error: validationError }, { status: 400 });
     }
     // Narrowing: all Results are Ok beyond this point (firstError returned early on any Err)
-    if (!vDealType.ok || !vPropertyPrice.ok || !vCommission.ok) {
+    if (!vDealType.ok || !vPropertyPrice.ok || !vCommission.ok || !vRentalMode.ok) {
       return NextResponse.json({ error: "Validation error" }, { status: 400 });
     }
-    const validatedDealType      = vDealType.value;
+    const validatedDealType = vDealType.value;
     const validatedPropertyPrice = vPropertyPrice.value;
-    const validatedCommission    = vCommission.value;
+    const validatedCommission = vCommission.value;
 
     // ── BOTH deal type: validate commissionSale (sale-side commission) ────────
     // SALE and RENTAL contracts must NOT include commissionSale.
@@ -343,10 +347,10 @@ export async function POST(request: Request) {
       // Path B — always create; never deduplicate by phone.
       client = await prisma.client.create({
         data: {
-          name:     clientName,
-          phone:    clientPhone,
+          name: clientName,
+          phone: clientPhone,
           // email/idNumber are non-nullable String in schema — use "" not null
-          email:    clientEmail?.trim()    || "",
+          email: clientEmail?.trim() || "",
           idNumber: clientIdNumber?.trim() || "",
           // Use Prisma relation connect instead of scalar userId to satisfy v7 validation
           user: { connect: { id: user.id } },
@@ -354,21 +358,42 @@ export async function POST(request: Request) {
       });
     }
 
-    // Auto-resolve template snapshot by contract type.
+    // Auto-resolve template snapshot by contract type (+ deal type).
     // generatedText is frozen at creation time — subsequent edits to the template
     // never affect contracts that have already been sent.
+    //
+    // Resolution is layered so a single user-facing category ("החתמת מתעניין") can
+    // map to different templates per dealType. A deal-type-specific override wins;
+    // otherwise the category default applies. Extend TEMPLATE_KEY_BY_TYPE_AND_DEAL
+    // as INTERESTED_BUYER_SALE / _BOTH (and future categories) are added.
     const CONTRACT_TYPE_TO_TEMPLATE_KEY: Record<string, string> = {
-      "החתמת מתעניין":                   "INTERESTED_BUYER",
-      "החתמת בעל נכס / בלעדיות":       "OWNER_EXCLUSIVE",
+      "החתמת מתעניין": "INTERESTED_BUYER",
+      "החתמת בעל נכס / בלעדיות": "OWNER_EXCLUSIVE",
       "הסכם שיתוף פעולה בין מתווכים": "BROKER_COOP",
     };
+    const TEMPLATE_KEY_BY_TYPE_AND_DEAL: Record<string, Partial<Record<string, string>>> = {
+      "החתמת מתעניין": {
+        RENTAL: "INTERESTED_BUYER_RENTAL",
+        // SALE: "INTERESTED_BUYER_SALE",   // future
+        // BOTH: "INTERESTED_BUYER_BOTH",   // future
+      },
+    };
 
-    let generatedText:      string | null = null;
+    let generatedText: string | null = null;
     let resolvedTemplateId: string | null = null;
 
-    const autoKey = CONTRACT_TYPE_TO_TEMPLATE_KEY[contractType] ?? null;
+    const autoKey =
+      TEMPLATE_KEY_BY_TYPE_AND_DEAL[contractType]?.[validatedDealType]
+      ?? CONTRACT_TYPE_TO_TEMPLATE_KEY[contractType]
+      ?? null;
+
+    // Persist the rental commission mode ONLY for the rental interested template.
+    // Absent mode on that template defaults to ONE_MONTH so clause 6.1 is deterministic.
+    const resolvedRentalMode: "ONE_MONTH" | "FIXED" | null =
+      autoKey === "INTERESTED_BUYER_RENTAL" ? (vRentalMode.value ?? "ONE_MONTH") : null;
+
     if (autoKey) {
-      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP";
+      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL";
       const templateLang = language as "HE" | "EN" | "FR" | "RU" | "AR";
 
       // Resolve by (templateKey + language), fallback to HE if not found
@@ -377,21 +402,21 @@ export async function POST(request: Request) {
           where: { templateKey, language: templateLang, isActive: true },
         }) ??
         await prisma.contractTemplate.findFirst({
-          where: { templateKey, language: "HE",         isActive: true },
+          where: { templateKey, language: "HE", isActive: true },
         });
       if (tpl) {
         const ctx = buildContext({
-          broker:   { fullName: user.fullName, licenseNumber: user.licenseNumber ?? null, phone: user.phone ?? null, idNumber: user.idNumber ?? null },
+          broker: { fullName: user.fullName, licenseNumber: user.licenseNumber ?? null, phone: user.phone ?? null, idNumber: user.idNumber ?? null },
           // ── Fix: use the resolved client DB record, NOT the raw form-body values.
           // When existingClientDbId is provided the form body may contain stale or
           // different data from a previous wizard session; the DB record is always
           // canonical.  Using form-body values here was the root cause of the
           // client/broker identity mixing bug (phone/idNumber mismatch between the
           // client details card and the legal document).
-          client:   { name: client.name, idNumber: client.idNumber || "", phone: client.phone, email: client.email || "" },
-          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: validatedCommission, commissionSale: validatedCommissionSale, createdAt: new Date() },
+          client: { name: client.name, idNumber: client.idNumber || "", phone: client.phone, email: client.email || "", address: client.address ?? null },
+          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: validatedCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, createdAt: new Date() },
         });
-        generatedText      = resolveTemplate(tpl.content, ctx);
+        generatedText = resolveTemplate(tpl.content, ctx);
         resolvedTemplateId = tpl.id;
       }
       // No active template for this type → graceful fallback (generatedText stays null)
@@ -408,22 +433,23 @@ export async function POST(request: Request) {
       const newContract = await tx.contract.create({
         data: {
           contractType,
-          dealType:      validatedDealType,
+          dealType: validatedDealType,
           propertyAddress,
           propertyCity,
           propertyPrice: validatedPropertyPrice,
-          commission:    validatedCommission,
+          commission: validatedCommission,
           ...(validatedCommissionSale !== null ? { commissionSale: validatedCommissionSale } : {}),
-          userId:        user.id,
-          clientId:      client.id,
+          ...(resolvedRentalMode ? { rentalCommissionMode: resolvedRentalMode } : {}),
+          userId: user.id,
+          clientId: client.id,
           signatureToken,
-          status:                   "SENT",
-          sentAt:                   new Date(),
+          status: "SENT",
+          sentAt: new Date(),
           hideFullAddressFromClient: hideFullAddressFromClient === true,
           language,
-          ...(propertyId         ? { propertyId }                        : {}),
-          ...(resolvedTemplateId ? { templateId: resolvedTemplateId }    : {}),
-          ...(generatedText      ? { generatedText }                     : {}),
+          ...(propertyId ? { propertyId } : {}),
+          ...(resolvedTemplateId ? { templateId: resolvedTemplateId } : {}),
+          ...(generatedText ? { generatedText } : {}),
         },
         include: { client: true, payment: true },
       });
@@ -433,9 +459,9 @@ export async function POST(request: Request) {
       // contractId but keep this row, so the monthly count is unaffected.
       await tx.contractUsageEvent.create({
         data: {
-          userId:     user.id,
+          userId: user.id,
           contractId: newContract.id,
-          plan:       usageCheck.plan,
+          plan: usageCheck.plan,
         },
       });
 
@@ -445,13 +471,13 @@ export async function POST(request: Request) {
     // ── Audit log: contract created ───────────────────────────────────────────
     // Awaited inline — fast single INSERT, never throws (errors caught inside helper).
     await logAuditEvent({
-      userId:     userId,
-      action:     "contract.created",
+      userId: userId,
+      action: "contract.created",
       entityType: "contract",
-      entityId:   contract.id,
-      metadata:   { contractType, dealType: validatedDealType, language },
-      ip:         getRealIp(request),
-      userAgent:  request.headers.get("user-agent"),
+      entityId: contract.id,
+      metadata: { contractType, dealType: validatedDealType, language },
+      ip: getRealIp(request),
+      userAgent: request.headers.get("user-agent"),
     });
 
     // Send signing-link SMS — awaited so Vercel doesn't kill the promise on response return.

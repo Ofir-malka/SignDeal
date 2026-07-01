@@ -108,6 +108,7 @@ model Client {
   phone     String
   email     String
   idNumber  String
+  address   String?                          // residential address; completed by the client on the signing page
   createdAt DateTime   @default(now())
   contracts Contract[]
   messages  Message[]
@@ -230,9 +231,18 @@ model StripePayoutEvent {
 // ── ContractTemplate ───────────────────────────────────────────────────────────
 
 enum ContractTemplateKey {
-  INTERESTED_BUYER   // החתמת מתעניין
-  OWNER_EXCLUSIVE    // החתמת בעל נכס / בלעדיות
-  BROKER_COOP        // הסכם שיתוף פעולה בין מתווכים
+  INTERESTED_BUYER          // החתמת מתעניין
+  OWNER_EXCLUSIVE           // החתמת בעל נכס / בלעדיות
+  BROKER_COOP               // הסכם שיתוף פעולה בין מתווכים
+  INTERESTED_BUYER_RENTAL   // החתמת מתעניין — שכירות (resolved when dealType = RENTAL)
+}
+
+// How the rental brokerage fee was chosen by the broker. Drives the dynamic
+// wording of clause 6.1 in the INTERESTED_BUYER_RENTAL template. Null for
+// SALE/BOTH and for every legacy contract.
+enum RentalCommissionMode {
+  ONE_MONTH   // חודש שכירות אחד
+  FIXED       // סכום קבוע
 }
 
 enum ContractTemplateLanguage {
@@ -270,6 +280,7 @@ model Contract {
   propertyPrice   Int             // stored in agorot (smallest currency unit)
   commission      Int             // stored in agorot (rental commission for BOTH; full commission for SALE/RENTAL)
   commissionSale  Int?            // stored in agorot; only set when dealType = BOTH (sale-side commission)
+  rentalCommissionMode RentalCommissionMode? // null for SALE/BOTH & legacy; drives rental clause 6.1 wording
 
   // Dates
   createdAt       DateTime        @default(now())

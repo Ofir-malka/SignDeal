@@ -1304,6 +1304,11 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
       commission:                commissionAgorot,
       ...(commissionSaleAgorot !== null ? { commissionSale: commissionSaleAgorot } : {}),
       hideFullAddressFromClient: form.hideFullAddressFromClient,
+      // Rental fee mode — lets the API render the dynamic clause 6.1 wording for the
+      // rental interested template. The server persists it only for that template.
+      ...(form.dealType === "RENTAL"
+        ? { rentalCommissionMode: form.rentalCommissionPreset === "fixed" ? "FIXED" : "ONE_MONTH" }
+        : {}),
       // Pass existingClientDbId when broker picked an existing client so the
       // API links the contract to the existing Client row (no duplicate).
       ...(selectedClientId   ? { existingClientDbId: selectedClientId }   : {}),

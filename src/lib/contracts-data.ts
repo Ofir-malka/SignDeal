@@ -28,6 +28,8 @@ export interface Contract {
   clientPhone:      string;
   clientEmail:      string;
   clientId:         string;
+  clientAddress:    string;   // residential address; "" when not yet completed
+  requiresClientAddress: boolean;  // signing-page flow requires the client to complete an address
   propertyAddress:  string;   // street only
   propertyCity:     string;
   propertyPrice:    string;

@@ -15,6 +15,10 @@ import { logAuditEvent } from "@/lib/audit/log-audit-event";
 // ── UUID format guard — reject obviously invalid tokens before hitting the DB ─
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+// Template keys whose flow requires the client to complete a residential address
+// before signing. Extend as more address-requiring templates are added.
+const KEYS_REQUIRING_CLIENT_ADDRESS = new Set<string>(["INTERESTED_BUYER_RENTAL"]);
+
 // ── GET /api/contracts/sign/[token] ──────────────────────────────────────────
 // Public endpoint — returns signing-safe contract fields for the client.
 // Does NOT expose userId, signatureToken, signatureHash, userAgent, or any
@@ -33,7 +37,7 @@ export async function GET(
 
     const contract = await prisma.contract.findUnique({
       where:   { signatureToken: token },
-      include: { client: true, payment: true },
+      include: { client: true, payment: true, template: { select: { templateKey: true } } },
     });
 
     if (!contract) {
@@ -78,7 +82,11 @@ export async function GET(
         phone:    contract.client.phone,
         email:    contract.client.email,
         idNumber: contract.client.idNumber,
+        address:  contract.client.address ?? null,
       },
+      // Whether this flow requires the client to complete a residential address
+      // before signing (drives the signing-page completion modal).
+      requiresClientAddress: KEYS_REQUIRING_CLIENT_ADDRESS.has(contract.template?.templateKey ?? ""),
       payment: contract.payment ? {
         status:     contract.payment.status,
         paidAt:     contract.payment.paidAt?.toISOString() ?? null,
@@ -365,7 +373,7 @@ async function sendClientSignedEmail(
 
 const SIGNING_ALLOWED_FIELDS = new Set([
   "signatureStatus", "signedAt",
-  "clientEmail", "clientIdNumber",
+  "clientEmail", "clientIdNumber", "clientAddress",
   "signatureData", "signatureHash",
 ]);
 
@@ -407,10 +415,14 @@ export async function PATCH(
       return NextResponse.json({ error: "Operation not permitted" }, { status: 403 });
     }
 
-    const { signatureStatus, signedAt, clientEmail, clientIdNumber, signatureData, signatureHash } = body;
+    const { signatureStatus, signedAt, clientEmail, clientIdNumber, clientAddress, signatureData, signatureHash } = body;
 
     if (signatureData !== undefined && typeof signatureData === "string" && signatureData.length > 500_000) {
       return NextResponse.json({ error: "Signature data too large" }, { status: 400 });
+    }
+
+    if (clientAddress !== undefined && (typeof clientAddress !== "string" || clientAddress.trim().length > 300)) {
+      return NextResponse.json({ error: "כתובת אינה תקינה" }, { status: 400 });
     }
 
     // ── signatureStatus: only "SIGNED" is a valid client-facing transition ────
@@ -431,6 +443,7 @@ export async function PATCH(
       include: {
         client: true,
         user:   { select: { fullName: true, licenseNumber: true, phone: true, idNumber: true } },
+        template: { select: { templateKey: true } },
       },
     });
 
@@ -445,6 +458,16 @@ export async function PATCH(
     }
     if (signatureStatus === "SIGNED" && contract.status === "SIGNED") {
       return NextResponse.json({ error: "החוזה כבר נחתם" }, { status: 409 });
+    }
+    // ── Required client address before signing ────────────────────────────────
+    // For flows that require a residential address (e.g. the rental interested
+    // template), the client must complete it before the signature is accepted.
+    if (
+      signatureStatus === "SIGNED"
+      && KEYS_REQUIRING_CLIENT_ADDRESS.has(contract.template?.templateKey ?? "")
+      && !contract.client.address
+    ) {
+      return NextResponse.json({ error: "יש להשלים כתובת מגורים לפני החתימה" }, { status: 400 });
     }
 
     // ── Owner guard (defence-in-depth) ────────────────────────────────────────
@@ -473,6 +496,21 @@ export async function PATCH(
     const clientData: Record<string, string> = {};
     if (clientEmail    !== undefined) clientData.email    = clientEmail;
     if (clientIdNumber !== undefined) clientData.idNumber = clientIdNumber;
+    if (clientAddress  !== undefined) clientData.address  = clientAddress.trim();
+
+    // ── Post-signing completion lock ──────────────────────────────────────────
+    // Client detail completion (address / ID / email) is only permitted before the
+    // contract is signed. Reject any such update once it is SIGNED or beyond.
+    if (
+      Object.keys(clientData).length > 0
+      && contract.status !== "SENT"
+      && contract.status !== "OPENED"
+    ) {
+      return NextResponse.json(
+        { error: "לא ניתן לעדכן פרטים לאחר חתימת החוזה" },
+        { status: 409 },
+      );
+    }
 
     if (Object.keys(clientData).length > 0) {
       data.client = { update: clientData };
@@ -500,6 +538,7 @@ export async function PATCH(
               phone:    contract.client.phone,
               email:    clientData.email    ?? contract.client.email,
               idNumber: clientData.idNumber ?? contract.client.idNumber,
+              address:  clientData.address  ?? contract.client.address,
             };
 
             const ctx = buildContext({
@@ -516,6 +555,7 @@ export async function PATCH(
                 idNumber: mergedClient.idNumber || "",
                 phone:    mergedClient.phone,
                 email:    mergedClient.email    || "",
+                address:  mergedClient.address  ?? null,
               },
               contract: {
                 id:              contract.id,
@@ -525,6 +565,7 @@ export async function PATCH(
                 dealType:        contract.dealType,
                 commission:      contract.commission,
                 commissionSale:  contract.commissionSale ?? null,
+                rentalCommissionMode: contract.rentalCommissionMode,
                 createdAt:       contract.createdAt,
               },
             });

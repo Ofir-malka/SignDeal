@@ -68,6 +68,7 @@ export interface TemplateContext {
   clientIdNumber:  string;
   clientPhone:     string;
   clientEmail:     string;
+  clientAddress:   string;   // residential address; "—" until completed on the signing page
   // Property + deal
   propertyAddress: string;
   propertyCity:    string;
@@ -75,6 +76,8 @@ export interface TemplateContext {
   dealType:        string;   // "שכירות" | "מכירה" | "גם וגם"
   commission:      string;   // formatted: "₪15,000" (rental commission for BOTH)
   commissionSale?: string;   // formatted: "₪30,000" — sale commission; set only for BOTH
+  // Dynamic rental clause 6.1 — full sentence built from the commission mode
+  rentalCommissionClause: string;
   // Dates
   today:           string;   // DD.MM.YYYY
   contractId:      string;   // last 8 chars of id, uppercased
@@ -116,6 +119,7 @@ export function buildContext(opts: {
     idNumber: string;
     phone:    string;
     email:    string;
+    address?: string | null;   // residential address; optional (completed at signing time)
   };
   contract: {
     id:              string;
@@ -125,6 +129,7 @@ export function buildContext(opts: {
     dealType:        string;    // "RENTAL" | "SALE" | "BOTH"
     commission:      number;    // agorot (rental commission for BOTH)
     commissionSale?: number | null;  // agorot; only set for BOTH
+    rentalCommissionMode?: "ONE_MONTH" | "FIXED" | null;  // drives clause 6.1; null -> ONE_MONTH wording
     createdAt:       Date | string;
   };
 }): TemplateContext {
@@ -137,6 +142,7 @@ export function buildContext(opts: {
     clientIdNumber:  opts.client.idNumber      || "—",
     clientPhone:     opts.client.phone,
     clientEmail:     opts.client.email         || "—",
+    clientAddress:   opts.client.address?.trim() || "—",
     propertyAddress: parsePropertyAddress(opts.contract.propertyAddress).address,
     propertyCity:    opts.contract.propertyCity,
     propertyPrice:   formatAgorot(opts.contract.propertyPrice),
@@ -145,6 +151,12 @@ export function buildContext(opts: {
     ...(opts.contract.commissionSale != null
       ? { commissionSale: formatAgorot(opts.contract.commissionSale) }
       : {}),
+    // Dynamic rental clause 6.1 — full sentence; defaults to the one-month wording
+    // when the mode is absent (null/undefined), matching legacy/one-month behaviour.
+    rentalCommissionClause:
+      opts.contract.rentalCommissionMode === "FIXED"
+        ? `בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בסך ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`
+        : `בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בגובה חודש שכירות אחד, בתוספת מע"מ כדין.`,
     today:           isoToDateStr(opts.contract.createdAt),
     contractId:      String(opts.contract.id).slice(-8).toUpperCase(),
   };
