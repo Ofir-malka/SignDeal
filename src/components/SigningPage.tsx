@@ -73,6 +73,7 @@ export function SigningPage({ token, previewMode = false }: { token: string; pre
   const [clientFormError, setClientFormError] = useState<string | null>(null);
   const [formEmail, setFormEmail]             = useState("");
   const [formIdNumber, setFormIdNumber]       = useState("");
+  const [formAddress, setFormAddress]         = useState("");
   const sigRef                                = useRef<SignatureCanvas>(null);
   const [canvasEmpty, setCanvasEmpty]         = useState(true);
 
@@ -108,6 +109,7 @@ export function SigningPage({ token, previewMode = false }: { token: string; pre
     const updateBody: Record<string, string> = {};
     if (formEmail.trim())    updateBody.clientEmail    = formEmail.trim();
     if (formIdNumber.trim()) updateBody.clientIdNumber = formIdNumber.trim();
+    if (formAddress.trim())  updateBody.clientAddress  = formAddress.trim();
 
     try {
       const res = await fetch(`/api/contracts/sign/${token}`, {
@@ -126,8 +128,9 @@ export function SigningPage({ token, previewMode = false }: { token: string; pre
 
     setContract((prev) => prev ? {
       ...prev,
-      clientEmail: formEmail.trim() || prev.clientEmail,
-      clientId:    formIdNumber.trim() || prev.clientId,
+      clientEmail:   formEmail.trim() || prev.clientEmail,
+      clientId:      formIdNumber.trim() || prev.clientId,
+      clientAddress: formAddress.trim() || prev.clientAddress,
     } : null);
     setClientFormDone(true);
   }
@@ -163,7 +166,10 @@ export function SigningPage({ token, previewMode = false }: { token: string; pre
     }
   }
 
-  const needsClientInfo = !!contract && (!contract.clientEmail || !contract.clientId);
+  // Ask for a residential address only when this flow requires it AND it's missing
+  // (reuse a stored address — do not ask again).
+  const needsAddress    = !!contract && contract.requiresClientAddress && !contract.clientAddress;
+  const needsClientInfo = !!contract && (!contract.clientEmail || !contract.clientId || needsAddress);
 
   if (notFound) {
     return (
@@ -246,48 +252,70 @@ export function SigningPage({ token, previewMode = false }: { token: string; pre
         {/* Contract document — always shown (broker can preview what the client sees) */}
         <ContractTemplate contract={contract} hideAddress={contract.hideFullAddressFromClient} />
 
-        {/* Client info form — hidden entirely in preview mode */}
+        {/* Client info completion — blocking modal shown BEFORE the client can
+            view/sign, whenever required details are missing. Hidden in preview mode. */}
         {!previewMode && needsClientInfo && !clientFormDone && (
-          <div className="bg-amber-50 rounded-xl border border-amber-200 shadow-sm p-5 space-y-4">
-            <p className="text-sm font-semibold text-amber-800">{L.completeDetails}</p>
-            {!contract!.clientEmail && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">{L.email}</label>
-                <input
-                  type="email"
-                  value={formEmail}
-                  onChange={(e) => setFormEmail(e.target.value)}
-                  placeholder="name@example.com"
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                />
-              </div>
-            )}
-            {!contract!.clientId && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">{L.idNumber}</label>
-                <input
-                  type="text"
-                  value={formIdNumber}
-                  onChange={(e) => setFormIdNumber(e.target.value)}
-                  placeholder="000000000"
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
-                />
-              </div>
-            )}
-            {clientFormError && (
-              <p className="text-sm text-red-600">{clientFormError}</p>
-            )}
-            <button
-              type="button"
-              onClick={handleClientSubmit}
-              disabled={
-                (!contract!.clientEmail && !formEmail.trim()) ||
-                (!contract!.clientId   && !formIdNumber.trim())
-              }
-              className="w-full py-2.5 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-            >
-              {L.continueToSign}
-            </button>
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+            dir={dir}
+            role="dialog"
+            aria-modal="true"
+          >
+            <div className="bg-white rounded-2xl border border-gray-200 shadow-xl p-6 max-w-md w-full space-y-4 max-h-[90vh] overflow-y-auto">
+              <p className="text-sm font-semibold text-gray-900">{L.completeDetails}</p>
+              {!contract.clientEmail && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">{L.email}</label>
+                  <input
+                    type="email"
+                    value={formEmail}
+                    onChange={(e) => setFormEmail(e.target.value)}
+                    placeholder="name@example.com"
+                    className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                  />
+                </div>
+              )}
+              {!contract.clientId && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">{L.idNumber}</label>
+                  <input
+                    type="text"
+                    value={formIdNumber}
+                    onChange={(e) => setFormIdNumber(e.target.value)}
+                    placeholder="000000000"
+                    className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                  />
+                </div>
+              )}
+              {needsAddress && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">{L.addressLabel}</label>
+                  <input
+                    type="text"
+                    value={formAddress}
+                    onChange={(e) => setFormAddress(e.target.value)}
+                    placeholder={L.addressPlaceholder}
+                    maxLength={300}
+                    className="w-full px-3.5 py-2.5 rounded-lg border border-gray-200 text-sm text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                  />
+                </div>
+              )}
+              {clientFormError && (
+                <p className="text-sm text-red-600">{clientFormError}</p>
+              )}
+              <button
+                type="button"
+                onClick={handleClientSubmit}
+                disabled={
+                  (!contract.clientEmail && !formEmail.trim()) ||
+                  (!contract.clientId   && !formIdNumber.trim()) ||
+                  (needsAddress          && !formAddress.trim())
+                }
+                className="w-full py-2.5 rounded-lg text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+              >
+                {L.continueToSign}
+              </button>
+            </div>
           </div>
         )}
 

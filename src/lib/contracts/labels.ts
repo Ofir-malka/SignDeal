@@ -56,6 +56,8 @@ export interface LabelSet {
   signingInProgress:  string;
   signatureRequired:  string;
   completeDetails:    string;
+  addressLabel:       string;
+  addressPlaceholder: string;
   continueToSign:     string;
   updateError:        string;
   saveError:          string;
@@ -114,6 +116,8 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     signingInProgress:  "שומר חתימה...",
     signatureRequired:  "יש לחתום בתיבת החתימה לפני האישור.",
     completeDetails:    "נא להשלים פרטים חסרים לפני החתימה",
+    addressLabel:       "כתובת מגורים",
+    addressPlaceholder: "רחוב, מספר, עיר",
     continueToSign:     "המשך לחתימה",
     updateError:        "שגיאה בעדכון הפרטים. אנא נסה שוב.",
     saveError:          "שגיאה בשמירת החתימה. אנא נסה שוב.",
@@ -171,6 +175,8 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     signingInProgress:  "Saving signature...",
     signatureRequired:  "Please sign in the signature box before confirming.",
     completeDetails:    "Please complete missing details before signing",
+    addressLabel:       "Residential Address",
+    addressPlaceholder: "Street, number, city",
     continueToSign:     "Continue to Sign",
     updateError:        "Error updating details. Please try again.",
     saveError:          "Error saving signature. Please try again.",
@@ -228,6 +234,8 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     signingInProgress:  "Enregistrement...",
     signatureRequired:  "Veuillez signer dans la zone de signature avant de confirmer.",
     completeDetails:    "Veuillez compléter les informations manquantes avant de signer",
+    addressLabel:       "Adresse de résidence",
+    addressPlaceholder: "Rue, numéro, ville",
     continueToSign:     "Continuer pour signer",
     updateError:        "Erreur lors de la mise à jour des informations. Veuillez réessayer.",
     saveError:          "Erreur lors de l'enregistrement de la signature. Veuillez réessayer.",
@@ -285,6 +293,8 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     signingInProgress:  "Сохранение...",
     signatureRequired:  "Пожалуйста, подпишите в поле для подписи перед подтверждением.",
     completeDetails:    "Пожалуйста, заполните недостающие данные перед подписанием",
+    addressLabel:       "Адрес проживания",
+    addressPlaceholder: "Улица, номер, город",
     continueToSign:     "Продолжить к подписанию",
     updateError:        "Ошибка при обновлении данных. Пожалуйста, попробуйте снова.",
     saveError:          "Ошибка при сохранении подписи. Пожалуйста, попробуйте снова.",

@@ -297,3 +297,58 @@ describe("parseDocumentLines", () => {
     expect(lines.some((l) => l.type === "blank")).toBe(true);
   });
 });
+
+// ─── buildContext — rental commission clause (dynamic 6.1) ────────────────────
+
+describe("buildContext — rental commission clause", () => {
+  it("FIXED mode produces the fixed-amount wording with the formatted commission", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, rentalCommissionMode: "FIXED" },
+    });
+    expect(ctx.rentalCommissionClause).toContain("בסך");
+    expect(ctx.rentalCommissionClause).toContain(ctx.commission);   // e.g. ₪15,000
+    expect(ctx.rentalCommissionClause).toContain('בתוספת מע"מ כדין');
+  });
+
+  it("ONE_MONTH mode produces the one-month wording", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, rentalCommissionMode: "ONE_MONTH" },
+    });
+    expect(ctx.rentalCommissionClause).toContain("חודש שכירות אחד");
+  });
+
+  it("defaults to the one-month wording when the mode is absent", () => {
+    const ctx = buildContext({ broker: BROKER, client: CLIENT, contract: CONTRACT });
+    expect(ctx.rentalCommissionClause).toContain("חודש שכירות אחד");
+  });
+});
+
+// ─── buildContext — client residential address ────────────────────────────────
+
+describe("buildContext — client address", () => {
+  it("maps clientAddress from client.address", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: { ...CLIENT, address: "רופין 9, תל אביב" }, contract: CONTRACT,
+    });
+    expect(ctx.clientAddress).toBe("רופין 9, תל אביב");
+  });
+
+  it("falls back to '—' when address is missing or empty", () => {
+    const ctxMissing = buildContext({ broker: BROKER, client: CLIENT, contract: CONTRACT });
+    expect(ctxMissing.clientAddress).toBe("—");
+    const ctxEmpty = buildContext({ broker: BROKER, client: { ...CLIENT, address: "" }, contract: CONTRACT });
+    expect(ctxEmpty.clientAddress).toBe("—");
+  });
+
+  it("resolveTemplate substitutes {{clientAddress}} and {{rentalCommissionClause}}", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: { ...CLIENT, address: "הרצל 1, חיפה" },
+      contract: { ...CONTRACT, rentalCommissionMode: "FIXED" },
+    });
+    const out = resolveTemplate("כתובת: {{clientAddress}}\n6.1 {{rentalCommissionClause}}", ctx);
+    expect(out).toContain("כתובת: הרצל 1, חיפה");
+    expect(out).toContain("6.1 בעסקאות שכירות");
+  });
+});
