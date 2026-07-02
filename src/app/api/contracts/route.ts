@@ -9,7 +9,7 @@ import { resolveTemplate, buildContext } from "@/lib/contracts/resolve-template"
 import { CONTRACT_TYPE } from "@/lib/contracts/contract-types";
 import { rateLimit, getRealIp } from "@/lib/rate-limit";
 import { logAuditEvent } from "@/lib/audit/log-audit-event";
-import { parsePositiveInt, parseNonNegativeInt, parseEnum, parseOptionalEnum, firstError } from "@/lib/validate";
+import { parsePositiveInt, parseNonNegativeInt, parseEnum, parseOptionalEnum, parseOptionalPositiveFloat, firstError } from "@/lib/validate";
 import { sendEmail, contractSigningEmail } from "@/lib/email";
 import { parsePropertyAddress } from "@/lib/format-address";
 
@@ -269,6 +269,8 @@ export async function POST(request: Request) {
       existingClientDbId,
       hideFullAddressFromClient,
       rentalCommissionMode,   // "ONE_MONTH" | "FIXED" — only meaningful for the rental interested flow
+      saleCommissionMode,     // "PERCENT" | "FIXED"   — only meaningful for the sale interested flow
+      saleCommissionPercent,  // human percent (2, 1.5) — only when saleCommissionMode = "PERCENT"
       language: rawLanguage,
     } = body;
 
@@ -293,12 +295,16 @@ export async function POST(request: Request) {
     // Optional: how the rental fee was chosen. Only persisted for the rental
     // interested template (see resolvedRentalMode below); null for everything else.
     const vRentalMode = parseOptionalEnum(rentalCommissionMode, ["ONE_MONTH", "FIXED"] as const, "אופן דמי התיווך");
-    const validationError = firstError(vDealType, vPropertyPrice, vCommission, vRentalMode);
+    // Optional: how the sale fee was chosen (+ its percent). Only persisted for
+    // the sale interested template (see resolvedSaleMode below).
+    const vSaleMode = parseOptionalEnum(saleCommissionMode, ["PERCENT", "FIXED"] as const, "אופן עמלת מכירה");
+    const vSalePct  = parseOptionalPositiveFloat(saleCommissionPercent, "אחוז עמלת מכירה", 100);
+    const validationError = firstError(vDealType, vPropertyPrice, vCommission, vRentalMode, vSaleMode, vSalePct);
     if (validationError) {
       return NextResponse.json({ error: validationError }, { status: 400 });
     }
     // Narrowing: all Results are Ok beyond this point (firstError returned early on any Err)
-    if (!vDealType.ok || !vPropertyPrice.ok || !vCommission.ok || !vRentalMode.ok) {
+    if (!vDealType.ok || !vPropertyPrice.ok || !vCommission.ok || !vRentalMode.ok || !vSaleMode.ok || !vSalePct.ok) {
       return NextResponse.json({ error: "Validation error" }, { status: 400 });
     }
     const validatedDealType = vDealType.value;
@@ -375,7 +381,7 @@ export async function POST(request: Request) {
     const TEMPLATE_KEY_BY_TYPE_AND_DEAL: Record<string, Partial<Record<string, string>>> = {
       [CONTRACT_TYPE.INTERESTED]: {
         RENTAL: "INTERESTED_BUYER_RENTAL",
-        // SALE: "INTERESTED_BUYER_SALE",   // future
+        SALE:   "INTERESTED_BUYER_SALE",
         // BOTH: "INTERESTED_BUYER_BOTH",   // future
       },
     };
@@ -393,8 +399,19 @@ export async function POST(request: Request) {
     const resolvedRentalMode: "ONE_MONTH" | "FIXED" | null =
       autoKey === "INTERESTED_BUYER_RENTAL" ? (vRentalMode.value ?? "ONE_MONTH") : null;
 
+    // Persist the sale commission mode + percent ONLY for the sale interested
+    // template. Absent mode defaults to FIXED so clause 5.1 always states the
+    // stored commission amount (truthful + deterministic across regeneration).
+    const resolvedSaleMode: "PERCENT" | "FIXED" | null =
+      autoKey === "INTERESTED_BUYER_SALE" ? (vSaleMode.value ?? "FIXED") : null;
+    const resolvedSalePercent: number | null =
+      resolvedSaleMode === "PERCENT" ? vSalePct.value : null;
+    if (resolvedSaleMode === "PERCENT" && resolvedSalePercent == null) {
+      return NextResponse.json({ error: "יש להזין אחוז עמלה" }, { status: 400 });
+    }
+
     if (autoKey) {
-      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL";
+      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE";
       const templateLang = language as "HE" | "EN" | "FR" | "RU" | "AR";
 
       // Resolve by (templateKey + language), fallback to HE if not found
@@ -415,7 +432,7 @@ export async function POST(request: Request) {
           // client/broker identity mixing bug (phone/idNumber mismatch between the
           // client details card and the legal document).
           client: { name: client.name, idNumber: client.idNumber || "", phone: client.phone, email: client.email || "", address: client.address ?? null },
-          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: validatedCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, createdAt: new Date() },
+          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: validatedCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, saleCommissionMode: resolvedSaleMode, saleCommissionPercent: resolvedSalePercent, createdAt: new Date() },
         });
         generatedText = resolveTemplate(tpl.content, ctx);
         resolvedTemplateId = tpl.id;
@@ -441,6 +458,8 @@ export async function POST(request: Request) {
           commission: validatedCommission,
           ...(validatedCommissionSale !== null ? { commissionSale: validatedCommissionSale } : {}),
           ...(resolvedRentalMode ? { rentalCommissionMode: resolvedRentalMode } : {}),
+          ...(resolvedSaleMode ? { saleCommissionMode: resolvedSaleMode } : {}),
+          ...(resolvedSalePercent != null ? { saleCommissionPercent: resolvedSalePercent } : {}),
           userId: user.id,
           clientId: client.id,
           signatureToken,
