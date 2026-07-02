@@ -352,3 +352,57 @@ describe("buildContext — client address", () => {
     expect(out).toContain("6.1 בעסקאות שכירות");
   });
 });
+
+// ─── buildContext — sale commission clause (dynamic 5.1) ──────────────────────
+
+describe("buildContext — sale commission clause", () => {
+  const SALE_CONTRACT = { ...CONTRACT, dealType: "SALE" };
+
+  it("PERCENT mode with 2% states the chosen percentage", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...SALE_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 2 },
+    });
+    expect(ctx.saleCommissionClause).toContain("ל-2% ממחיר העסקה הכולל");
+    expect(ctx.saleCommissionClause).toContain('בתוספת מע"מ כדין');
+  });
+
+  it("PERCENT mode with a decimal percentage (1.5) renders as 1.5%", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...SALE_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 1.5 },
+    });
+    expect(ctx.saleCommissionClause).toContain("ל-1.5% ממחיר העסקה הכולל");
+  });
+
+  it("FIXED mode states the stored commission amount", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...SALE_CONTRACT, saleCommissionMode: "FIXED" },
+    });
+    expect(ctx.saleCommissionClause).toContain(`דמי תיווך בסך של ${ctx.commission}`);   // e.g. ₪15,000
+    expect(ctx.saleCommissionClause).toContain('בתוספת מע"מ כדין');
+  });
+
+  it("falls back to the fixed-amount wording when the mode is absent", () => {
+    const ctx = buildContext({ broker: BROKER, client: CLIENT, contract: SALE_CONTRACT });
+    expect(ctx.saleCommissionClause).toContain("דמי תיווך בסך של");
+  });
+
+  it("falls back to the fixed-amount wording when PERCENT is set without a percent", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...SALE_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: null },
+    });
+    expect(ctx.saleCommissionClause).toContain("דמי תיווך בסך של");
+  });
+
+  it("resolveTemplate substitutes {{saleCommissionClause}}", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...SALE_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 2 },
+    });
+    const out = resolveTemplate("5.1 {{saleCommissionClause}}", ctx);
+    expect(out).toBe('5.1 ברכישת נכס – סך השווה ל-2% ממחיר העסקה הכולל, בתוספת מע"מ כדין.');
+  });
+});

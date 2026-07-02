@@ -17,7 +17,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 // Template keys whose flow requires the client to complete a residential address
 // before signing. Extend as more address-requiring templates are added.
-const KEYS_REQUIRING_CLIENT_ADDRESS = new Set<string>(["INTERESTED_BUYER_RENTAL"]);
+const KEYS_REQUIRING_CLIENT_ADDRESS = new Set<string>([
+  "INTERESTED_BUYER_RENTAL",
+  "INTERESTED_BUYER_SALE",
+]);
 
 // ── GET /api/contracts/sign/[token] ──────────────────────────────────────────
 // Public endpoint — returns signing-safe contract fields for the client.
@@ -566,6 +569,8 @@ export async function PATCH(
                 commission:      contract.commission,
                 commissionSale:  contract.commissionSale ?? null,
                 rentalCommissionMode: contract.rentalCommissionMode,
+                saleCommissionMode:   contract.saleCommissionMode,
+                saleCommissionPercent: contract.saleCommissionPercent,
                 createdAt:       contract.createdAt,
               },
             });

@@ -1333,6 +1333,16 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
       ...(form.dealType === "RENTAL"
         ? { rentalCommissionMode: form.rentalCommissionPreset === "fixed" ? "FIXED" : "ONE_MONTH" }
         : {}),
+      // Sale fee mode + percent — lets the API render the dynamic clause 5.1 wording
+      // for the sale interested template. The server persists them only for that template.
+      ...(form.dealType === "SALE"
+        ? {
+            saleCommissionMode: form.commissionMode === "percent" ? "PERCENT" : "FIXED",
+            ...(form.commissionMode === "percent"
+              ? { saleCommissionPercent: parseFloat(form.commissionPct) }
+              : {}),
+          }
+        : {}),
       // Pass existingClientDbId when broker picked an existing client so the
       // API links the contract to the existing Client row (no duplicate).
       ...(selectedClientId   ? { existingClientDbId: selectedClientId }   : {}),
@@ -1842,6 +1852,10 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                   </div>
                 )}
                 {commPreview && <CommissionPreviewChip label={commPreview} />}
+                {/* The sale template's clause 5.1 always appends "+מע״מ" to the fee */}
+                <p className="text-xs text-gray-400 mt-2">
+                  שים לב: דמי התיווך בחוזה יוצגו בתוספת מע&quot;מ כדין.
+                </p>
               </div>
             )}
 

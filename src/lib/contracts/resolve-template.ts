@@ -78,6 +78,8 @@ export interface TemplateContext {
   commissionSale?: string;   // formatted: "₪30,000" — sale commission; set only for BOTH
   // Dynamic rental clause 6.1 — full sentence built from the commission mode
   rentalCommissionClause: string;
+  // Dynamic sale clause 5.1 — full sentence built from the sale commission mode
+  saleCommissionClause:   string;
   // Dates
   today:           string;   // DD.MM.YYYY
   contractId:      string;   // last 8 chars of id, uppercased
@@ -130,6 +132,8 @@ export function buildContext(opts: {
     commission:      number;    // agorot (rental commission for BOTH)
     commissionSale?: number | null;  // agorot; only set for BOTH
     rentalCommissionMode?: "ONE_MONTH" | "FIXED" | null;  // drives clause 6.1; null -> ONE_MONTH wording
+    saleCommissionMode?:   "PERCENT" | "FIXED" | null;    // drives sale clause 5.1; null -> FIXED wording
+    saleCommissionPercent?: number | null;                // human percent (2, 1.5); only for PERCENT
     createdAt:       Date | string;
   };
 }): TemplateContext {
@@ -157,6 +161,13 @@ export function buildContext(opts: {
       opts.contract.rentalCommissionMode === "FIXED"
         ? `בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בסך ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`
         : `בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בגובה חודש שכירות אחד, בתוספת מע"מ כדין.`,
+    // Dynamic sale clause 5.1 — PERCENT states the broker's chosen percentage;
+    // FIXED (and any absent/incomplete mode) states the stored commission amount,
+    // which is always truthful and deterministic across regeneration.
+    saleCommissionClause:
+      opts.contract.saleCommissionMode === "PERCENT" && opts.contract.saleCommissionPercent != null
+        ? `ברכישת נכס – סך השווה ל-${String(Number(opts.contract.saleCommissionPercent.toFixed(2)))}% ממחיר העסקה הכולל, בתוספת מע"מ כדין.`
+        : `ברכישת נכס – דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`,
     today:           isoToDateStr(opts.contract.createdAt),
     contractId:      String(opts.contract.id).slice(-8).toUpperCase(),
   };
