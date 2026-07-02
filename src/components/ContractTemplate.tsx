@@ -72,7 +72,7 @@ function PropertyTable({
     ...(floor     ? [[labels.floor,     floor    ] as [string, string]] : []),
     ...(apartment ? [[labels.apartment, apartment] as [string, string]] : []),
     [labels.dealType,   c.dealType],
-    [labels.price,      c.propertyPrice],
+    [c.dealType === "שכירות" ? labels.monthlyRent : labels.price, c.propertyPrice],
     // For BOTH: show rental commission first, then sale commission separately
     ...(c.dealType === "גם וגם" && c.commissionSale
       ? [["עמלת שכירות", c.commission] as [string, string], ["עמלת מכירה", c.commissionSale] as [string, string]]
@@ -278,7 +278,7 @@ export function ContractTemplate({
                     ...(fl  ? [[labels.floor,     fl ] as [string, string]] : []),
                     ...(apt ? [[labels.apartment, apt] as [string, string]] : []),
                     [labels.dealType, c.dealType] as [string, string],
-                    [labels.price,    c.propertyPrice] as [string, string],
+                    [c.dealType === "שכירות" ? labels.monthlyRent : labels.price, c.propertyPrice] as [string, string],
                   ];
                 })()).map(([label, value]) => (
                   <tr key={label} className="border-b border-gray-100 last:border-0">

@@ -21,6 +21,7 @@ export interface LabelSet {
   apartment:       string;
   dealType:        string;
   price:           string;
+  monthlyRent:     string;   // rental-only price label ("שכירות חודשית"); SALE/BOTH keep `price`
   commission:      string;
   clientSignature: string;
   notYetSigned:    string;
@@ -81,6 +82,7 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     apartment:          "דירה",
     dealType:           "סוג עסקה",
     price:              "מחיר",
+    monthlyRent:        "שכירות חודשית",
     commission:         "עמלת תיווך",
     clientSignature:    "חתימת הלקוח",
     notYetSigned:       "טרם נחתם",
@@ -140,6 +142,7 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     apartment:          "Apartment",
     dealType:           "Deal Type",
     price:              "Price",
+    monthlyRent:        "Monthly Rent",
     commission:         "Brokerage Fee",
     clientSignature:    "Client Signature",
     notYetSigned:       "Not yet signed",
@@ -199,6 +202,7 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     apartment:          "Appartement",
     dealType:           "Type de transaction",
     price:              "Prix",
+    monthlyRent:        "Loyer mensuel",
     commission:         "Honoraires de courtage",
     clientSignature:    "Signature du client",
     notYetSigned:       "Non encore signé",
@@ -258,6 +262,7 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     apartment:          "Квартира",
     dealType:           "Тип сделки",
     price:              "Цена",
+    monthlyRent:        "Ежемесячная аренда",
     commission:         "Брокерское вознаграждение",
     clientSignature:    "Подпись клиента",
     notYetSigned:       "Ещё не подписан",
