@@ -6,6 +6,7 @@ import { normalizeIsraeliPhone } from "@/lib/messaging/normalize-phone";
 import { requireUserId } from "@/lib/require-user";
 import { canCreateContract } from "@/lib/subscription";
 import { resolveTemplate, buildContext } from "@/lib/contracts/resolve-template";
+import { CONTRACT_TYPE } from "@/lib/contracts/contract-types";
 import { rateLimit, getRealIp } from "@/lib/rate-limit";
 import { logAuditEvent } from "@/lib/audit/log-audit-event";
 import { parsePositiveInt, parseNonNegativeInt, parseEnum, parseOptionalEnum, firstError } from "@/lib/validate";
@@ -367,12 +368,12 @@ export async function POST(request: Request) {
     // otherwise the category default applies. Extend TEMPLATE_KEY_BY_TYPE_AND_DEAL
     // as INTERESTED_BUYER_SALE / _BOTH (and future categories) are added.
     const CONTRACT_TYPE_TO_TEMPLATE_KEY: Record<string, string> = {
-      "החתמת מתעניין": "INTERESTED_BUYER",
-      "החתמת בעל נכס / בלעדיות": "OWNER_EXCLUSIVE",
-      "הסכם שיתוף פעולה בין מתווכים": "BROKER_COOP",
+      [CONTRACT_TYPE.INTERESTED]:      "INTERESTED_BUYER",
+      [CONTRACT_TYPE.OWNER_EXCLUSIVE]: "OWNER_EXCLUSIVE",
+      [CONTRACT_TYPE.BROKER_COOP]:     "BROKER_COOP",
     };
     const TEMPLATE_KEY_BY_TYPE_AND_DEAL: Record<string, Partial<Record<string, string>>> = {
-      "החתמת מתעניין": {
+      [CONTRACT_TYPE.INTERESTED]: {
         RENTAL: "INTERESTED_BUYER_RENTAL",
         // SALE: "INTERESTED_BUYER_SALE",   // future
         // BOTH: "INTERESTED_BUYER_BOTH",   // future

@@ -24,6 +24,7 @@
 
 import { useState, useCallback, useRef, useEffect } from "react";
 import Link from "next/link";
+import { CONTRACT_TYPE } from "@/lib/contracts/contract-types";
 import { parsePropertyAddress } from "@/lib/format-address";
 import { formatNisInput } from "@/lib/format-nis";
 import { UpgradeBanner } from "@/components/UpgradeBanner";
@@ -899,10 +900,24 @@ function TextInput({ id, value, onChange, placeholder, type = "text", error, dis
 }
 
 // ── Contract type options ──────────────────────────────────────────────────────
+// `label` is the display text on the card; `apiType` is the canonical
+// contractType string sent to POST /api/contracts (from CONTRACT_TYPE — must
+// match the route's resolution maps byte-for-byte). They usually coincide, but
+// a card may show a shortened display label (e.g. cooperation).
 
-const CONTRACT_TYPES = [
+type ContractTypeId = "interested" | "exclusivity" | "cooperation" | "transfer";
+
+const CONTRACT_TYPES: Array<{
+  id:       ContractTypeId;
+  label:    string;
+  apiType:  string;
+  subtitle: string;
+  iconBg:   string;
+  active:   boolean;
+  icon:     React.ReactNode;
+}> = [
   {
-    id: "interested", label: "החתמת מתעניין",
+    id: "interested", label: CONTRACT_TYPE.INTERESTED, apiType: CONTRACT_TYPE.INTERESTED,
     subtitle: "רישום הסכמת רוכש או שוכר פוטנציאלי",
     iconBg: "bg-indigo-50 text-indigo-600", active: true,
     icon: (
@@ -915,7 +930,7 @@ const CONTRACT_TYPES = [
     ),
   },
   {
-    id: "exclusivity", label: "החתמת בעל נכס / בלעדיות",
+    id: "exclusivity", label: CONTRACT_TYPE.OWNER_EXCLUSIVE, apiType: CONTRACT_TYPE.OWNER_EXCLUSIVE,
     subtitle: "הסכם בלעדיות עם בעל הנכס",
     iconBg: "bg-emerald-50 text-emerald-600", active: false,
     icon: (
@@ -927,7 +942,8 @@ const CONTRACT_TYPES = [
     ),
   },
   {
-    id: "cooperation", label: "הסכם שיתוף פעולה",
+    // Display label is intentionally shorter than the canonical apiType string.
+    id: "cooperation", label: "הסכם שיתוף פעולה", apiType: CONTRACT_TYPE.BROKER_COOP,
     subtitle: "שיתוף עסקה עם מתווך שותף",
     iconBg: "bg-violet-50 text-violet-600", active: false,
     icon: (
@@ -940,7 +956,7 @@ const CONTRACT_TYPES = [
     ),
   },
   {
-    id: "transfer", label: "העברת לקוח בין מתווכים",
+    id: "transfer", label: CONTRACT_TYPE.TRANSFER, apiType: CONTRACT_TYPE.TRANSFER,
     subtitle: "רישום העברת לקוח ממתווך אחר",
     iconBg: "bg-rose-50 text-rose-500", active: false,
     icon: (
@@ -1064,6 +1080,11 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
         reason:           subscription.reason,
       }
     : null;
+
+  // Contract category selection — drives the payload's contractType string.
+  // Only cards with active:true are selectable; today that is "interested" only,
+  // so behavior is unchanged, but the state is real and ready for more categories.
+  const [contractTypeId, setContractTypeId] = useState<ContractTypeId>("interested");
 
   // Selection tracking — UI-only; not included in API payload
   const [selectedClientId,   setSelectedClientId]   = useState<string | null>(null);
@@ -1291,7 +1312,10 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
     }
 
     const payload = {
-      contractType:              "החתמת מתעניין",
+      // Canonical category string from the selected card — must match the API's
+      // resolution maps byte-for-byte (both sides import CONTRACT_TYPE).
+      contractType:              CONTRACT_TYPES.find((c) => c.id === contractTypeId)?.apiType
+                                   ?? CONTRACT_TYPE.INTERESTED,
       language:                  form.language,
       dealType:                  form.dealType,
       clientName:                form.clientName.trim(),
@@ -1339,6 +1363,7 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
         clientName={stage.clientName}
         onCreateAnother={() => {
           setForm(INITIAL); setErrors({}); setStage({ name: "idle" });
+          setContractTypeId("interested");
           setSelectedClientId(null); setSelectedClientName(null);
           setSelectedPropertyId(null); setSelectedPropertyAddr(null);
         }}
@@ -1367,9 +1392,11 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
         <Section title="סוג חוזה">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {CONTRACT_TYPES.map((ct) => {
-              const selected = ct.id === "interested";
+              const selected = ct.id === contractTypeId;
               return (
-                <div key={ct.id} className={[
+                <div key={ct.id}
+                  {...(ct.active ? { role: "button", onClick: () => setContractTypeId(ct.id) } : {})}
+                  className={[
                   "flex items-start gap-4 p-4 rounded-xl border transition-all",
                   ct.active && selected ? "border-indigo-300 bg-indigo-50/50 ring-1 ring-indigo-300"
                     : ct.active ? "border-gray-200 bg-white cursor-pointer hover:border-indigo-200"
@@ -1483,6 +1510,9 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                   commissionNis: "",
                   commissionPct: "",
                   rentalCommissionPreset: "one_month",
+                  // Rental template discloses the full address only after signing —
+                  // default to hidden; the broker can still uncheck manually.
+                  hideFullAddressFromClient: true,
                 }));
                 setErrors((prev) => { const n = { ...prev }; delete n.priceNis; delete n.commissionNis; delete n.commissionPct; return n; });
                 setStage((s) => s.name === "error" ? { name: "idle" } : s);
@@ -1509,6 +1539,7 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                   commissionNis: "",
                   commissionPct: "",
                   rentalCommissionPreset: "one_month",
+                  hideFullAddressFromClient: false,
                 }));
                 setErrors((prev) => { const n = { ...prev }; delete n.priceNis; delete n.commissionNis; delete n.commissionPct; return n; });
                 setStage((s) => s.name === "error" ? { name: "idle" } : s);
@@ -1539,6 +1570,7 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                   salePriceNis: "",
                   rentalCommissionPreset: "one_month",
                   commissionSaleMode: "percent",
+                  hideFullAddressFromClient: false,
                 }));
                 setErrors((prev) => {
                   const n = { ...prev };
@@ -1765,6 +1797,12 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                   {/* commRentalPreview is set for BOTH; commPreview is set for RENTAL (never both at once) */}
                   {commRentalPreview && <CommissionPreviewChip label={commRentalPreview} />}
                   {commPreview       && <CommissionPreviewChip label={commPreview} />}
+                  {/* The rental template's clause 6.1 always appends "+מע״מ" to the fee */}
+                  {form.dealType === "RENTAL" && (
+                    <p className="text-xs text-gray-400 mt-2">
+                      שים לב: דמי התיווך בחוזה יוצגו בתוספת מע&quot;מ כדין.
+                    </p>
+                  )}
                 </div>
               );
             })()}
