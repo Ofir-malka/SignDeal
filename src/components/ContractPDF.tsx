@@ -408,7 +408,7 @@ export function ContractPDF({ contract: c, broker }: { contract: Contract; broke
       ...(propFloor ? [[labels.floor,     propFloor] as [string, string]] : []),
       ...(propApt   ? [[labels.apartment, propApt  ] as [string, string]] : []),
       [labels.dealType,   c.dealType],
-      [labels.price,      c.propertyPrice],
+      [c.dealType === "שכירות" ? labels.monthlyRent : labels.price, c.propertyPrice],
       // BOTH: split into two commission rows
       ...(c.dealType === "גם וגם" && c.commissionSale
         ? [["עמלת שכירות", c.commission] as [string, string], ["עמלת מכירה", c.commissionSale] as [string, string]]
@@ -484,7 +484,7 @@ export function ContractPDF({ contract: c, broker }: { contract: Contract; broke
     ...(fbFloor ? [[labels.floor,     fbFloor] as [string, string]] : []),
     ...(fbApt   ? [[labels.apartment, fbApt  ] as [string, string]] : []),
     [labels.dealType, c.dealType],
-    [labels.price,    c.propertyPrice],
+    [c.dealType === "שכירות" ? labels.monthlyRent : labels.price, c.propertyPrice],
   ];
 
   const terms = [

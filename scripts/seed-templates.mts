@@ -123,13 +123,14 @@ const TEMPLATES: Array<{
     // • Clause 6.1 is dynamic via {{rentalCommissionClause}} (ONE_MONTH / FIXED).
     // • Property facts (address/rent/commission) are intentionally NOT placed in the
     //   body — they render through PropertyTable, which honours hideFullAddressFromClient.
+    // • The contract number is intentionally NOT in the body — the renderers' chrome
+    //   (HTML top chip / PDF header meta row) already shows "מסמך מס׳" once per view.
     // • Original legal numbering is preserved; 6.1/6.2/6.3 render as paragraph text.
     {
       key: "INTERESTED_BUYER_RENTAL",
       language: "HE",
       title: "הזמנת שירותי תיווך לשכירות נכס מקרקעין",
       content: `הזמנת שירותי תיווך לשכירות נכס מקרקעין
-חוזה מס׳ {{contractId}}
 בהתאם לחוק המתווכים במקרקעין התשנ״ו-1996
 
 המתווך: {{brokerName}}, ת.ז {{brokerIdNumber}}, רישיון מתווך מס׳ {{brokerLicense}}, טלפון {{brokerPhone}}
