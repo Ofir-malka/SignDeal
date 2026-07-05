@@ -20,8 +20,9 @@ export interface LabelSet {
   floor:           string;
   apartment:       string;
   dealType:        string;
-  price:           string;
-  monthlyRent:     string;   // rental-only price label ("שכירות חודשית"); SALE/BOTH keep `price`
+  price:           string;   // SALE price label ("מחיר רכישה") — surfaces only for dealType SALE
+  monthlyRent:     string;   // price label for RENTAL and BOTH ("שכירות חודשית") — propertyPrice is monthly rent there
+  salePrice:       string;   // BOTH-only extra row ("מחיר מכירה") — from propertySalePrice
   commission:      string;
   clientSignature: string;
   notYetSigned:    string;
@@ -81,8 +82,9 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     floor:              "קומה",
     apartment:          "דירה",
     dealType:           "סוג עסקה",
-    price:              "מחיר",
+    price:              "מחיר רכישה",
     monthlyRent:        "שכירות חודשית",
+    salePrice:          "מחיר מכירה",
     commission:         "עמלת תיווך",
     clientSignature:    "חתימת הלקוח",
     notYetSigned:       "טרם נחתם",
@@ -141,8 +143,9 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     floor:              "Floor",
     apartment:          "Apartment",
     dealType:           "Deal Type",
-    price:              "Price",
+    price:              "Purchase Price",
     monthlyRent:        "Monthly Rent",
+    salePrice:          "Sale Price",
     commission:         "Brokerage Fee",
     clientSignature:    "Client Signature",
     notYetSigned:       "Not yet signed",
@@ -201,8 +204,9 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     floor:              "Étage",
     apartment:          "Appartement",
     dealType:           "Type de transaction",
-    price:              "Prix",
+    price:              "Prix d'achat",
     monthlyRent:        "Loyer mensuel",
+    salePrice:          "Prix de vente",
     commission:         "Honoraires de courtage",
     clientSignature:    "Signature du client",
     notYetSigned:       "Non encore signé",
@@ -261,8 +265,9 @@ export const LABELS: Record<ContractLang, LabelSet> = {
     floor:              "Этаж",
     apartment:          "Квартира",
     dealType:           "Тип сделки",
-    price:              "Цена",
+    price:              "Цена покупки",
     monthlyRent:        "Ежемесячная аренда",
+    salePrice:          "Цена продажи",
     commission:         "Брокерское вознаграждение",
     clientSignature:    "Подпись клиента",
     notYetSigned:       "Ещё не подписан",

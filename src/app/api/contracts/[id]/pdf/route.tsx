@@ -34,6 +34,7 @@ export async function GET(
       propertyAddress: contract.propertyAddress,
       propertyCity:    contract.propertyCity,
       propertyPrice:   contract.propertyPrice,
+      propertySalePrice: contract.propertySalePrice ?? null,
       commission:      contract.commission,
       commissionSale:  contract.commissionSale ?? null,
       dealClosed:      contract.dealClosed,

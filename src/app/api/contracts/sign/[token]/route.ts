@@ -20,6 +20,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const KEYS_REQUIRING_CLIENT_ADDRESS = new Set<string>([
   "INTERESTED_BUYER_RENTAL",
   "INTERESTED_BUYER_SALE",
+  "INTERESTED_BUYER_BOTH",
 ]);
 
 // ── GET /api/contracts/sign/[token] ──────────────────────────────────────────
@@ -73,6 +74,7 @@ export async function GET(
       propertyAddress: contract.propertyAddress,
       propertyCity:    contract.propertyCity,
       propertyPrice:   contract.propertyPrice,
+      propertySalePrice: contract.propertySalePrice ?? null,
       commission:      contract.commission,
       commissionSale:  contract.commissionSale ?? null,
       dealClosed:      contract.dealClosed,
