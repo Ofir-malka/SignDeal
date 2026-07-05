@@ -137,6 +137,35 @@ export function buildContext(opts: {
     createdAt:       Date | string;
   };
 }): TemplateContext {
+  const isBoth = opts.contract.dealType === "BOTH";
+
+  // Dynamic rental clause — wording differs between the RENTAL template
+  // ("בעסקאות שכירות ישלם הלקוח…") and the BOTH template ("בעסקת שכירות: …"),
+  // matching the lawyer text of each document. Defaults to the one-month
+  // wording when the mode is absent. The amount always comes from `commission`
+  // (for BOTH that IS the rental-side commission).
+  const rentalCommissionClause = isBoth
+    ? (opts.contract.rentalCommissionMode === "FIXED"
+        ? `בעסקת שכירות: דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`
+        : `בעסקת שכירות: סכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.`)
+    : (opts.contract.rentalCommissionMode === "FIXED"
+        ? `בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בסך ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`
+        : `בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בגובה חודש שכירות אחד, בתוספת מע"מ כדין.`);
+
+  // Dynamic sale clause — PERCENT states the broker's chosen percentage; FIXED
+  // (and any absent/incomplete mode) states the stored amount, which is always
+  // truthful and deterministic across regeneration.
+  // CRITICAL: for BOTH the sale-side amount lives in `commissionSale`
+  // (`commission` is the rental side there); for SALE it lives in `commission`.
+  const salePct = opts.contract.saleCommissionPercent;
+  const saleCommissionClause = isBoth
+    ? (opts.contract.saleCommissionMode === "PERCENT" && salePct != null
+        ? `בעסקת מכר: בשיעור של ${String(Number(salePct.toFixed(2)))}% ממחיר הרכישה הכולל של הנכס, בתוספת מע"מ כדין.`
+        : `בעסקת מכר: דמי תיווך בסך של ${formatAgorot(opts.contract.commissionSale ?? opts.contract.commission)}, בתוספת מע"מ כדין.`)
+    : (opts.contract.saleCommissionMode === "PERCENT" && salePct != null
+        ? `ברכישת נכס – סך השווה ל-${String(Number(salePct.toFixed(2)))}% ממחיר העסקה הכולל, בתוספת מע"מ כדין.`
+        : `ברכישת נכס – דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`);
+
   return {
     brokerName:      opts.broker.fullName,
     brokerLicense:   opts.broker.licenseNumber ?? "—",
@@ -155,19 +184,9 @@ export function buildContext(opts: {
     ...(opts.contract.commissionSale != null
       ? { commissionSale: formatAgorot(opts.contract.commissionSale) }
       : {}),
-    // Dynamic rental clause 6.1 — full sentence; defaults to the one-month wording
-    // when the mode is absent (null/undefined), matching legacy/one-month behaviour.
-    rentalCommissionClause:
-      opts.contract.rentalCommissionMode === "FIXED"
-        ? `בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בסך ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`
-        : `בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בגובה חודש שכירות אחד, בתוספת מע"מ כדין.`,
-    // Dynamic sale clause 5.1 — PERCENT states the broker's chosen percentage;
-    // FIXED (and any absent/incomplete mode) states the stored commission amount,
-    // which is always truthful and deterministic across regeneration.
-    saleCommissionClause:
-      opts.contract.saleCommissionMode === "PERCENT" && opts.contract.saleCommissionPercent != null
-        ? `ברכישת נכס – סך השווה ל-${String(Number(opts.contract.saleCommissionPercent.toFixed(2)))}% ממחיר העסקה הכולל, בתוספת מע"מ כדין.`
-        : `ברכישת נכס – דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`,
+    // Dynamic clauses — computed above; wording is dealType-aware (BOTH vs RENTAL/SALE).
+    rentalCommissionClause,
+    saleCommissionClause,
     today:           isoToDateStr(opts.contract.createdAt),
     contractId:      String(opts.contract.id).slice(-8).toUpperCase(),
   };

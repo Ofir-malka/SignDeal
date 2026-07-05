@@ -236,6 +236,7 @@ enum ContractTemplateKey {
   BROKER_COOP               // הסכם שיתוף פעולה בין מתווכים
   INTERESTED_BUYER_RENTAL   // החתמת מתעניין — שכירות (resolved when dealType = RENTAL)
   INTERESTED_BUYER_SALE     // החתמת מתעניין — מכירה (resolved when dealType = SALE)
+  INTERESTED_BUYER_BOTH     // החתמת מתעניין — מכירה והשכרה (resolved when dealType = BOTH)
 }
 
 // How the rental brokerage fee was chosen by the broker. Drives the dynamic
@@ -286,7 +287,8 @@ model Contract {
   // Property
   propertyAddress String
   propertyCity    String
-  propertyPrice   Int             // stored in agorot (smallest currency unit)
+  propertyPrice   Int             // stored in agorot (smallest currency unit; monthly rent for RENTAL/BOTH, sale price for SALE)
+  propertySalePrice Int?          // agorot; sale asking price — set only for dealType BOTH (propertyPrice = monthly rent there)
   commission      Int             // stored in agorot (rental commission for BOTH; full commission for SALE/RENTAL)
   commissionSale  Int?            // stored in agorot; only set when dealType = BOTH (sale-side commission)
   rentalCommissionMode RentalCommissionMode? // null for SALE/BOTH & legacy; drives rental clause 6.1 wording

@@ -56,6 +56,10 @@
  *                               PERCENT states the chosen percentage, FIXED (or
  *                               absent mode) states the stored commission amount
  *
+ * NOTE: both commission clauses are dealType-aware — for dealType BOTH they use
+ * the BOTH document's wording ("בעסקת מכר: …" / "בעסקת שכירות: …"), the sale
+ * amount comes from commissionSale and the rental amount from commission.
+ *
  * Dates & metadata
  *   {{today}}           contract creation date, DD.MM.YYYY
  *   {{contractId}}      last 8 chars of contract ID, uppercased
@@ -88,7 +92,7 @@ const p = prisma as any;
 // All {{placeholders}} listed above are supported.
 
 const TEMPLATES: Array<{
-  key: "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE";
+  key: "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH";
   language: "HE" | "EN" | "FR" | "RU" | "AR";
   title: string;
   content: string;
@@ -208,6 +212,49 @@ const TEMPLATES: Array<{
 9. כל שינוי, תיקון, ויתור, הקלה או ארכה הנוגעים להסכם זה יהיו תקפים רק אם נערכו בכתב. הימנעות או עיכוב מצד מי מהצדדים במימוש זכות כלשהי לא ייחשבו כוויתור על אותה זכות.
 10. כאשר צד להסכם מורכב ממספר אנשים, תחול על כולם אחריות ביחד ולחוד לכל התחייבויותיהם על פי הסכם זה. חתימתו, אישורו או התחייבותו של אחד מהם בכל עניין הקשור להסכם תחייב גם את יתר החותמים מטעמו.
 11. למען הסר ספק, כל התקשרות של הלקוח ו/או מי מטעמו בקשר לנכס שהוצג על ידי המתווך, תיחשב לעסקה המזכה את המתווך בדמי התיווך המפורטים בהסכם זה.`,
+    },
+
+    // ── INTERESTED_BUYER_BOTH · HE ────────────────────────────────────────────
+    // Combined sale+rental variant of the interested-client flow. Resolved by
+    // (contractType "החתמת מתעניין" + dealType BOTH).
+    // • Broker details are embedded in the body so they appear in the signed HTML
+    //   view (ContractTemplate has no separate broker header), not only the PDF.
+    // • Clause 5.1 is dynamic via {{saleCommissionClause}} (PERCENT / FIXED —
+    //   amount from commissionSale) and clause 5.2 via {{rentalCommissionClause}}
+    //   (ONE_MONTH / FIXED — amount from commission); both use the BOTH wording.
+    // • Clause 6 uses the approved general "sold and/or rented" wording (the
+    //   source document's clause 6 was sale-only).
+    // • Property facts (address/rent/sale price/commissions) are intentionally
+    //   NOT placed in the body — they render through PropertyTable.
+    // • The contract number is intentionally NOT in the body — the renderers'
+    //   chrome (HTML top chip / PDF header meta row) already shows "מסמך מס׳".
+    // • The law-reference subtitle line is a platform addition (not in the source
+    //   text) for structural consistency with the other templates.
+    // • Original legal numbering is preserved; 5.1–5.4 render as paragraph text.
+    {
+      key: "INTERESTED_BUYER_BOTH",
+      language: "HE",
+      title: "הזמנת שירותי תיווך למכירה והשכרת נכס מקרקעין",
+      content: `הזמנת שירותי תיווך למכירה והשכרת נכס מקרקעין
+בהתאם לחוק המתווכים במקרקעין התשנ״ו-1996
+
+המתווך: {{brokerName}}, ת.ז {{brokerIdNumber}}, רישיון מתווך מס׳ {{brokerLicense}}, טלפון {{brokerPhone}}
+הלקוח: {{clientName}}, ת.ז {{clientIdNumber}}, כתובת {{clientAddress}}, טלפון {{clientPhone}}, דוא״ל {{clientEmail}}
+
+1. הלקוח מזמין בזאת מהמתווך שירותי תיווך במקרקעין, בקשר לנכסים המפורטים לעיל ו/או להלן, לפי העניין.
+2. הלקוח מאשר כי הנכסים המפורטים לעיל הוצגו בפניו על ידי המתווך. הלקוח מתחייב לעדכן את המתווך באופן מיידי על כל משא ומתן שיתנהל בינו ו/או בין מי מטעמו לבין בעל הנכס ו/או מי מטעמו, ביחס לאחד או יותר מן הנכסים, וכן להודיע למתווך מיד עם חתימת הסכם מחייב ו/או עם מתן התחייבות לביצוע העסקה, לפי המוקדם מביניהם.
+3. מובהר כי הלקוח מבין ומסכים שכל התקשרות, הסכם או התחייבות שייעשו בינו ו/או בין מי מטעמו לבין בעל הנכס, בקשר לאחד או יותר מהנכסים המפורטים בהזמנה זו, יחייבו את הלקוח בתשלום דמי התיווך למתווך, כמפורט בסעיף 5 להלן.
+4. הלקוח מתחייב לשמור בסוד ולא להעביר לכל צד שלישי מידע, פרטים או נתונים שנמסרו לו על ידי המתווך בנוגע לנכסים המפורטים להלן. ככל שהלקוח יפר התחייבות זו, הוא יישא באחריות לכל נזק, הפסד או הוצאה שייגרמו למתווך כתוצאה מכך.
+5. הלקוח מתחייב לשלם למתווך דמי תיווך, מיד עם חתימת הסכם מחייב ו/או עם מתן התחייבות לביצוע העסקה, לפי המוקדם מביניהם, ביחס לאחד או יותר מהנכסים המפורטים בהזמנה זו.
+דמי התיווך ישולמו באופן הבא:
+5.1 {{saleCommissionClause}}
+5.2 {{rentalCommissionClause}}
+5.3 דמי התיווך ישולמו למתווך מיד עם חתימת הסכם מחייב ו/או עם מתן התחייבות לביצוע העסקה, לפי המוקדם מביניהם.
+5.4 אין באמור לעיל כדי לגרוע מזכותו של המתווך לגבות דמי תיווך גם מהמוכר ו/או מהמשכיר, לפי העניין.
+6. הלקוח מאשר כי לאחר השלמת העסקה, יהיה המתווך רשאי לפרסם ו/או להודיע לציבור כי הנכס נמכר ו/או הושכר, לפי העניין, בכל אמצעי ובכל דרך שימצא לנכון.
+7. הלקוח מאשר כי המתווך המליץ לו להיעזר בשירותי עורך דין ו/או באנשי מקצוע מתאימים נוספים, בהתאם לצורך ולנסיבות העסקה.
+8. כל ויתור, דחייה, ארכה, הנחה או שינוי בתנאי מתנאי הסכם זה לא יהיו תקפים אלא אם נעשו בכתב ונחתמו על ידי הצדדים. אי־מימוש או עיכוב במימוש זכות כלשהי על ידי מי מהצדדים לא ייחשבו כוויתור על אותה זכות, והצד הזכאי יהיה רשאי לממש את זכויותיו, כולן או חלקן, בכל עת, בהתאם להסכם זה ולפי כל דין.
+9. ככל שמי מהצדדים להסכם זה כולל יותר מאדם או גורם אחד, יהיו כל יחידי אותו צד אחראים להתחייבויותיהם על פי הסכם זה ביחד ולחוד. חתימתו של אחד מיחידי אותו צד על כל מסמך, אישור, מכתב או התחייבות הקשורים להסכם זה, לביצועו או לנובע ממנו, תחייב גם את יתר יחידי אותו צד.`,
     },
 
     // ── OWNER_EXCLUSIVE · HE ──────────────────────────────────────────────────
@@ -381,7 +428,7 @@ async function upsertTemplates() {
 
   // ── Sanity check: each HE template must have exactly 1 active row ─────────
   console.log("\n── Sanity check (HE templates) ───────────────────────────────");
-  for (const key of ["INTERESTED_BUYER", "OWNER_EXCLUSIVE", "BROKER_COOP", "INTERESTED_BUYER_RENTAL", "INTERESTED_BUYER_SALE"] as const) {
+  for (const key of ["INTERESTED_BUYER", "OWNER_EXCLUSIVE", "BROKER_COOP", "INTERESTED_BUYER_RENTAL", "INTERESTED_BUYER_SALE", "INTERESTED_BUYER_BOTH"] as const) {
     const rows = await p.contractTemplate.findMany({
       where: { templateKey: key, language: "HE", isActive: true },
       select: { id: true },

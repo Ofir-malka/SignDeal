@@ -1246,11 +1246,13 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
       const commNis = parseNis(form.commissionNis);
       if (isNaN(commNis) || commNis < 0) e.commissionNis = "עמלת תיווך חייבת להיות מספר חיובי או 0";
     }
-    // ── Sale commission (BOTH only) ───────────────────────────────────────────
+    // ── Sale commission + sale price (BOTH only) ─────────────────────────────
     if (form.dealType === "BOTH") {
+      // Sale price is always required for BOTH — it is persisted as
+      // propertySalePrice and displayed in the contract property table.
+      const salePriceNis = parseNis(form.salePriceNis);
+      if (isNaN(salePriceNis) || salePriceNis <= 0) e.salePriceNis = "מחיר מכירה חייב להיות מספר חיובי";
       if (form.commissionSaleMode === "percent") {
-        const salePriceNis = parseNis(form.salePriceNis);
-        if (isNaN(salePriceNis) || salePriceNis <= 0) e.salePriceNis = "מחיר מכירה חייב להיות מספר חיובי";
         const pct = parseFloat(form.commissionSalePct);
         if (isNaN(pct) || pct < 0 || pct > 100) e.commissionSalePct = "אחוז עמלה למכירה חייב להיות בין 0 ל-100";
       } else {
@@ -1340,6 +1342,20 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
             saleCommissionMode: form.commissionMode === "percent" ? "PERCENT" : "FIXED",
             ...(form.commissionMode === "percent"
               ? { saleCommissionPercent: parseFloat(form.commissionPct) }
+              : {}),
+          }
+        : {}),
+      // BOTH — sale price + both fee modes, from the BOTH-specific state vars
+      // (commissionSaleMode/commissionSalePct, NOT the SALE-side commissionMode/Pct).
+      // The API requires propertySalePrice for BOTH and renders clauses 5.1/5.2 from
+      // the modes (sale amount from commissionSale, rental amount from commission).
+      ...(form.dealType === "BOTH"
+        ? {
+            propertySalePrice: Math.round(parseNis(form.salePriceNis) * 100),
+            rentalCommissionMode: form.rentalCommissionPreset === "fixed" ? "FIXED" : "ONE_MONTH",
+            saleCommissionMode: form.commissionSaleMode === "percent" ? "PERCENT" : "FIXED",
+            ...(form.commissionSaleMode === "percent"
+              ? { saleCommissionPercent: parseFloat(form.commissionSalePct) }
               : {}),
           }
         : {}),
@@ -1899,6 +1915,14 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                 )}
                 {commSalePreview && <CommissionPreviewChip label={commSalePreview} />}
               </div>
+            )}
+
+            {/* One general VAT note for BOTH — covers both fee blocks above
+                (clauses 5.1/5.2 of the BOTH template always append "+מע״מ") */}
+            {form.dealType === "BOTH" && (
+              <p className="text-xs text-gray-400">
+                שים לב: דמי התיווך בחוזה יוצגו בתוספת מע&quot;מ כדין.
+              </p>
             )}
 
           </div>

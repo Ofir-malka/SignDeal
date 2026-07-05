@@ -11,6 +11,7 @@ export type ApiContractResponse = {
   propertyAddress: string;
   propertyCity: string;
   propertyPrice: number;
+  propertySalePrice?: number | null;  // agorot; set only for dealType "BOTH" (propertyPrice = monthly rent there)
   commission: number;
   commissionSale: number | null;   // set only when dealType = "BOTH"; null for SALE/RENTAL
   dealClosed: boolean;
@@ -97,6 +98,7 @@ export function apiToContract(c: ApiContractResponse): Contract {
     propertyAddress: c.propertyAddress,
     propertyCity:    c.propertyCity,
     propertyPrice:   formatAgorot(c.propertyPrice),
+    propertySalePrice: c.propertySalePrice != null ? formatAgorot(c.propertySalePrice) : null,
     createdDate:     isoToDateStr(c.createdAt) ?? "—",
     signedDate:      isoToDateStr(c.signedAt),
     paidDate:        isoToDateStr(c.payment?.paidAt ?? null),

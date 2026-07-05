@@ -261,6 +261,7 @@ export async function POST(request: Request) {
       propertyPrice,
       commission,
       commissionSale,      // only expected when dealType === "BOTH"
+      propertySalePrice,   // agorot; only expected when dealType === "BOTH" (propertyPrice = monthly rent there)
       clientName,
       clientPhone,
       clientEmail,
@@ -323,6 +324,19 @@ export async function POST(request: Request) {
       validatedCommissionSale = vCommissionSale.value;
     }
 
+    // ── BOTH deal type: validate propertySalePrice (sale asking price) ────────
+    // For BOTH, propertyPrice holds the MONTHLY RENT, so the sale price needs its
+    // own field (displayed in the property table as "מחיר מכירה"). Required for
+    // BOTH; forced null for SALE/RENTAL (SALE keeps propertyPrice as the sale price).
+    let validatedPropertySalePrice: number | null = null;
+    if (validatedDealType === "BOTH") {
+      const vPropertySalePrice = parsePositiveInt(propertySalePrice, "מחיר מכירה");
+      if (!vPropertySalePrice.ok) {
+        return NextResponse.json({ error: vPropertySalePrice.error }, { status: 400 });
+      }
+      validatedPropertySalePrice = vPropertySalePrice.value;
+    }
+
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
@@ -382,7 +396,7 @@ export async function POST(request: Request) {
       [CONTRACT_TYPE.INTERESTED]: {
         RENTAL: "INTERESTED_BUYER_RENTAL",
         SALE:   "INTERESTED_BUYER_SALE",
-        // BOTH: "INTERESTED_BUYER_BOTH",   // future
+        BOTH:   "INTERESTED_BUYER_BOTH",
       },
     };
 
@@ -394,16 +408,21 @@ export async function POST(request: Request) {
       ?? CONTRACT_TYPE_TO_TEMPLATE_KEY[contractType]
       ?? null;
 
-    // Persist the rental commission mode ONLY for the rental interested template.
-    // Absent mode on that template defaults to ONE_MONTH so clause 6.1 is deterministic.
+    // Persist the rental commission mode ONLY for templates whose clause needs it
+    // (rental + both). Absent mode defaults to ONE_MONTH so the rental clause is
+    // deterministic.
     const resolvedRentalMode: "ONE_MONTH" | "FIXED" | null =
-      autoKey === "INTERESTED_BUYER_RENTAL" ? (vRentalMode.value ?? "ONE_MONTH") : null;
+      autoKey === "INTERESTED_BUYER_RENTAL" || autoKey === "INTERESTED_BUYER_BOTH"
+        ? (vRentalMode.value ?? "ONE_MONTH")
+        : null;
 
-    // Persist the sale commission mode + percent ONLY for the sale interested
-    // template. Absent mode defaults to FIXED so clause 5.1 always states the
-    // stored commission amount (truthful + deterministic across regeneration).
+    // Persist the sale commission mode + percent ONLY for templates whose clause
+    // needs them (sale + both). Absent mode defaults to FIXED so the sale clause
+    // always states the stored amount (truthful + deterministic across regeneration).
     const resolvedSaleMode: "PERCENT" | "FIXED" | null =
-      autoKey === "INTERESTED_BUYER_SALE" ? (vSaleMode.value ?? "FIXED") : null;
+      autoKey === "INTERESTED_BUYER_SALE" || autoKey === "INTERESTED_BUYER_BOTH"
+        ? (vSaleMode.value ?? "FIXED")
+        : null;
     const resolvedSalePercent: number | null =
       resolvedSaleMode === "PERCENT" ? vSalePct.value : null;
     if (resolvedSaleMode === "PERCENT" && resolvedSalePercent == null) {
@@ -411,7 +430,7 @@ export async function POST(request: Request) {
     }
 
     if (autoKey) {
-      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE";
+      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH";
       const templateLang = language as "HE" | "EN" | "FR" | "RU" | "AR";
 
       // Resolve by (templateKey + language), fallback to HE if not found
@@ -457,6 +476,7 @@ export async function POST(request: Request) {
           propertyPrice: validatedPropertyPrice,
           commission: validatedCommission,
           ...(validatedCommissionSale !== null ? { commissionSale: validatedCommissionSale } : {}),
+          ...(validatedPropertySalePrice !== null ? { propertySalePrice: validatedPropertySalePrice } : {}),
           ...(resolvedRentalMode ? { rentalCommissionMode: resolvedRentalMode } : {}),
           ...(resolvedSaleMode ? { saleCommissionMode: resolvedSaleMode } : {}),
           ...(resolvedSalePercent != null ? { saleCommissionPercent: resolvedSalePercent } : {}),
