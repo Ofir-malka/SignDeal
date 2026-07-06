@@ -345,6 +345,17 @@ export async function POST(request: Request) {
       validatedPropertySalePrice = vPropertySalePrice.value;
     }
 
+    // ── Owner-exclusive: only the RENTAL variant is implemented ───────────────
+    // Blocks direct API posts for SALE/BOTH so they cannot fall back to the
+    // legacy OWNER_EXCLUSIVE placeholder template (not lawyer-approved).
+    // Remove per-dealType as OWNER_EXCLUSIVE_SALE / _BOTH templates ship.
+    if (contractType === CONTRACT_TYPE.OWNER_EXCLUSIVE && validatedDealType !== "RENTAL") {
+      return NextResponse.json(
+        { error: "חוזה בלעדיות נתמך כרגע לעסקאות שכירות בלבד" },
+        { status: 400 },
+      );
+    }
+
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 

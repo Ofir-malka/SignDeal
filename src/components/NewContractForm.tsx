@@ -25,6 +25,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import Link from "next/link";
 import { CONTRACT_TYPE } from "@/lib/contracts/contract-types";
+import { addMonthsInclusive, exclusivityDuration, durationTextHe, isWholeMonths, fromInputValue, toInputValue } from "@/lib/contracts/exclusivity-dates";
 import { parsePropertyAddress } from "@/lib/format-address";
 import { formatNisInput } from "@/lib/format-nis";
 import { UpgradeBanner } from "@/components/UpgradeBanner";
@@ -102,6 +103,12 @@ interface FormState {
   commissionNis:               string;
   commissionPct:               string;
   rentalCommissionPreset:      RentalCommissionPreset;
+  // ── Owner-exclusive rental only ───────────────────────────────────────────
+  rentalCommissionMonths:      string;   // "1"–"12"; always "1" for interested flows (never exposed there)
+  exclusivityStart:            string;   // "YYYY-MM-DD" (input value)
+  exclusivityDurationMode:     "months" | "custom";
+  exclusivityMonths:           string;   // quick-chip months ("1"|"3"|"6"|"12")
+  exclusivityEndCustom:        string;   // "YYYY-MM-DD"; only in custom mode
   // ── Sale-side commission (BOTH only) ─────────────────────────────────────
   commissionSaleMode: CommissionMode;
   commissionSaleNis:  string;   // BOTH + fixed: sale commission amount in ₪
@@ -138,6 +145,11 @@ const INITIAL: FormState = {
   commissionNis:             "",
   commissionPct:             "",
   rentalCommissionPreset:    "one_month",
+  rentalCommissionMonths:    "1",
+  exclusivityStart:          "",
+  exclusivityDurationMode:   "months",
+  exclusivityMonths:         "3",
+  exclusivityEndCustom:      "",
   commissionSaleMode:        "percent",
   commissionSaleNis:         "",
   commissionSalePct:         "",
@@ -221,10 +233,14 @@ function calcCommissionAgorot(f: FormState): number {
     if (isNaN(priceNis) || isNaN(pct)) return NaN;
     return Math.round(priceNis * pct);   // priceNis(₪) × pct(%) = commission in agorot
   }
-  // RENTAL and BOTH — "one_month" preset: commission = 1 × monthly rent
+  // RENTAL and BOTH — months preset: commission = N × monthly rent.
+  // rentalCommissionMonths is always "1" for interested flows (no UI exposes
+  // it there), so their result is unchanged; the owner-exclusive rental flow
+  // exposes a 1-12 selector.
   if ((f.dealType === "RENTAL" || f.dealType === "BOTH") && f.rentalCommissionPreset !== "fixed") {
     if (isNaN(priceNis)) return NaN;
-    return Math.round(priceNis * 100);
+    const months = parseInt(f.rentalCommissionMonths, 10);
+    return Math.round(priceNis * 100 * (Number.isInteger(months) && months >= 1 ? months : 1));
   }
   const commNis = parseNis(f.commissionNis);
   return isNaN(commNis) ? NaN : Math.round(commNis * 100);
@@ -930,9 +946,11 @@ const CONTRACT_TYPES: Array<{
     ),
   },
   {
+    // RENTAL-only in this phase — the form forces dealType=RENTAL and disables
+    // SALE/BOTH when this card is selected; the API also rejects owner+SALE/BOTH.
     id: "exclusivity", label: CONTRACT_TYPE.OWNER_EXCLUSIVE, apiType: CONTRACT_TYPE.OWNER_EXCLUSIVE,
     subtitle: "הסכם בלעדיות עם בעל הנכס",
-    iconBg: "bg-emerald-50 text-emerald-600", active: false,
+    iconBg: "bg-emerald-50 text-emerald-600", active: true,
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -1082,9 +1100,48 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
     : null;
 
   // Contract category selection — drives the payload's contractType string.
-  // Only cards with active:true are selectable; today that is "interested" only,
-  // so behavior is unchanged, but the state is real and ready for more categories.
+  // Only cards with active:true are selectable.
   const [contractTypeId, setContractTypeId] = useState<ContractTypeId>("interested");
+  const isOwner = contractTypeId === "exclusivity";
+
+  // ── Exclusivity period derivation (owner-exclusive rental only) ────────────
+  // End date uses the inclusive day-before convention (3 months from 01.08 →
+  // 31.10). Only the resulting start/end dates are sent to the API.
+  const exclusivityStartDate = fromInputValue(form.exclusivityStart);
+  const exclusivityEndDate: Date | null = !exclusivityStartDate
+    ? null
+    : form.exclusivityDurationMode === "months"
+      ? addMonthsInclusive(exclusivityStartDate, parseInt(form.exclusivityMonths, 10) || 1)
+      : fromInputValue(form.exclusivityEndCustom);
+  const exclusivityDur =
+    exclusivityStartDate && exclusivityEndDate && exclusivityEndDate > exclusivityStartDate
+      ? exclusivityDuration(exclusivityStartDate, exclusivityEndDate)
+      : null;
+
+  // Selecting a category applies its defaults. The owner-exclusive flow supports
+  // RENTAL only in this phase: deal type is forced to RENTAL, SALE/BOTH are
+  // disabled in the UI, and the address-hiding toggle is hidden + forced off
+  // (the owner already knows their own address).
+  function handleContractTypeSelect(id: ContractTypeId) {
+    if (id === contractTypeId) return;
+    setContractTypeId(id);
+    setForm((prev) => ({
+      ...prev,
+      dealType: id === "exclusivity" ? "RENTAL" : "SALE",
+      priceNis: "", commissionNis: "", commissionPct: "",
+      commissionSaleNis: "", commissionSalePct: "", salePriceNis: "",
+      rentalCommissionPreset: "one_month",
+      rentalCommissionMonths: "1",
+      commissionSaleMode: "percent",
+      hideFullAddressFromClient: false,
+      exclusivityStart: id === "exclusivity" ? toInputValue(new Date()) : "",
+      exclusivityDurationMode: "months",
+      exclusivityMonths: "3",
+      exclusivityEndCustom: "",
+    }));
+    setErrors({});
+    setStage((s) => (s.name === "error" ? { name: "idle" } : s));
+  }
 
   // Selection tracking — UI-only; not included in API payload
   const [selectedClientId,   setSelectedClientId]   = useState<string | null>(null);
@@ -1222,10 +1279,10 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
   // ── Validation ────────────────────────────────────────────────────────────
   function validate(): FieldError {
     const e: FieldError = {};
-    if (!form.clientName.trim())  e.clientName  = "שם לקוח הוא שדה חובה";
-    if (!form.clientPhone.trim()) e.clientPhone = "טלפון לקוח הוא שדה חובה";
+    if (!form.clientName.trim())  e.clientName  = isOwner ? "שם בעל הנכס הוא שדה חובה" : "שם לקוח הוא שדה חובה";
+    if (!form.clientPhone.trim()) e.clientPhone = isOwner ? "טלפון בעל הנכס הוא שדה חובה" : "טלפון לקוח הוא שדה חובה";
     if (!form.skipEmailId) {
-      if (!form.clientEmail.trim())    e.clientEmail    = "אימייל לקוח הוא שדה חובה (או סמן 'אין לי כרגע')";
+      if (!form.clientEmail.trim())    e.clientEmail    = isOwner ? "אימייל בעל הנכס הוא שדה חובה (או סמן 'אין לי כרגע')" : "אימייל לקוח הוא שדה חובה (או סמן 'אין לי כרגע')";
       if (!form.clientIdNumber.trim()) e.clientIdNumber = "תעודת זהות היא שדה חובה (או סמן 'אין לי כרגע')";
     }
     if (!form.propertyStreet.trim()) e.propertyStreet = "שם רחוב הוא שדה חובה";
@@ -1258,6 +1315,19 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
       } else {
         const commSaleNis = parseNis(form.commissionSaleNis);
         if (isNaN(commSaleNis) || commSaleNis < 0) e.commissionSaleNis = "עמלת מכירה חייבת להיות מספר חיובי או 0";
+      }
+    }
+    // ── Exclusivity period (owner-exclusive rental only) ─────────────────────
+    if (isOwner) {
+      if (!form.exclusivityStart) {
+        e.exclusivityStart = "תאריך תחילת הבלעדיות הוא שדה חובה";
+      }
+      if (form.exclusivityDurationMode === "custom") {
+        if (!form.exclusivityEndCustom) {
+          e.exclusivityEnd = "תאריך סיום הבלעדיות הוא שדה חובה";
+        } else if (exclusivityStartDate && exclusivityEndDate && exclusivityEndDate <= exclusivityStartDate) {
+          e.exclusivityEnd = "תאריך הסיום חייב להיות מאוחר מתאריך ההתחלה";
+        }
       }
     }
     return e;
@@ -1329,11 +1399,27 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
       propertyPrice:             priceAgorot,
       commission:                commissionAgorot,
       ...(commissionSaleAgorot !== null ? { commissionSale: commissionSaleAgorot } : {}),
-      hideFullAddressFromClient: form.hideFullAddressFromClient,
-      // Rental fee mode — lets the API render the dynamic clause 6.1 wording for the
-      // rental interested template. The server persists it only for that template.
+      // Owner-exclusive never hides the address (the owner knows it; toggle hidden).
+      hideFullAddressFromClient: isOwner ? false : form.hideFullAddressFromClient,
+      // Rental fee mode — interested rental uses ONE_MONTH/FIXED; the
+      // owner-exclusive rental flow uses MONTHS (1-12) / FIXED. The server
+      // persists these per template key.
       ...(form.dealType === "RENTAL"
-        ? { rentalCommissionMode: form.rentalCommissionPreset === "fixed" ? "FIXED" : "ONE_MONTH" }
+        ? (isOwner
+            ? {
+                rentalCommissionMode: form.rentalCommissionPreset === "fixed" ? "FIXED" : "MONTHS",
+                ...(form.rentalCommissionPreset !== "fixed"
+                  ? { rentalCommissionMonths: parseInt(form.rentalCommissionMonths, 10) || 1 }
+                  : {}),
+              }
+            : { rentalCommissionMode: form.rentalCommissionPreset === "fixed" ? "FIXED" : "ONE_MONTH" })
+        : {}),
+      // Exclusivity period — owner-exclusive rental only (plain YYYY-MM-DD strings)
+      ...(isOwner && form.exclusivityStart && exclusivityEndDate
+        ? {
+            exclusivityStartsAt: form.exclusivityStart,
+            exclusivityEndsAt:   toInputValue(exclusivityEndDate),
+          }
         : {}),
       // Sale fee mode + percent — lets the API render the dynamic clause 5.1 wording
       // for the sale interested template. The server persists them only for that template.
@@ -1421,7 +1507,7 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
               const selected = ct.id === contractTypeId;
               return (
                 <div key={ct.id}
-                  {...(ct.active ? { role: "button", onClick: () => setContractTypeId(ct.id) } : {})}
+                  {...(ct.active ? { role: "button", onClick: () => handleContractTypeSelect(ct.id) } : {})}
                   className={[
                   "flex items-start gap-4 p-4 rounded-xl border transition-all",
                   ct.active && selected ? "border-indigo-300 bg-indigo-50/50 ring-1 ring-indigo-300"
@@ -1453,7 +1539,7 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
         </Section>
 
         {/* ══ 2. Client details ═════════════════════════════════════════════ */}
-        <Section title="פרטי לקוח">
+        <Section title={isOwner ? "פרטי בעל הנכס" : "פרטי לקוח"}>
           <div className="space-y-4" ref={firstErrorRef}>
 
             {/* Existing client picker */}
@@ -1466,12 +1552,12 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
             {/* Manual fields — always editable */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <FieldLabel htmlFor="clientName">שם לקוח</FieldLabel>
+                <FieldLabel htmlFor="clientName">{isOwner ? "שם בעל הנכס" : "שם לקוח"}</FieldLabel>
                 <TextInput id="clientName" value={form.clientName} onChange={(v) => set("clientName", v)}
                   placeholder="ישראל ישראלי" error={errors.clientName} />
               </div>
               <div>
-                <FieldLabel htmlFor="clientPhone">טלפון לקוח</FieldLabel>
+                <FieldLabel htmlFor="clientPhone">{isOwner ? "טלפון בעל הנכס" : "טלפון לקוח"}</FieldLabel>
                 <TextInput id="clientPhone" value={form.clientPhone} onChange={(v) => set("clientPhone", v)}
                   placeholder="050-0000000" type="tel" error={errors.clientPhone} />
               </div>
@@ -1479,12 +1565,12 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <FieldLabel htmlFor="clientEmail" optional={form.skipEmailId}>אימייל לקוח</FieldLabel>
+                <FieldLabel htmlFor="clientEmail" optional={form.skipEmailId}>{isOwner ? "אימייל בעל הנכס" : "אימייל לקוח"}</FieldLabel>
                 <TextInput id="clientEmail" value={form.clientEmail} onChange={(v) => set("clientEmail", v)}
                   placeholder="client@example.com" type="email" disabled={form.skipEmailId} error={errors.clientEmail} />
               </div>
               <div>
-                <FieldLabel htmlFor="clientIdNumber" optional={form.skipEmailId}>תעודת זהות לקוח</FieldLabel>
+                <FieldLabel htmlFor="clientIdNumber" optional={form.skipEmailId}>{isOwner ? "תעודת זהות בעל הנכס" : "תעודת זהות לקוח"}</FieldLabel>
                 <TextInput id="clientIdNumber" value={form.clientIdNumber} onChange={(v) => set("clientIdNumber", v)}
                   placeholder="000000000" disabled={form.skipEmailId} error={errors.clientIdNumber} />
               </div>
@@ -1512,8 +1598,12 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                 </div>
               </div>
               <div>
-                <p className="text-sm font-medium text-gray-700">אין לי כרגע ת״ז / מייל — הלקוח ישלים לפני החתימה</p>
-                <p className="text-xs text-gray-400 mt-0.5">הלקוח יתבקש להשלים פרטים אלו לפני שיוכל לחתום על החוזה</p>
+                <p className="text-sm font-medium text-gray-700">
+                  {isOwner ? "אין לי כרגע ת״ז / מייל — בעל הנכס ישלים לפני החתימה" : "אין לי כרגע ת״ז / מייל — הלקוח ישלים לפני החתימה"}
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {isOwner ? "בעל הנכס יתבקש להשלים פרטים אלו לפני שיוכל לחתום על החוזה" : "הלקוח יתבקש להשלים פרטים אלו לפני שיוכל לחתום על החוזה"}
+                </p>
               </div>
             </label>
           </div>
@@ -1536,9 +1626,11 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                   commissionNis: "",
                   commissionPct: "",
                   rentalCommissionPreset: "one_month",
-                  // Rental template discloses the full address only after signing —
-                  // default to hidden; the broker can still uncheck manually.
-                  hideFullAddressFromClient: true,
+                  rentalCommissionMonths: "1",
+                  // Interested rental template discloses the full address only after
+                  // signing — default to hidden (broker can uncheck). The owner flow
+                  // never hides (the owner knows their own address).
+                  hideFullAddressFromClient: isOwner ? false : true,
                 }));
                 setErrors((prev) => { const n = { ...prev }; delete n.priceNis; delete n.commissionNis; delete n.commissionPct; return n; });
                 setStage((s) => s.name === "error" ? { name: "idle" } : s);
@@ -1565,14 +1657,18 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                   commissionNis: "",
                   commissionPct: "",
                   rentalCommissionPreset: "one_month",
+                  rentalCommissionMonths: "1",
                   hideFullAddressFromClient: false,
                 }));
                 setErrors((prev) => { const n = { ...prev }; delete n.priceNis; delete n.commissionNis; delete n.commissionPct; return n; });
                 setStage((s) => s.name === "error" ? { name: "idle" } : s);
               }}
+              disabled={isOwner}
               className={[
                 "flex items-center gap-2.5 px-5 py-3 rounded-xl border text-sm font-semibold transition-all",
-                form.dealType === "SALE"
+                isOwner
+                  ? "border-gray-100 bg-gray-50/70 text-gray-400 opacity-60 cursor-not-allowed select-none"
+                  : form.dealType === "SALE"
                   ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
                   : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
               ].join(" ")}>
@@ -1580,6 +1676,9 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                 <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" /><rect x="9" y="13" width="6" height="8" rx="0.5" />
               </svg>
               מכירה
+              {isOwner && (
+                <span className="text-[10px] font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">בקרוב</span>
+              )}
             </button>
 
             {/* גם וגם */}
@@ -1595,6 +1694,7 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                   commissionSalePct: "",
                   salePriceNis: "",
                   rentalCommissionPreset: "one_month",
+                  rentalCommissionMonths: "1",
                   commissionSaleMode: "percent",
                   hideFullAddressFromClient: false,
                 }));
@@ -1606,9 +1706,12 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                 });
                 setStage((s) => s.name === "error" ? { name: "idle" } : s);
               }}
+              disabled={isOwner}
               className={[
                 "flex items-center gap-2.5 px-5 py-3 rounded-xl border text-sm font-semibold transition-all",
-                form.dealType === "BOTH"
+                isOwner
+                  ? "border-gray-100 bg-gray-50/70 text-gray-400 opacity-60 cursor-not-allowed select-none"
+                  : form.dealType === "BOTH"
                   ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
                   : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
               ].join(" ")}>
@@ -1617,10 +1720,90 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                 <rect x="3" y="3" width="7" height="7" rx="1" fill="currentColor" stroke="none" opacity="0.3" />
               </svg>
               גם וגם
+              {isOwner && (
+                <span className="text-[10px] font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">בקרוב</span>
+              )}
             </button>
 
           </div>
         </Section>
+
+        {/* ══ 4b. Exclusivity period — owner-exclusive rental only ══════════ */}
+        {/* Only the computed start/end dates are sent to the API; duration mode
+            and text are UI-derived. End dates use the inclusive day-before
+            convention (3 months from 01.08 → 31.10). */}
+        {isOwner && (
+          <Section title="תקופת הבלעדיות" subtitle="התקופה בה המתווך משווק את הנכס בבלעדיות">
+            <div className="space-y-4">
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <FieldLabel htmlFor="exclusivityStart">תאריך התחלה</FieldLabel>
+                  <TextInput id="exclusivityStart" type="date" value={form.exclusivityStart}
+                    onChange={(v) => set("exclusivityStart", v)} error={errors.exclusivityStart} />
+                </div>
+              </div>
+
+              {/* Duration: quick month chips + custom end date */}
+              <div>
+                <FieldLabel>משך הבלעדיות</FieldLabel>
+                <div className="flex flex-wrap gap-2">
+                  {["1", "3", "6", "12"].map((m) => {
+                    const active = form.exclusivityDurationMode === "months" && form.exclusivityMonths === m;
+                    return (
+                      <button key={m} type="button"
+                        onClick={() => {
+                          setForm((prev) => ({ ...prev, exclusivityDurationMode: "months", exclusivityMonths: m }));
+                          setErrors((prev) => { const n = { ...prev }; delete n.exclusivityEnd; return n; });
+                        }}
+                        className={[
+                          "px-3 py-2 rounded-xl border text-xs font-semibold transition-all",
+                          active
+                            ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
+                            : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
+                        ].join(" ")}>
+                        {m === "1" ? "חודש אחד" : `${m} חודשים`}
+                      </button>
+                    );
+                  })}
+                  <button type="button"
+                    onClick={() => setForm((prev) => ({ ...prev, exclusivityDurationMode: "custom" }))}
+                    className={[
+                      "px-3 py-2 rounded-xl border text-xs font-semibold transition-all",
+                      form.exclusivityDurationMode === "custom"
+                        ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
+                        : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
+                    ].join(" ")}>
+                    תאריך מותאם אישית
+                  </button>
+                </div>
+              </div>
+
+              {form.exclusivityDurationMode === "custom" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel htmlFor="exclusivityEndCustom">תאריך סיום</FieldLabel>
+                    <TextInput id="exclusivityEndCustom" type="date" value={form.exclusivityEndCustom}
+                      onChange={(v) => set("exclusivityEndCustom", v)} error={errors.exclusivityEnd} />
+                  </div>
+                </div>
+              )}
+
+              {/* Computed period summary + non-blocking whole-months warning */}
+              {exclusivityStartDate && exclusivityEndDate && exclusivityEndDate > exclusivityStartDate && (
+                <p className="text-xs text-gray-500">
+                  תקופת הבלעדיות תסתיים ב-{toInputValue(exclusivityEndDate).split("-").reverse().join(".")}
+                </p>
+              )}
+              {form.exclusivityDurationMode === "custom" && exclusivityDur && !isWholeMonths(exclusivityDur) && (
+                <p className="text-xs text-amber-600">
+                  שים לב: תקופת הבלעדיות שנבחרה היא {durationTextHe(exclusivityDur)}.
+                </p>
+              )}
+
+            </div>
+          </Section>
+        )}
 
         {/* ══ 5. Property details ═══════════════════════════════════════════ */}
         {/* Appears after Deal Type so the price label ("מחיר הנכס" / "שכירות
@@ -1694,7 +1877,9 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
               </div>
             </div>
 
-            {/* Hide-address toggle */}
+            {/* Hide-address toggle — hidden for owner-exclusive: the owner knows
+                their own address, and the payload forces the flag to false. */}
+            {!isOwner && (
             <label className="flex items-start gap-3 cursor-pointer select-none group">
               <div className="relative mt-0.5 flex-shrink-0">
                 <input
@@ -1725,6 +1910,7 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                 </p>
               </div>
             </label>
+            )}
 
             {/* Row 4: Property price(s)
                 SALE   → "מחיר הנכס (₪)"      — stored as propertyPrice on Contract
@@ -1783,10 +1969,17 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
 
             {/* ── RENTAL presets (shared between RENTAL and the rental half of BOTH) */}
             {(form.dealType === "RENTAL" || form.dealType === "BOTH") && (() => {
-              const presets: { id: RentalCommissionPreset; label: string; sub?: string }[] = [
-                { id: "one_month",   label: "חודש שכירות",    sub: "×1"   },
-                { id: "fixed",       label: "סכום ידני (₪)"              },
-              ];
+              // Owner-exclusive: the months option opens a 1-12 selector below;
+              // interested flows keep the fixed one-month preset.
+              const presets: { id: RentalCommissionPreset; label: string; sub?: string }[] = isOwner
+                ? [
+                    { id: "one_month", label: "לפי חודשי שכירות"          },
+                    { id: "fixed",     label: "סכום ידני (₪)"              },
+                  ]
+                : [
+                    { id: "one_month", label: "חודש שכירות",    sub: "×1"  },
+                    { id: "fixed",     label: "סכום ידני (₪)"              },
+                  ];
               return (
                 <div>
                   <FieldLabel>{form.dealType === "BOTH" ? "עמלת שכירות" : "עמלת תיווך"}</FieldLabel>
@@ -1813,6 +2006,22 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                       </button>
                     ))}
                   </div>
+                  {/* Owner-exclusive: number of monthly rents (1-12) */}
+                  {isOwner && form.rentalCommissionPreset !== "fixed" && (
+                    <div className="mb-3">
+                      <select
+                        value={form.rentalCommissionMonths}
+                        onChange={(e) => set("rentalCommissionMonths", e.target.value)}
+                        className="w-full sm:w-56 px-3.5 py-2.5 rounded-xl border border-gray-200 bg-white text-base sm:text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                      >
+                        {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                          <option key={n} value={String(n)}>
+                            {n === 1 ? "חודש אחד" : `${n} חודשים`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   {form.rentalCommissionPreset === "fixed" && (
                     <div>
                       <TextInput id="commissionNis" value={form.commissionNis} onChange={(v) => set("commissionNis", formatNisInput(v))}
