@@ -59,6 +59,12 @@
  * NOTE: both commission clauses are dealType-aware — for dealType BOTH they use
  * the BOTH document's wording ("בעסקת מכר: …" / "בעסקת שכירות: …"), the sale
  * amount comes from commissionSale and the rental amount from commission.
+ * The rental clause is additionally templateKey-aware: OWNER_EXCLUSIVE_RENTAL
+ * uses the owner wording, incl. MONTHS mode (1-12 monthly rents, Hebrew words).
+ *
+ * Owner-exclusive (rental)
+ *   {{exclusivityStartDate}}  exclusivity period start, DD.MM.YYYY (fallback: "—")
+ *   {{exclusivityEndDate}}    exclusivity period end,   DD.MM.YYYY (fallback: "—")
  *
  * Dates & metadata
  *   {{today}}           contract creation date, DD.MM.YYYY
@@ -92,7 +98,7 @@ const p = prisma as any;
 // All {{placeholders}} listed above are supported.
 
 const TEMPLATES: Array<{
-  key: "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH";
+  key: "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_EXCLUSIVE_RENTAL";
   language: "HE" | "EN" | "FR" | "RU" | "AR";
   title: string;
   content: string;
@@ -255,6 +261,54 @@ const TEMPLATES: Array<{
 7. הלקוח מאשר כי המתווך המליץ לו להיעזר בשירותי עורך דין ו/או באנשי מקצוע מתאימים נוספים, בהתאם לצורך ולנסיבות העסקה.
 8. כל ויתור, דחייה, ארכה, הנחה או שינוי בתנאי מתנאי הסכם זה לא יהיו תקפים אלא אם נעשו בכתב ונחתמו על ידי הצדדים. אי־מימוש או עיכוב במימוש זכות כלשהי על ידי מי מהצדדים לא ייחשבו כוויתור על אותה זכות, והצד הזכאי יהיה רשאי לממש את זכויותיו, כולן או חלקן, בכל עת, בהתאם להסכם זה ולפי כל דין.
 9. ככל שמי מהצדדים להסכם זה כולל יותר מאדם או גורם אחד, יהיו כל יחידי אותו צד אחראים להתחייבויותיהם על פי הסכם זה ביחד ולחוד. חתימתו של אחד מיחידי אותו צד על כל מסמך, אישור, מכתב או התחייבות הקשורים להסכם זה, לביצועו או לנובע ממנו, תחייב גם את יתר יחידי אותו צד.`,
+    },
+
+    // ── OWNER_EXCLUSIVE_RENTAL · HE ───────────────────────────────────────────
+    // Exclusive rental marketing mandate (owner-side). Resolved by
+    // (contractType "החתמת בעל נכס / בלעדיות" + dealType RENTAL).
+    // Composed from the owner rental declarations text + the exclusivity clauses
+    // (5-8, 15) of the sale exclusivity agreement, adapted to rental; continuous
+    // numbering 1-16 in the approved legal order (declarations -> exclusivity ->
+    // fees -> general).
+    // • Clause 5 is the exclusivity period — {{exclusivityStartDate}} /
+    //   {{exclusivityEndDate}} come from Contract.exclusivityStartsAt/EndsAt.
+    // • Clause 11 is dynamic via {{rentalCommissionClause}} — owner wording:
+    //   MONTHS (1-12 monthly rents via rentalCommissionMonths) or FIXED amount.
+    // • Broker details are embedded in the body so they appear in the signed HTML
+    //   view; the client line is the property owner and includes {{clientAddress}}.
+    // • Property facts are NOT in the body (PropertyTable renders them); the
+    //   contract number is chrome-only.
+    // • The law-reference subtitle line is a platform addition for consistency.
+    {
+      key: "OWNER_EXCLUSIVE_RENTAL",
+      language: "HE",
+      title: "הזמנת שירותי תיווך בבלעדיות להשכרת נכס מקרקעין",
+      content: `הזמנת שירותי תיווך בבלעדיות להשכרת נכס מקרקעין
+בהתאם לחוק המתווכים במקרקעין התשנ״ו-1996
+
+המתווך: {{brokerName}}, ת.ז {{brokerIdNumber}}, רישיון מתווך מס׳ {{brokerLicense}}, טלפון {{brokerPhone}}
+הלקוח (בעל הנכס): {{clientName}}, ת.ז {{clientIdNumber}}, כתובת {{clientAddress}}, טלפון {{clientPhone}}, דוא״ל {{clientEmail}}
+
+הצהרות והתחייבויות הלקוח
+1. הלקוח מאשר ומצהיר כי הוא בעל הזכויות בנכס/ים המפורטים בהזמנה זו, או כי ניתנה לו הרשאה כדין מאת בעל/י הזכויות לפעול בקשר לנכס/ים, לרבות לצורך השכרה, לפי העניין.
+2. הלקוח מצהיר כי כל המידע שנמסר על ידו למתווך ביחס לנכס/ים, לרבות שטח הנכס, מצבו המשפטי, מצבו הפיזי, זהות בעלי הזכויות, תנאי העסקה וכל פרט מהותי אחר, הוא מידע נכון, מלא ומדויק למיטב ידיעתו.
+3. הלקוח מתחייב להעביר למתווך, בהקדם האפשרי, מסמכים עדכניים המעידים על הזכויות בנכס/ים, לרבות נסח רישום, אישור זכויות מרשות מקרקעי ישראל, אישור מהחברה המשכנת ו/או כל מסמך רלוונטי אחר, ככל שיידרש.
+4. הלקוח מסכים כי לצורך ביצוע פעולות השיווק והתיווך, יהיה המתווך רשאי למסור את פרטי הנכס/ים לגורמים רלוונטיים, ובכלל זה לשוכרים פוטנציאליים, מתווכים משתפים פעולה וגורמים נוספים הקשורים לקידום העסקה.
+מינוי המתווך ותקופת הבלעדיות
+5. הלקוח מזמין בזאת מהמתווך שירותי תיווך במקרקעין וממנה אותו לשווק את הנכס בבלעדיות, לתקופה שתחילתה ביום {{exclusivityStartDate}} וסיומה ביום {{exclusivityEndDate}}, להלן: "תקופת הבלעדיות".
+6. במהלך תקופת הבלעדיות יהיה המתווך הגורם המרכז את כלל פעולות השיווק של הנכס. הלקוח מתחייב שלא לפנות, להזמין, לקבל או לאפשר שירותי תיווך מגורם אחר ביחס לנכס בתקופה זו, וכן מתחייב כי כל פנייה, קשר, הצעה או משא ומתן עם שוכר, מתווך או כל גורם אחר בקשר לנכס ייעשו באמצעות המתווך בלבד.
+7. הלקוח מתחייב להודיע לכל גורם הפונה אליו ישירות בקשר לנכס, לרבות מתווכים או שוכרים פוטנציאליים, כי הנכס משווק באמצעות המתווך בבלעדיות. כמו כן, הלקוח מתחייב לסיים באופן מיידי כל התחייבות קודמת או מקבילה הסותרת את התחייבויותיו לפי הסכם זה.
+8. לאחר סיום תקופת הבלעדיות, וככל שלא נחתמה עסקת שכירות ביחס לנכס, ימשיך הסכם זה לשמש כהזמנת שירותי תיווך רגילה שאינה בבלעדיות. במקרה שבו עסקה תיחתם לאחר תום תקופת הבלעדיות כתוצאה מפעולת המתווך, טיפולו או קשר שנוצר בעקבותיו, יהיה המתווך זכאי לדמי תיווך בהתאם להוראות הסכם זה.
+9. הפרת התחייבויות הלקוח בתקופת הבלעדיות, לרבות פנייה או התקשרות עם מתווך אחר, ניהול משא ומתן שלא באמצעות המתווך או הסתרת פנייה בקשר לנכס, עלולה לפגוע ביכולתו של המתווך לשמש כגורם היעיל בעסקה. במקרה של הפרה כאמור, יהיה המתווך זכאי לפיצוי בשיעור מלוא דמי התיווך שהיו מגיעים לו אילו נכרתה העסקה באמצעותו, וזאת מבלי לגרוע מכל סעד או פיצוי נוסף בגין נזק שייגרם לו עקב ההפרה.
+דמי תיווך וזכאות המתווך
+10. הלקוח מתחייב לשלם למתווך דמי תיווך עם היווצרות התקשרות מחייבת ביחס לנכס/ים, לרבות חתימת הסכם שכירות או כל התחייבות מחייבת אחרת לביצוע עסקת שכירות, לפי המוקדם מביניהם.
+11. {{rentalCommissionClause}}
+12. דמי התיווך ישולמו למתווך הרשום בהזמנה זו, וכנגד תוצא ללקוח חשבונית מס כדין.
+13. מובהר כי זכותו של המתווך לקבל דמי תיווך מהלקוח אינה שוללת את זכותו לגבות דמי תיווך גם מהצד השני לעסקה, לרבות שוכר, לפי העניין.
+הוראות כלליות
+14. הלקוח מאשר כי הומלץ לו להיוועץ, טרם התקשרותו בעסקה ובמהלכה, עם עורך דין ו/או עם בעלי מקצוע מתאימים נוספים, לפי אופי העסקה והנסיבות.
+15. כל שינוי, ויתור, הנחה, דחייה או הסכמה אחרת ביחס להוראות הזמנה זו יהיו תקפים רק אם נערכו בכתב. הימנעות ממימוש זכות או עיכוב במימושה לא ייחשבו כוויתור, והצד הזכאי יהיה רשאי לממש את זכויותיו בכל עת, בהתאם להזמנה זו ולפי כל דין.
+16. ככל שהלקוח ו/או מי מהצדדים להזמנה זו כולל יותר מאדם אחד או גוף אחד, יחולו כל ההתחייבויות על כל אחד מהם ביחד ולחוד. חתימה של אחד מיחידי אותו צד על מסמך הקשור להזמנה, לעסקה או לביצועה, תחייב גם את יתר יחידי אותו צד.`,
     },
 
     // ── OWNER_EXCLUSIVE · HE ──────────────────────────────────────────────────
@@ -428,7 +482,7 @@ async function upsertTemplates() {
 
   // ── Sanity check: each HE template must have exactly 1 active row ─────────
   console.log("\n── Sanity check (HE templates) ───────────────────────────────");
-  for (const key of ["INTERESTED_BUYER", "OWNER_EXCLUSIVE", "BROKER_COOP", "INTERESTED_BUYER_RENTAL", "INTERESTED_BUYER_SALE", "INTERESTED_BUYER_BOTH"] as const) {
+  for (const key of ["INTERESTED_BUYER", "OWNER_EXCLUSIVE", "BROKER_COOP", "INTERESTED_BUYER_RENTAL", "INTERESTED_BUYER_SALE", "INTERESTED_BUYER_BOTH", "OWNER_EXCLUSIVE_RENTAL"] as const) {
     const rows = await p.contractTemplate.findMany({
       where: { templateKey: key, language: "HE", isActive: true },
       select: { id: true },

@@ -237,6 +237,7 @@ enum ContractTemplateKey {
   INTERESTED_BUYER_RENTAL   // החתמת מתעניין — שכירות (resolved when dealType = RENTAL)
   INTERESTED_BUYER_SALE     // החתמת מתעניין — מכירה (resolved when dealType = SALE)
   INTERESTED_BUYER_BOTH     // החתמת מתעניין — מכירה והשכרה (resolved when dealType = BOTH)
+  OWNER_EXCLUSIVE_RENTAL    // החתמת בעל נכס — בלעדיות להשכרה (resolved when dealType = RENTAL)
 }
 
 // How the rental brokerage fee was chosen by the broker. Drives the dynamic
@@ -245,6 +246,7 @@ enum ContractTemplateKey {
 enum RentalCommissionMode {
   ONE_MONTH   // חודש שכירות אחד
   FIXED       // סכום קבוע
+  MONTHS      // מספר חודשי שכירות (1–12) — rentalCommissionMonths holds the count (owner-exclusive rental)
 }
 
 // How the sale brokerage fee was chosen by the broker. Drives the dynamic
@@ -292,8 +294,16 @@ model Contract {
   commission      Int             // stored in agorot (rental commission for BOTH; full commission for SALE/RENTAL)
   commissionSale  Int?            // stored in agorot; only set when dealType = BOTH (sale-side commission)
   rentalCommissionMode RentalCommissionMode? // null for SALE/BOTH & legacy; drives rental clause 6.1 wording
+  rentalCommissionMonths Int?                // 1–12; set only when rentalCommissionMode = MONTHS (owner-exclusive rental)
   saleCommissionMode    SaleCommissionMode?  // null for non-sale-template & legacy; drives sale clause 5.1 wording
   saleCommissionPercent Float?               // human percent (2, 1.5); set only when saleCommissionMode = PERCENT
+
+  // Exclusivity period (owner-exclusive templates only; null elsewhere).
+  // End date follows the inclusive day-before convention in the UI
+  // (3 months from 01.08 -> 31.10). Rendered via {{exclusivityStartDate}} /
+  // {{exclusivityEndDate}} in the frozen generatedText.
+  exclusivityStartsAt DateTime?
+  exclusivityEndsAt   DateTime?
 
   // Dates
   createdAt       DateTime        @default(now())

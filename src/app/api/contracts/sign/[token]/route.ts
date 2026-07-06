@@ -21,6 +21,7 @@ const KEYS_REQUIRING_CLIENT_ADDRESS = new Set<string>([
   "INTERESTED_BUYER_RENTAL",
   "INTERESTED_BUYER_SALE",
   "INTERESTED_BUYER_BOTH",
+  "OWNER_EXCLUSIVE_RENTAL",
 ]);
 
 // ── GET /api/contracts/sign/[token] ──────────────────────────────────────────
@@ -571,8 +572,12 @@ export async function PATCH(
                 commission:      contract.commission,
                 commissionSale:  contract.commissionSale ?? null,
                 rentalCommissionMode: contract.rentalCommissionMode,
+                rentalCommissionMonths: contract.rentalCommissionMonths,
                 saleCommissionMode:   contract.saleCommissionMode,
                 saleCommissionPercent: contract.saleCommissionPercent,
+                templateKey:     contract.template?.templateKey ?? null,
+                exclusivityStartsAt: contract.exclusivityStartsAt,
+                exclusivityEndsAt:   contract.exclusivityEndsAt,
                 createdAt:       contract.createdAt,
               },
             });

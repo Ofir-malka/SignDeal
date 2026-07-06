@@ -514,3 +514,142 @@ describe("non-regression — SALE and RENTAL clause wordings unchanged", () => {
     expect(ctx.rentalCommissionClause).toBe('בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בסך ₪15,000, בתוספת מע"מ כדין.');
   });
 });
+
+// ─── buildContext — owner-exclusive rental clause (templateKey-aware) ─────────
+
+describe("buildContext — owner-exclusive rental commission clause", () => {
+  const OWNER_CONTRACT = {
+    ...CONTRACT,
+    dealType:    "RENTAL",
+    templateKey: "OWNER_EXCLUSIVE_RENTAL",
+    commission:  9_000_00,   // ₪9,000 (e.g. 2 × ₪4,500 rent)
+  };
+
+  it("MONTHS mode with 1 month", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...OWNER_CONTRACT, rentalCommissionMode: "MONTHS", rentalCommissionMonths: 1 },
+    });
+    expect(ctx.rentalCommissionClause).toBe('בעסקת שכירות, דמי התיווך יהיו בסכום השווה לדמי שכירות של חודש אחד, ללא תלות במשך תקופת השכירות, בתוספת מע"מ כדין.');
+  });
+
+  it("MONTHS mode with 2 months", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...OWNER_CONTRACT, rentalCommissionMode: "MONTHS", rentalCommissionMonths: 2 },
+    });
+    expect(ctx.rentalCommissionClause).toContain("דמי שכירות של שני חודשים, ללא תלות");
+  });
+
+  it("MONTHS mode with 6 months", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...OWNER_CONTRACT, rentalCommissionMode: "MONTHS", rentalCommissionMonths: 6 },
+    });
+    expect(ctx.rentalCommissionClause).toContain("דמי שכירות של שישה חודשים");
+  });
+
+  it("MONTHS mode with 12 months", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...OWNER_CONTRACT, rentalCommissionMode: "MONTHS", rentalCommissionMonths: 12 },
+    });
+    expect(ctx.rentalCommissionClause).toContain("דמי שכירות של שנים עשר חודשים");
+  });
+
+  it("FIXED mode states the stored commission amount", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...OWNER_CONTRACT, rentalCommissionMode: "FIXED" },
+    });
+    expect(ctx.rentalCommissionClause).toBe('בעסקת שכירות, דמי התיווך יהיו בסך של ₪9,000, בתוספת מע"מ כדין.');
+  });
+
+  it("MONTHS mode without a month count falls back to the fixed-amount wording", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...OWNER_CONTRACT, rentalCommissionMode: "MONTHS", rentalCommissionMonths: null },
+    });
+    expect(ctx.rentalCommissionClause).toContain("בסך של ₪9,000");
+  });
+
+  it("ONE_MONTH on the owner key is treated as one month (defensive)", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...OWNER_CONTRACT, rentalCommissionMode: "ONE_MONTH" },
+    });
+    expect(ctx.rentalCommissionClause).toContain("דמי שכירות של חודש אחד, ללא תלות");
+  });
+});
+
+// ─── buildContext — exclusivity period placeholders ───────────────────────────
+
+describe("buildContext — exclusivity period", () => {
+  it("formats persisted dates as DD.MM.YYYY", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: {
+        ...CONTRACT, dealType: "RENTAL", templateKey: "OWNER_EXCLUSIVE_RENTAL",
+        exclusivityStartsAt: new Date("2026-08-01T00:00:00"),
+        exclusivityEndsAt:   new Date("2026-10-31T00:00:00"),
+      },
+    });
+    expect(ctx.exclusivityStartDate).toBe("01.08.2026");
+    expect(ctx.exclusivityEndDate).toBe("31.10.2026");
+  });
+
+  it("falls back to '—' when dates are absent", () => {
+    const ctx = buildContext({ broker: BROKER, client: CLIENT, contract: CONTRACT });
+    expect(ctx.exclusivityStartDate).toBe("—");
+    expect(ctx.exclusivityEndDate).toBe("—");
+  });
+
+  it("resolveTemplate substitutes the exclusivity clause", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: {
+        ...CONTRACT, dealType: "RENTAL", templateKey: "OWNER_EXCLUSIVE_RENTAL",
+        exclusivityStartsAt: new Date("2026-08-01T00:00:00"),
+        exclusivityEndsAt:   new Date("2026-10-31T00:00:00"),
+      },
+    });
+    const out = resolveTemplate("לתקופה שתחילתה ביום {{exclusivityStartDate}} וסיומה ביום {{exclusivityEndDate}}", ctx);
+    expect(out).toBe("לתקופה שתחילתה ביום 01.08.2026 וסיומה ביום 31.10.2026");
+  });
+});
+
+// ─── Non-regression — INTERESTED clauses unchanged when templateKey is passed ─
+// The creation route now passes the resolved templateKey for EVERY contract.
+// The interested-client keys must hit the existing branches and produce
+// byte-identical output.
+
+describe("non-regression — INTERESTED wordings unchanged with templateKey passed", () => {
+  it("INTERESTED_BUYER_RENTAL one-month clause is byte-identical", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, dealType: "RENTAL", templateKey: "INTERESTED_BUYER_RENTAL", rentalCommissionMode: "ONE_MONTH" },
+    });
+    expect(ctx.rentalCommissionClause).toBe('בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בגובה חודש שכירות אחד, בתוספת מע"מ כדין.');
+  });
+
+  it("INTERESTED_BUYER_SALE percent clause is byte-identical", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, dealType: "SALE", templateKey: "INTERESTED_BUYER_SALE", saleCommissionMode: "PERCENT", saleCommissionPercent: 2 },
+    });
+    expect(ctx.saleCommissionClause).toBe('ברכישת נכס – סך השווה ל-2% ממחיר העסקה הכולל, בתוספת מע"מ כדין.');
+  });
+
+  it("INTERESTED_BUYER_BOTH clauses are byte-identical", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: {
+        ...CONTRACT, dealType: "BOTH", templateKey: "INTERESTED_BUYER_BOTH",
+        commission: 4_500_00, commissionSale: 30_000_00,
+        rentalCommissionMode: "ONE_MONTH", saleCommissionMode: "FIXED",
+      },
+    });
+    expect(ctx.rentalCommissionClause).toBe('בעסקת שכירות: סכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.');
+    expect(ctx.saleCommissionClause).toBe('בעסקת מכר: דמי תיווך בסך של ₪30,000, בתוספת מע"מ כדין.');
+  });
+});

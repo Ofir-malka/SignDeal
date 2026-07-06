@@ -80,6 +80,9 @@ export interface TemplateContext {
   rentalCommissionClause: string;
   // Dynamic sale clause 5.1 — full sentence built from the sale commission mode
   saleCommissionClause:   string;
+  // Exclusivity period (owner-exclusive templates) — DD.MM.YYYY, "—" when absent
+  exclusivityStartDate:   string;
+  exclusivityEndDate:     string;
   // Dates
   today:           string;   // DD.MM.YYYY
   contractId:      string;   // last 8 chars of id, uppercased
@@ -107,6 +110,16 @@ function isoToDateStr(iso: string | Date): string {
 
 const DEAL_TYPE_HE: Record<string, string> = { RENTAL: "שכירות", SALE: "מכירה", BOTH: "גם וגם" };
 
+// Hebrew month-count words for the owner-exclusive rental fee clause
+// ("דמי שכירות של חודש אחד / שני חודשים / ..."). Keys match the 1-12 range
+// enforced on Contract.rentalCommissionMonths.
+const HE_MONTH_WORDS: Record<number, string> = {
+  1: "חודש אחד",     2: "שני חודשים",    3: "שלושה חודשים",
+  4: "ארבעה חודשים", 5: "חמישה חודשים",  6: "שישה חודשים",
+  7: "שבעה חודשים",  8: "שמונה חודשים",  9: "תשעה חודשים",
+  10: "עשרה חודשים", 11: "אחד עשר חודשים", 12: "שנים עשר חודשים",
+};
+
 // ── Context builder ───────────────────────────────────────────────────────────
 
 export function buildContext(opts: {
@@ -131,9 +144,16 @@ export function buildContext(opts: {
     dealType:        string;    // "RENTAL" | "SALE" | "BOTH"
     commission:      number;    // agorot (rental commission for BOTH)
     commissionSale?: number | null;  // agorot; only set for BOTH
-    rentalCommissionMode?: "ONE_MONTH" | "FIXED" | null;  // drives clause 6.1; null -> ONE_MONTH wording
+    rentalCommissionMode?: "ONE_MONTH" | "FIXED" | "MONTHS" | null;  // drives the rental clause; null -> ONE_MONTH wording
+    rentalCommissionMonths?: number | null;               // 1-12; only when mode = MONTHS (owner-exclusive rental)
     saleCommissionMode?:   "PERCENT" | "FIXED" | null;    // drives sale clause 5.1; null -> FIXED wording
     saleCommissionPercent?: number | null;                // human percent (2, 1.5); only for PERCENT
+    // Resolved template key — selects template-specific clause wordings
+    // (e.g. OWNER_EXCLUSIVE_RENTAL vs the interested-client rental wording).
+    templateKey?:    string | null;
+    // Exclusivity period (owner-exclusive templates only)
+    exclusivityStartsAt?: Date | string | null;
+    exclusivityEndsAt?:   Date | string | null;
     createdAt:       Date | string;
   };
 }): TemplateContext {
@@ -144,7 +164,22 @@ export function buildContext(opts: {
   // matching the lawyer text of each document. Defaults to the one-month
   // wording when the mode is absent. The amount always comes from `commission`
   // (for BOTH that IS the rental-side commission).
-  const rentalCommissionClause = isBoth
+  const rentalCommissionClause = opts.contract.templateKey === "OWNER_EXCLUSIVE_RENTAL"
+    // Owner-exclusive rental wording: MONTHS states the chosen number of monthly
+    // rents (1-12, Hebrew words); ONE_MONTH is treated defensively as one month;
+    // FIXED (and any absent/incomplete mode) states the stored amount — always
+    // truthful and deterministic across regeneration.
+    ? (() => {
+        const m = opts.contract.rentalCommissionMonths;
+        if (opts.contract.rentalCommissionMode === "MONTHS" && m != null && HE_MONTH_WORDS[m]) {
+          return `בעסקת שכירות, דמי התיווך יהיו בסכום השווה לדמי שכירות של ${HE_MONTH_WORDS[m]}, ללא תלות במשך תקופת השכירות, בתוספת מע"מ כדין.`;
+        }
+        if (opts.contract.rentalCommissionMode === "ONE_MONTH") {
+          return `בעסקת שכירות, דמי התיווך יהיו בסכום השווה לדמי שכירות של ${HE_MONTH_WORDS[1]}, ללא תלות במשך תקופת השכירות, בתוספת מע"מ כדין.`;
+        }
+        return `בעסקת שכירות, דמי התיווך יהיו בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`;
+      })()
+    : isBoth
     ? (opts.contract.rentalCommissionMode === "FIXED"
         ? `בעסקת שכירות: דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`
         : `בעסקת שכירות: סכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.`)
@@ -184,9 +219,12 @@ export function buildContext(opts: {
     ...(opts.contract.commissionSale != null
       ? { commissionSale: formatAgorot(opts.contract.commissionSale) }
       : {}),
-    // Dynamic clauses — computed above; wording is dealType-aware (BOTH vs RENTAL/SALE).
+    // Dynamic clauses — computed above; wording is templateKey/dealType-aware.
     rentalCommissionClause,
     saleCommissionClause,
+    // Exclusivity period — deterministic from the persisted dates
+    exclusivityStartDate: opts.contract.exclusivityStartsAt ? isoToDateStr(opts.contract.exclusivityStartsAt) : "—",
+    exclusivityEndDate:   opts.contract.exclusivityEndsAt   ? isoToDateStr(opts.contract.exclusivityEndsAt)   : "—",
     today:           isoToDateStr(opts.contract.createdAt),
     contractId:      String(opts.contract.id).slice(-8).toUpperCase(),
   };
