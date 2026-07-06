@@ -191,8 +191,8 @@ const CARDS: CardDef[] = [
     iconBg:   "bg-indigo-50 text-indigo-600",
   },
   {
-    // Live — rental variant only; the form forces dealType=RENTAL for this
-    // category and the API rejects owner-exclusive SALE/BOTH.
+    // Live — rental + sale variants; the form defaults to RENTAL for this
+    // category (SALE selectable there) and the API rejects owner-exclusive BOTH.
     href:     "/contracts/new?type=owner-exclusive",
     icon:     <IconExclusivity />,
     title:    CONTRACT_TYPE.OWNER_EXCLUSIVE,

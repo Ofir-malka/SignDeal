@@ -946,8 +946,8 @@ const CONTRACT_TYPES: Array<{
     ),
   },
   {
-    // RENTAL-only in this phase — the form forces dealType=RENTAL and disables
-    // SALE/BOTH when this card is selected; the API also rejects owner+SALE/BOTH.
+    // RENTAL + SALE are live for this category (defaults to RENTAL when selected);
+    // BOTH is still disabled ("בקרוב") in the UI and rejected by the API.
     id: "exclusivity", label: CONTRACT_TYPE.OWNER_EXCLUSIVE, apiType: CONTRACT_TYPE.OWNER_EXCLUSIVE,
     subtitle: "הסכם בלעדיות עם בעל הנכס",
     iconBg: "bg-emerald-50 text-emerald-600", active: true,
@@ -1008,8 +1008,9 @@ function categoryDefaults(id: ContractTypeId): Partial<FormState> {
     exclusivityEndCustom: "",
   };
   if (id === "exclusivity") {
-    // Owner-exclusive supports RENTAL only in this phase: deal type forced,
-    // exclusivity period seeded (start = today, 3 months), address never hidden.
+    // Owner-exclusive defaults to RENTAL (SALE is selectable in the deal-type
+    // section; BOTH is still disabled). Exclusivity period seeded (start = today,
+    // 3 months), address never hidden.
     return {
       ...shared,
       dealType: "RENTAL",
@@ -1158,9 +1159,9 @@ export function NewContractForm({ subscription, initialContractType = "intereste
       : null;
 
   // Selecting a category applies its defaults (shared with the ?type= preselect
-  // path via categoryDefaults). The owner-exclusive flow supports RENTAL only in
-  // this phase: deal type is forced to RENTAL, SALE/BOTH are disabled in the UI,
-  // and the address-hiding toggle is hidden + forced off.
+  // path via categoryDefaults). The owner-exclusive flow defaults to RENTAL
+  // (SALE is also supported; BOTH stays disabled in the UI and blocked by the
+  // API), and the address-hiding toggle is hidden + forced off.
   function handleContractTypeSelect(id: ContractTypeId) {
     if (id === contractTypeId) return;
     setContractTypeId(id);
@@ -1692,12 +1693,9 @@ export function NewContractForm({ subscription, initialContractType = "intereste
                 setErrors((prev) => { const n = { ...prev }; delete n.priceNis; delete n.commissionNis; delete n.commissionPct; return n; });
                 setStage((s) => s.name === "error" ? { name: "idle" } : s);
               }}
-              disabled={isOwner}
               className={[
                 "flex items-center gap-2.5 px-5 py-3 rounded-xl border text-sm font-semibold transition-all",
-                isOwner
-                  ? "border-gray-100 bg-gray-50/70 text-gray-400 opacity-60 cursor-not-allowed select-none"
-                  : form.dealType === "SALE"
+                form.dealType === "SALE"
                   ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
                   : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
               ].join(" ")}>
@@ -1705,9 +1703,6 @@ export function NewContractForm({ subscription, initialContractType = "intereste
                 <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" /><rect x="9" y="13" width="6" height="8" rx="0.5" />
               </svg>
               מכירה
-              {isOwner && (
-                <span className="text-[10px] font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">בקרוב</span>
-              )}
             </button>
 
             {/* גם וגם */}
@@ -1757,7 +1752,7 @@ export function NewContractForm({ subscription, initialContractType = "intereste
           </div>
         </Section>
 
-        {/* ══ 4b. Exclusivity period — owner-exclusive rental only ══════════ */}
+        {/* ══ 4b. Exclusivity period — owner-exclusive only (rental + sale) ═ */}
         {/* Only the computed start/end dates are sent to the API; duration mode
             and text are UI-derived. End dates use the inclusive day-before
             convention (3 months from 01.08 → 31.10). */}
