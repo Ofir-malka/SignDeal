@@ -188,8 +188,10 @@ export function ContractDetail({ contract: c }: { contract: Contract }) {
                 { label: "עיר",      value: c.propertyCity    },
                 ...(floor     ? [{ label: "קומה", value: floor     }] : []),
                 ...(apartment ? [{ label: "דירה", value: apartment }] : []),
-                { label: "סוג עסקה", value: c.dealType        },
-                { label: "מחיר",     value: c.propertyPrice   },
+                { label: "סוג עסקה", value: c.dealType === "גם וגם" ? c.contractType : c.dealType },
+                { label: c.dealType === "מכירה" ? "מחיר רכישה" : "שכירות חודשית", value: c.propertyPrice },
+                ...(c.dealType === "גם וגם" && c.propertySalePrice
+                  ? [{ label: "מחיר מכירה", value: c.propertySalePrice }] : []),
               ];
             })()}
           />

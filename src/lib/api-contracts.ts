@@ -11,6 +11,7 @@ export type ApiContractResponse = {
   propertyAddress: string;
   propertyCity: string;
   propertyPrice: number;
+  propertySalePrice?: number | null;  // agorot; set only for dealType "BOTH" (propertyPrice = monthly rent there)
   commission: number;
   commissionSale: number | null;   // set only when dealType = "BOTH"; null for SALE/RENTAL
   dealClosed: boolean;
@@ -18,7 +19,7 @@ export type ApiContractResponse = {
   signedAt: string | null;
   dealClosedAt: string | null;
   createdAt: string;
-  client: { name: string; phone: string; email: string; idNumber: string };
+  client: { name: string; phone: string; email: string; idNumber: string; address?: string | null };
   payment: {
     status:     string;
     paidAt:     string | null;
@@ -35,6 +36,7 @@ export type ApiContractResponse = {
   generatedText?:  string | null;
   signatureToken?: string | null;
   language?:       string | null;
+  requiresClientAddress?: boolean;  // signing page only — whether the client must complete an address
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -91,9 +93,12 @@ export function apiToContract(c: ApiContractResponse): Contract {
     clientPhone:     c.client.phone,
     clientEmail:     c.client.email,
     clientId:        c.client.idNumber,
+    clientAddress:   c.client.address ?? "",
+    requiresClientAddress: c.requiresClientAddress ?? false,
     propertyAddress: c.propertyAddress,
     propertyCity:    c.propertyCity,
     propertyPrice:   formatAgorot(c.propertyPrice),
+    propertySalePrice: c.propertySalePrice != null ? formatAgorot(c.propertySalePrice) : null,
     createdDate:     isoToDateStr(c.createdAt) ?? "—",
     signedDate:      isoToDateStr(c.signedAt),
     paidDate:        isoToDateStr(c.payment?.paidAt ?? null),

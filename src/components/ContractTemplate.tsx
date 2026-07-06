@@ -71,8 +71,14 @@ function PropertyTable({
     [labels.address,    formatPropertyAddress(c.propertyAddress, c.propertyCity, revealFullAddress)],
     ...(floor     ? [[labels.floor,     floor    ] as [string, string]] : []),
     ...(apartment ? [[labels.apartment, apartment] as [string, string]] : []),
-    [labels.dealType,   c.dealType],
-    [labels.price,      c.propertyPrice],
+    // Display-only: for BOTH show the contract category ("החתמת מתעניין") instead of
+    // the internal "גם וגם" value. dealType itself is unchanged for all logic.
+    [labels.dealType,   c.dealType === "גם וגם" ? c.contractType : c.dealType],
+    // SALE → purchase price; RENTAL & BOTH → monthly rent (propertyPrice IS the rent there)
+    [c.dealType === "מכירה" ? labels.price : labels.monthlyRent, c.propertyPrice],
+    // BOTH only — sale asking price; hidden on legacy BOTH rows where it is absent
+    ...(c.dealType === "גם וגם" && c.propertySalePrice
+      ? [[labels.salePrice, c.propertySalePrice] as [string, string]] : []),
     // For BOTH: show rental commission first, then sale commission separately
     ...(c.dealType === "גם וגם" && c.commissionSale
       ? [["עמלת שכירות", c.commission] as [string, string], ["עמלת מכירה", c.commissionSale] as [string, string]]
@@ -277,8 +283,10 @@ export function ContractTemplate({
                     [labels.address,  formatPropertyAddress(c.propertyAddress, c.propertyCity, revealFullAddress)] as [string, string],
                     ...(fl  ? [[labels.floor,     fl ] as [string, string]] : []),
                     ...(apt ? [[labels.apartment, apt] as [string, string]] : []),
-                    [labels.dealType, c.dealType] as [string, string],
-                    [labels.price,    c.propertyPrice] as [string, string],
+                    [labels.dealType, c.dealType === "גם וגם" ? c.contractType : c.dealType] as [string, string],
+                    [c.dealType === "מכירה" ? labels.price : labels.monthlyRent, c.propertyPrice] as [string, string],
+                    ...(c.dealType === "גם וגם" && c.propertySalePrice
+                      ? [[labels.salePrice, c.propertySalePrice] as [string, string]] : []),
                   ];
                 })()).map(([label, value]) => (
                   <tr key={label} className="border-b border-gray-100 last:border-0">

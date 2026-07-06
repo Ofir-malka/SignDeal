@@ -407,8 +407,14 @@ export function ContractPDF({ contract: c, broker }: { contract: Contract; broke
       [labels.address,    formatPropertyAddress(c.propertyAddress, c.propertyCity, revealFullAddress)],
       ...(propFloor ? [[labels.floor,     propFloor] as [string, string]] : []),
       ...(propApt   ? [[labels.apartment, propApt  ] as [string, string]] : []),
-      [labels.dealType,   c.dealType],
-      [labels.price,      c.propertyPrice],
+      // Display-only: for BOTH show the contract category ("החתמת מתעניין") instead of
+      // the internal "גם וגם" value. dealType itself is unchanged for all logic.
+      [labels.dealType,   c.dealType === "גם וגם" ? c.contractType : c.dealType],
+      // SALE → purchase price; RENTAL & BOTH → monthly rent (propertyPrice IS the rent there)
+      [c.dealType === "מכירה" ? labels.price : labels.monthlyRent, c.propertyPrice],
+      // BOTH only — sale asking price; hidden on legacy BOTH rows where it is absent
+      ...(c.dealType === "גם וגם" && c.propertySalePrice
+        ? [[labels.salePrice, c.propertySalePrice] as [string, string]] : []),
       // BOTH: split into two commission rows
       ...(c.dealType === "גם וגם" && c.commissionSale
         ? [["עמלת שכירות", c.commission] as [string, string], ["עמלת מכירה", c.commissionSale] as [string, string]]
@@ -483,8 +489,10 @@ export function ContractPDF({ contract: c, broker }: { contract: Contract; broke
     [labels.address,  formatPropertyAddress(c.propertyAddress, c.propertyCity, revealFullAddress)],
     ...(fbFloor ? [[labels.floor,     fbFloor] as [string, string]] : []),
     ...(fbApt   ? [[labels.apartment, fbApt  ] as [string, string]] : []),
-    [labels.dealType, c.dealType],
-    [labels.price,    c.propertyPrice],
+    [labels.dealType, c.dealType === "גם וגם" ? c.contractType : c.dealType],
+    [c.dealType === "מכירה" ? labels.price : labels.monthlyRent, c.propertyPrice],
+    ...(c.dealType === "גם וגם" && c.propertySalePrice
+      ? [[labels.salePrice, c.propertySalePrice] as [string, string]] : []),
   ];
 
   const terms = [

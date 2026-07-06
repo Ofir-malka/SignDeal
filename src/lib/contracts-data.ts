@@ -28,9 +28,12 @@ export interface Contract {
   clientPhone:      string;
   clientEmail:      string;
   clientId:         string;
+  clientAddress:    string;   // residential address; "" when not yet completed
+  requiresClientAddress: boolean;  // signing-page flow requires the client to complete an address
   propertyAddress:  string;   // street only
   propertyCity:     string;
-  propertyPrice:    string;
+  propertyPrice:    string;   // monthly rent for RENTAL/BOTH, sale price for SALE (formatted ₪)
+  propertySalePrice?: string | null;  // sale price for BOTH (formatted ₪); null/absent otherwise
   createdDate:      string;
   signedDate:       string | null;
   paidDate:         string | null;

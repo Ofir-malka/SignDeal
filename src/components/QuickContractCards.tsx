@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { CONTRACT_TYPE } from "@/lib/contracts/contract-types";
 
 // ── Card data shape ────────────────────────────────────────────────────────────
 
@@ -184,28 +185,28 @@ const CARDS: CardDef[] = [
   {
     href:     "/contracts/new",
     icon:     <IconInterestedBuyer />,
-    title:    "החתמת מתעניין",
+    title:    CONTRACT_TYPE.INTERESTED,
     subtitle: "רישום הסכמת רוכש או שוכר פוטנציאלי",
     iconBg:   "bg-indigo-50 text-indigo-600",
   },
   {
     // Disabled — template pending legal sign-off
     icon:    <IconExclusivity />,
-    title:   "החתמת בעל נכס / בלעדיות",
+    title:   CONTRACT_TYPE.OWNER_EXCLUSIVE,
     subtitle: "הסכם בלעדיות עם בעל הנכס",
     iconBg:  "bg-emerald-50 text-emerald-600",
   },
   {
     // Disabled — template pending legal sign-off
     icon:    <IconCooperation />,
-    title:   "הסכם שיתוף פעולה בין מתווכים",
+    title:   CONTRACT_TYPE.BROKER_COOP,
     subtitle: "שיתוף עסקה עם מתווך שותף",
     iconBg:  "bg-violet-50 text-violet-600",
   },
   {
     // Disabled — not yet designed
     icon:    <IconTransfer />,
-    title:   "העברת לקוח בין מתווכים",
+    title:   CONTRACT_TYPE.TRANSFER,
     subtitle: "רישום העברת לקוח ממתווך אחר",
     iconBg:  "bg-rose-50 text-rose-500",
   },

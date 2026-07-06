@@ -68,6 +68,7 @@ export interface TemplateContext {
   clientIdNumber:  string;
   clientPhone:     string;
   clientEmail:     string;
+  clientAddress:   string;   // residential address; "—" until completed on the signing page
   // Property + deal
   propertyAddress: string;
   propertyCity:    string;
@@ -75,6 +76,10 @@ export interface TemplateContext {
   dealType:        string;   // "שכירות" | "מכירה" | "גם וגם"
   commission:      string;   // formatted: "₪15,000" (rental commission for BOTH)
   commissionSale?: string;   // formatted: "₪30,000" — sale commission; set only for BOTH
+  // Dynamic rental clause 6.1 — full sentence built from the commission mode
+  rentalCommissionClause: string;
+  // Dynamic sale clause 5.1 — full sentence built from the sale commission mode
+  saleCommissionClause:   string;
   // Dates
   today:           string;   // DD.MM.YYYY
   contractId:      string;   // last 8 chars of id, uppercased
@@ -116,6 +121,7 @@ export function buildContext(opts: {
     idNumber: string;
     phone:    string;
     email:    string;
+    address?: string | null;   // residential address; optional (completed at signing time)
   };
   contract: {
     id:              string;
@@ -125,9 +131,41 @@ export function buildContext(opts: {
     dealType:        string;    // "RENTAL" | "SALE" | "BOTH"
     commission:      number;    // agorot (rental commission for BOTH)
     commissionSale?: number | null;  // agorot; only set for BOTH
+    rentalCommissionMode?: "ONE_MONTH" | "FIXED" | null;  // drives clause 6.1; null -> ONE_MONTH wording
+    saleCommissionMode?:   "PERCENT" | "FIXED" | null;    // drives sale clause 5.1; null -> FIXED wording
+    saleCommissionPercent?: number | null;                // human percent (2, 1.5); only for PERCENT
     createdAt:       Date | string;
   };
 }): TemplateContext {
+  const isBoth = opts.contract.dealType === "BOTH";
+
+  // Dynamic rental clause — wording differs between the RENTAL template
+  // ("בעסקאות שכירות ישלם הלקוח…") and the BOTH template ("בעסקת שכירות: …"),
+  // matching the lawyer text of each document. Defaults to the one-month
+  // wording when the mode is absent. The amount always comes from `commission`
+  // (for BOTH that IS the rental-side commission).
+  const rentalCommissionClause = isBoth
+    ? (opts.contract.rentalCommissionMode === "FIXED"
+        ? `בעסקת שכירות: דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`
+        : `בעסקת שכירות: סכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.`)
+    : (opts.contract.rentalCommissionMode === "FIXED"
+        ? `בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בסך ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`
+        : `בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בגובה חודש שכירות אחד, בתוספת מע"מ כדין.`);
+
+  // Dynamic sale clause — PERCENT states the broker's chosen percentage; FIXED
+  // (and any absent/incomplete mode) states the stored amount, which is always
+  // truthful and deterministic across regeneration.
+  // CRITICAL: for BOTH the sale-side amount lives in `commissionSale`
+  // (`commission` is the rental side there); for SALE it lives in `commission`.
+  const salePct = opts.contract.saleCommissionPercent;
+  const saleCommissionClause = isBoth
+    ? (opts.contract.saleCommissionMode === "PERCENT" && salePct != null
+        ? `בעסקת מכר: בשיעור של ${String(Number(salePct.toFixed(2)))}% ממחיר הרכישה הכולל של הנכס, בתוספת מע"מ כדין.`
+        : `בעסקת מכר: דמי תיווך בסך של ${formatAgorot(opts.contract.commissionSale ?? opts.contract.commission)}, בתוספת מע"מ כדין.`)
+    : (opts.contract.saleCommissionMode === "PERCENT" && salePct != null
+        ? `ברכישת נכס – סך השווה ל-${String(Number(salePct.toFixed(2)))}% ממחיר העסקה הכולל, בתוספת מע"מ כדין.`
+        : `ברכישת נכס – דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`);
+
   return {
     brokerName:      opts.broker.fullName,
     brokerLicense:   opts.broker.licenseNumber ?? "—",
@@ -137,6 +175,7 @@ export function buildContext(opts: {
     clientIdNumber:  opts.client.idNumber      || "—",
     clientPhone:     opts.client.phone,
     clientEmail:     opts.client.email         || "—",
+    clientAddress:   opts.client.address?.trim() || "—",
     propertyAddress: parsePropertyAddress(opts.contract.propertyAddress).address,
     propertyCity:    opts.contract.propertyCity,
     propertyPrice:   formatAgorot(opts.contract.propertyPrice),
@@ -145,6 +184,9 @@ export function buildContext(opts: {
     ...(opts.contract.commissionSale != null
       ? { commissionSale: formatAgorot(opts.contract.commissionSale) }
       : {}),
+    // Dynamic clauses — computed above; wording is dealType-aware (BOTH vs RENTAL/SALE).
+    rentalCommissionClause,
+    saleCommissionClause,
     today:           isoToDateStr(opts.contract.createdAt),
     contractId:      String(opts.contract.id).slice(-8).toUpperCase(),
   };

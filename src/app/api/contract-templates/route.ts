@@ -46,7 +46,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "content is required" }, { status: 400 });
     }
 
-    const VALID_KEYS  = ["INTERESTED_BUYER", "OWNER_EXCLUSIVE", "BROKER_COOP"];
+    const VALID_KEYS  = ["INTERESTED_BUYER", "OWNER_EXCLUSIVE", "BROKER_COOP", "INTERESTED_BUYER_RENTAL", "INTERESTED_BUYER_SALE", "INTERESTED_BUYER_BOTH"];
     const VALID_LANGS = ["HE", "EN", "FR", "RU", "AR"];
 
     const resolvedKey  = templateKey && VALID_KEYS.includes(templateKey)   ? templateKey              : undefined;

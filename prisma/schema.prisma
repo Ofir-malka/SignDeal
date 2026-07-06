@@ -108,6 +108,7 @@ model Client {
   phone     String
   email     String
   idNumber  String
+  address   String?                          // residential address; completed by the client on the signing page
   createdAt DateTime   @default(now())
   contracts Contract[]
   messages  Message[]
@@ -230,9 +231,28 @@ model StripePayoutEvent {
 // ── ContractTemplate ───────────────────────────────────────────────────────────
 
 enum ContractTemplateKey {
-  INTERESTED_BUYER   // החתמת מתעניין
-  OWNER_EXCLUSIVE    // החתמת בעל נכס / בלעדיות
-  BROKER_COOP        // הסכם שיתוף פעולה בין מתווכים
+  INTERESTED_BUYER          // החתמת מתעניין
+  OWNER_EXCLUSIVE           // החתמת בעל נכס / בלעדיות
+  BROKER_COOP               // הסכם שיתוף פעולה בין מתווכים
+  INTERESTED_BUYER_RENTAL   // החתמת מתעניין — שכירות (resolved when dealType = RENTAL)
+  INTERESTED_BUYER_SALE     // החתמת מתעניין — מכירה (resolved when dealType = SALE)
+  INTERESTED_BUYER_BOTH     // החתמת מתעניין — מכירה והשכרה (resolved when dealType = BOTH)
+}
+
+// How the rental brokerage fee was chosen by the broker. Drives the dynamic
+// wording of clause 6.1 in the INTERESTED_BUYER_RENTAL template. Null for
+// SALE/BOTH and for every legacy contract.
+enum RentalCommissionMode {
+  ONE_MONTH   // חודש שכירות אחד
+  FIXED       // סכום קבוע
+}
+
+// How the sale brokerage fee was chosen by the broker. Drives the dynamic
+// wording of clause 5.1 in the INTERESTED_BUYER_SALE template. Null for
+// non-sale flows and for every legacy contract.
+enum SaleCommissionMode {
+  PERCENT   // אחוז ממחיר העסקה
+  FIXED     // סכום קבוע
 }
 
 enum ContractTemplateLanguage {
@@ -267,9 +287,13 @@ model Contract {
   // Property
   propertyAddress String
   propertyCity    String
-  propertyPrice   Int             // stored in agorot (smallest currency unit)
+  propertyPrice   Int             // stored in agorot (smallest currency unit; monthly rent for RENTAL/BOTH, sale price for SALE)
+  propertySalePrice Int?          // agorot; sale asking price — set only for dealType BOTH (propertyPrice = monthly rent there)
   commission      Int             // stored in agorot (rental commission for BOTH; full commission for SALE/RENTAL)
   commissionSale  Int?            // stored in agorot; only set when dealType = BOTH (sale-side commission)
+  rentalCommissionMode RentalCommissionMode? // null for SALE/BOTH & legacy; drives rental clause 6.1 wording
+  saleCommissionMode    SaleCommissionMode?  // null for non-sale-template & legacy; drives sale clause 5.1 wording
+  saleCommissionPercent Float?               // human percent (2, 1.5); set only when saleCommissionMode = PERCENT
 
   // Dates
   createdAt       DateTime        @default(now())
