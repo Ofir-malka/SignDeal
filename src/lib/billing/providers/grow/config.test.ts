@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   isGrowSaasEnabled,
   isGrowSaasRecurringEnabled,
+  isGrowSaasWebhookEnabled,
   getGrowSaasHost,
   getGrowSaasCreatePaymentProcessUrl,
   getGrowSaasGetPaymentProcessInfoUrl,
@@ -10,7 +11,7 @@ import {
   getGrowSaasPageCode,
 } from "./config";
 
-const KEYS = ["GROW_SAAS_ENABLED", "ENABLE_GROW_RECURRING_CHARGES", "GROW_SAAS_ENVIRONMENT", "GROW_SAAS_HOST", "GROW_SAAS_USER_ID", "GROW_SAAS_PAGECODE"];
+const KEYS = ["GROW_SAAS_ENABLED", "ENABLE_GROW_RECURRING_CHARGES", "GROW_SAAS_WEBHOOK_ENABLED", "GROW_SAAS_ENVIRONMENT", "GROW_SAAS_HOST", "GROW_SAAS_USER_ID", "GROW_SAAS_PAGECODE"];
 const saved: Record<string, string | undefined> = {};
 
 beforeEach(() => { for (const k of KEYS) { saved[k] = process.env[k]; delete process.env[k]; } });
@@ -47,6 +48,12 @@ describe("grow saas config", () => {
     expect(isGrowSaasRecurringEnabled()).toBe(false);
     process.env.ENABLE_GROW_RECURRING_CHARGES = "true";
     expect(isGrowSaasRecurringEnabled()).toBe(true);
+  });
+
+  it("isGrowSaasWebhookEnabled defaults off (shadow mode), true when 'true'", () => {
+    expect(isGrowSaasWebhookEnabled()).toBe(false);
+    process.env.GROW_SAAS_WEBHOOK_ENABLED = "true";
+    expect(isGrowSaasWebhookEnabled()).toBe(true);
   });
 
   it("userId / pageCode are required", () => {

@@ -1,21 +1,33 @@
 /**
- * POST /api/grow/webhook  —  Grow CreatePaymentLink server-to-server callback (P3b).
+ * POST /api/grow/webhook — Grow webhook DISPATCHER (flat URL, both rails).
  *
- * Flat URL (no token path) — Grow already has this exact URL configured. The
- * callback is only the TRIGGER; the authoritative PAID decision comes from a
- * getPaymentLinkInfo re-fetch inside the handler (verify-then-trust). All logic +
- * idempotency live in processGrowPaymentCallback; this route is a thin shell.
+ * Grow sends every server-to-server callback to this ONE fixed URL (no path token —
+ * already configured in the Grow dashboard). Two unrelated flows land here, and they
+ * must never mix:
  *
- * Returns 200 for terminal outcomes; 5xx only on our transient errors so Grow
- * retries (reprocessing is idempotent via the Payment status guard). No secrets
- * are logged here.
+ *   "payment" → RAIL B client→broker brokerage (CreatePaymentLink callbacks).
+ *               Handler: @/lib/payments/providers/grow/webhook-handler
+ *               Capture: WebhookEvent provider 'grow_payment'
+ *   "saas"    → RAIL A broker→SignDeal SaaS billing (cField1 "saas_*" namespaces /
+ *               SaaS-merchant identity). Handler: @/lib/billing/providers/grow/webhook-handler
+ *               Capture: WebhookEvent provider 'grow_saas'
+ *               SHADOW MODE by default (GROW_SAAS_WEBHOOK_ENABLED=false → capture only).
  *
- * Captured/audited in WebhookEvent (provider 'grow_payment'):
- *   SELECT "eventId","eventType","payload","status","processedAt"
- *   FROM "WebhookEvent" WHERE provider = 'grow_payment' ORDER BY "processedAt" DESC;
+ * This route is the ONLY file that touches both rails (app routes are outside the
+ * ESLint rail walls); it stays a thin shell — read raw body, classify (pure), dispatch,
+ * return. The callback is only a TRIGGER on both rails; the authoritative decision
+ * comes from each handler's own verify-then-trust re-fetch. Rail B behavior and its
+ * 200-terminal / 5xx-transient contract are unchanged.
+ *
+ * Audit:
+ *   SELECT provider, "eventType", status, error, "processedAt"
+ *   FROM "WebhookEvent" WHERE provider IN ('grow_payment','grow_saas')
+ *   ORDER BY "processedAt" DESC;
  */
 
+import { classifyGrowCallback } from "./classify";
 import { processGrowPaymentCallback } from "@/lib/payments/providers/grow/webhook-handler";
+import { processGrowSaasCallback } from "@/lib/billing/providers/grow/webhook-handler";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,18 +41,25 @@ function clientIp(req: Request): string | null {
 export async function POST(req: Request): Promise<Response> {
   try {
     const rawText = await req.text();
-    const result = await processGrowPaymentCallback({
-      rawText,
-      contentType: req.headers.get("content-type"),
-      sourceIp: clientIp(req),
-    });
+    const contentType = req.headers.get("content-type");
+    const sourceIp = clientIp(req);
+
+    // Pure classification — no payload/secret logged, telemetry only.
+    const cls = classifyGrowCallback(rawText, contentType);
+    console.log(`[grow/webhook] classified=${cls.rail} reason=${cls.reason}`);
+
+    const result =
+      cls.rail === "saas"
+        ? await processGrowSaasCallback({ rawText, contentType, sourceIp })
+        : await processGrowPaymentCallback({ rawText, contentType, sourceIp });
+
     return new Response(JSON.stringify({ received: result.outcome }), {
       status: result.httpStatus,
       headers: { "Content-Type": "application/json" },
     });
   } catch (err) {
     // Unexpected (e.g. DB unavailable). 5xx so Grow retries — reprocessing is
-    // idempotent (Payment status guard). No payload/secret is logged.
+    // idempotent on both rails (status guards + claim gates). No payload/secret logged.
     console.error("[grow/webhook] unexpected error:", err instanceof Error ? err.message : String(err));
     return new Response(JSON.stringify({ received: false }), {
       status: 500,
