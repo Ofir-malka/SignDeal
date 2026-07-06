@@ -177,9 +177,10 @@ function IconTransfer() {
 
 // ── Card definitions ───────────────────────────────────────────────────────────
 //
-// Only "החתמת מתעניין" is wired to a live contract flow.
-// The remaining three are placeholders pending lawyer-approved templates.
-// They are intentionally left disabled (no href) until further notice.
+// "החתמת מתעניין" and "החתמת בעל נכס / בלעדיות" are wired to live contract
+// flows (the owner-exclusive card deep-links with ?type= so the form opens
+// preselected on that category). The remaining two are placeholders pending
+// lawyer-approved templates and are intentionally left disabled (no href).
 
 const CARDS: CardDef[] = [
   {
@@ -190,11 +191,13 @@ const CARDS: CardDef[] = [
     iconBg:   "bg-indigo-50 text-indigo-600",
   },
   {
-    // Disabled — template pending legal sign-off
-    icon:    <IconExclusivity />,
-    title:   CONTRACT_TYPE.OWNER_EXCLUSIVE,
+    // Live — rental variant only; the form forces dealType=RENTAL for this
+    // category and the API rejects owner-exclusive SALE/BOTH.
+    href:     "/contracts/new?type=owner-exclusive",
+    icon:     <IconExclusivity />,
+    title:    CONTRACT_TYPE.OWNER_EXCLUSIVE,
     subtitle: "הסכם בלעדיות עם בעל הנכס",
-    iconBg:  "bg-emerald-50 text-emerald-600",
+    iconBg:   "bg-emerald-50 text-emerald-600",
   },
   {
     // Disabled — template pending legal sign-off

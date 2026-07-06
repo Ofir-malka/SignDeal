@@ -921,7 +921,7 @@ function TextInput({ id, value, onChange, placeholder, type = "text", error, dis
 // match the route's resolution maps byte-for-byte). They usually coincide, but
 // a card may show a shortened display label (e.g. cooperation).
 
-type ContractTypeId = "interested" | "exclusivity" | "cooperation" | "transfer";
+export type ContractTypeId = "interested" | "exclusivity" | "cooperation" | "transfer";
 
 const CONTRACT_TYPES: Array<{
   id:       ContractTypeId;
@@ -988,6 +988,40 @@ const CONTRACT_TYPES: Array<{
     ),
   },
 ];
+
+// ── Per-category form defaults ─────────────────────────────────────────────────
+// Applied both when a card is clicked AND when the page preselects a category
+// via the validated ?type= query param (dashboard quick cards deep-link here).
+// One source of truth so both entry paths produce identical form state.
+// For "interested" the values match INITIAL exactly, so a no-param visit stays
+// bit-identical to the historical default.
+function categoryDefaults(id: ContractTypeId): Partial<FormState> {
+  const shared = {
+    priceNis: "", commissionNis: "", commissionPct: "",
+    commissionSaleNis: "", commissionSalePct: "", salePriceNis: "",
+    rentalCommissionPreset: "one_month" as RentalCommissionPreset,
+    rentalCommissionMonths: "1",
+    commissionSaleMode: "percent" as CommissionMode,
+    hideFullAddressFromClient: false,
+    exclusivityDurationMode: "months" as const,
+    exclusivityMonths: "3",
+    exclusivityEndCustom: "",
+  };
+  if (id === "exclusivity") {
+    // Owner-exclusive supports RENTAL only in this phase: deal type forced,
+    // exclusivity period seeded (start = today, 3 months), address never hidden.
+    return {
+      ...shared,
+      dealType: "RENTAL",
+      exclusivityStart: toInputValue(new Date()),
+    };
+  }
+  return {
+    ...shared,
+    dealType: "SALE",
+    exclusivityStart: "",
+  };
+}
 
 // ── Success screen ─────────────────────────────────────────────────────────────
 
@@ -1068,8 +1102,13 @@ function CommissionPreviewChip({ label }: { label: string }) {
 
 // ── Main form ──────────────────────────────────────────────────────────────────
 
-export function NewContractForm({ subscription }: { subscription?: SubscriptionStatus }) {
-  const [form,   setForm]   = useState<FormState>(INITIAL);
+export function NewContractForm({ subscription, initialContractType = "interested" }: {
+  subscription?: SubscriptionStatus;
+  initialContractType?: ContractTypeId;   // validated by the page's ?type= allowlist
+}) {
+  // Lazy initializer: arriving via ?type=owner-exclusive produces exactly the
+  // same state as clicking the owner-exclusive card (shared categoryDefaults).
+  const [form,   setForm]   = useState<FormState>(() => ({ ...INITIAL, ...categoryDefaults(initialContractType) }));
   const [stage,  setStage]  = useState<Stage>({ name: "idle" });
   const [errors, setErrors] = useState<FieldError>({});
   const firstErrorRef = useRef<HTMLDivElement>(null);
@@ -1101,7 +1140,7 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
 
   // Contract category selection — drives the payload's contractType string.
   // Only cards with active:true are selectable.
-  const [contractTypeId, setContractTypeId] = useState<ContractTypeId>("interested");
+  const [contractTypeId, setContractTypeId] = useState<ContractTypeId>(initialContractType);
   const isOwner = contractTypeId === "exclusivity";
 
   // ── Exclusivity period derivation (owner-exclusive rental only) ────────────
@@ -1118,27 +1157,14 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
       ? exclusivityDuration(exclusivityStartDate, exclusivityEndDate)
       : null;
 
-  // Selecting a category applies its defaults. The owner-exclusive flow supports
-  // RENTAL only in this phase: deal type is forced to RENTAL, SALE/BOTH are
-  // disabled in the UI, and the address-hiding toggle is hidden + forced off
-  // (the owner already knows their own address).
+  // Selecting a category applies its defaults (shared with the ?type= preselect
+  // path via categoryDefaults). The owner-exclusive flow supports RENTAL only in
+  // this phase: deal type is forced to RENTAL, SALE/BOTH are disabled in the UI,
+  // and the address-hiding toggle is hidden + forced off.
   function handleContractTypeSelect(id: ContractTypeId) {
     if (id === contractTypeId) return;
     setContractTypeId(id);
-    setForm((prev) => ({
-      ...prev,
-      dealType: id === "exclusivity" ? "RENTAL" : "SALE",
-      priceNis: "", commissionNis: "", commissionPct: "",
-      commissionSaleNis: "", commissionSalePct: "", salePriceNis: "",
-      rentalCommissionPreset: "one_month",
-      rentalCommissionMonths: "1",
-      commissionSaleMode: "percent",
-      hideFullAddressFromClient: false,
-      exclusivityStart: id === "exclusivity" ? toInputValue(new Date()) : "",
-      exclusivityDurationMode: "months",
-      exclusivityMonths: "3",
-      exclusivityEndCustom: "",
-    }));
+    setForm((prev) => ({ ...prev, ...categoryDefaults(id) }));
     setErrors({});
     setStage((s) => (s.name === "error" ? { name: "idle" } : s));
   }
@@ -1474,8 +1500,11 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
         signatureToken={stage.signatureToken}
         clientName={stage.clientName}
         onCreateAnother={() => {
-          setForm(INITIAL); setErrors({}); setStage({ name: "idle" });
-          setContractTypeId("interested");
+          // Reset to the ENTRY category (not always "interested") — a broker who
+          // arrived via the owner-exclusive dashboard card stays in that flow.
+          setForm({ ...INITIAL, ...categoryDefaults(initialContractType) });
+          setErrors({}); setStage({ name: "idle" });
+          setContractTypeId(initialContractType);
           setSelectedClientId(null); setSelectedClientName(null);
           setSelectedPropertyId(null); setSelectedPropertyAddr(null);
         }}
