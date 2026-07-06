@@ -22,6 +22,7 @@ const KEYS_REQUIRING_CLIENT_ADDRESS = new Set<string>([
   "INTERESTED_BUYER_SALE",
   "INTERESTED_BUYER_BOTH",
   "OWNER_EXCLUSIVE_RENTAL",
+  "OWNER_EXCLUSIVE_SALE",
 ]);
 
 // ── GET /api/contracts/sign/[token] ──────────────────────────────────────────

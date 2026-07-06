@@ -193,7 +193,14 @@ export function buildContext(opts: {
   // CRITICAL: for BOTH the sale-side amount lives in `commissionSale`
   // (`commission` is the rental side there); for SALE it lives in `commission`.
   const salePct = opts.contract.saleCommissionPercent;
-  const saleCommissionClause = isBoth
+  const saleCommissionClause = opts.contract.templateKey === "OWNER_EXCLUSIVE_SALE"
+    // Owner-exclusive sale wording: PERCENT states the broker's chosen percentage
+    // of the sale price; FIXED (and any absent/incomplete mode) states the stored
+    // amount from `commission` — truthful and deterministic across regeneration.
+    ? (opts.contract.saleCommissionMode === "PERCENT" && salePct != null
+        ? `בעסקת מכר, דמי התיווך יהיו בשיעור של ${String(Number(salePct.toFixed(2)))}% ממחיר המכירה הכולל של הנכס, בתוספת מע"מ כדין.`
+        : `בעסקת מכר, דמי התיווך יהיו בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`)
+    : isBoth
     ? (opts.contract.saleCommissionMode === "PERCENT" && salePct != null
         ? `בעסקת מכר: בשיעור של ${String(Number(salePct.toFixed(2)))}% ממחיר הרכישה הכולל של הנכס, בתוספת מע"מ כדין.`
         : `בעסקת מכר: דמי תיווך בסך של ${formatAgorot(opts.contract.commissionSale ?? opts.contract.commission)}, בתוספת מע"מ כדין.`)

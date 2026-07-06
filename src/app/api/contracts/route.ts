@@ -345,13 +345,13 @@ export async function POST(request: Request) {
       validatedPropertySalePrice = vPropertySalePrice.value;
     }
 
-    // ── Owner-exclusive: only the RENTAL variant is implemented ───────────────
-    // Blocks direct API posts for SALE/BOTH so they cannot fall back to the
-    // legacy OWNER_EXCLUSIVE placeholder template (not lawyer-approved).
-    // Remove per-dealType as OWNER_EXCLUSIVE_SALE / _BOTH templates ship.
-    if (contractType === CONTRACT_TYPE.OWNER_EXCLUSIVE && validatedDealType !== "RENTAL") {
+    // ── Owner-exclusive: RENTAL and SALE variants are implemented ─────────────
+    // BOTH is still blocked so direct API posts cannot fall back to the legacy
+    // OWNER_EXCLUSIVE placeholder template (not lawyer-approved).
+    // Remove when OWNER_EXCLUSIVE_BOTH ships.
+    if (contractType === CONTRACT_TYPE.OWNER_EXCLUSIVE && validatedDealType === "BOTH") {
       return NextResponse.json(
-        { error: "חוזה בלעדיות נתמך כרגע לעסקאות שכירות בלבד" },
+        { error: "חוזה בלעדיות אינו נתמך עדיין לעסקה משולבת (מכירה והשכרה)" },
         { status: 400 },
       );
     }
@@ -419,7 +419,8 @@ export async function POST(request: Request) {
       },
       [CONTRACT_TYPE.OWNER_EXCLUSIVE]: {
         RENTAL: "OWNER_EXCLUSIVE_RENTAL",
-        // SALE / BOTH: fall through to the legacy category default (card disabled)
+        SALE:   "OWNER_EXCLUSIVE_SALE",
+        // BOTH: blocked by the guard above until OWNER_EXCLUSIVE_BOTH ships
       },
     };
 
@@ -451,11 +452,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "יש לבחור מספר חודשי שכירות" }, { status: 400 });
     }
 
-    // Exclusivity period — required for the owner-exclusive rental template,
+    // Exclusivity period — required for the owner-exclusive templates,
     // ignored (forced null) for every other key.
     let resolvedExclusivityStart: Date | null = null;
     let resolvedExclusivityEnd: Date | null = null;
-    if (autoKey === "OWNER_EXCLUSIVE_RENTAL") {
+    if (autoKey === "OWNER_EXCLUSIVE_RENTAL" || autoKey === "OWNER_EXCLUSIVE_SALE") {
       if (!vExclusivityStart.value || !vExclusivityEnd.value) {
         return NextResponse.json({ error: "יש להזין תקופת בלעדיות" }, { status: 400 });
       }
@@ -470,7 +471,7 @@ export async function POST(request: Request) {
     // needs them (sale + both). Absent mode defaults to FIXED so the sale clause
     // always states the stored amount (truthful + deterministic across regeneration).
     const resolvedSaleMode: "PERCENT" | "FIXED" | null =
-      autoKey === "INTERESTED_BUYER_SALE" || autoKey === "INTERESTED_BUYER_BOTH"
+      autoKey === "INTERESTED_BUYER_SALE" || autoKey === "INTERESTED_BUYER_BOTH" || autoKey === "OWNER_EXCLUSIVE_SALE"
         ? (vSaleMode.value ?? "FIXED")
         : null;
     const resolvedSalePercent: number | null =
@@ -480,7 +481,7 @@ export async function POST(request: Request) {
     }
 
     if (autoKey) {
-      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_EXCLUSIVE_RENTAL";
+      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_EXCLUSIVE_RENTAL" | "OWNER_EXCLUSIVE_SALE";
       const templateLang = language as "HE" | "EN" | "FR" | "RU" | "AR";
 
       // Resolve by (templateKey + language), fallback to HE if not found

@@ -238,6 +238,7 @@ enum ContractTemplateKey {
   INTERESTED_BUYER_SALE     // החתמת מתעניין — מכירה (resolved when dealType = SALE)
   INTERESTED_BUYER_BOTH     // החתמת מתעניין — מכירה והשכרה (resolved when dealType = BOTH)
   OWNER_EXCLUSIVE_RENTAL    // החתמת בעל נכס — בלעדיות להשכרה (resolved when dealType = RENTAL)
+  OWNER_EXCLUSIVE_SALE      // החתמת בעל נכס — בלעדיות למכירה (resolved when dealType = SALE)
 }
 
 // How the rental brokerage fee was chosen by the broker. Drives the dynamic

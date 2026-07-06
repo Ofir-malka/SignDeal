@@ -618,6 +618,67 @@ describe("buildContext — exclusivity period", () => {
   });
 });
 
+// ─── buildContext — owner-exclusive sale clause (templateKey-aware) ───────────
+
+describe("buildContext — owner-exclusive sale commission clause", () => {
+  const OWNER_SALE_CONTRACT = {
+    ...CONTRACT,
+    dealType:    "SALE",
+    templateKey: "OWNER_EXCLUSIVE_SALE",
+    // CONTRACT.commission = 1,500,000 agorot -> ₪15,000
+  };
+
+  it("PERCENT mode with 2% states the percentage of the sale price", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...OWNER_SALE_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 2 },
+    });
+    expect(ctx.saleCommissionClause).toBe('בעסקת מכר, דמי התיווך יהיו בשיעור של 2% ממחיר המכירה הכולל של הנכס, בתוספת מע"מ כדין.');
+  });
+
+  it("PERCENT mode with a decimal percentage (1.5) renders as 1.5%", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...OWNER_SALE_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 1.5 },
+    });
+    expect(ctx.saleCommissionClause).toContain("בשיעור של 1.5% ממחיר המכירה הכולל");
+  });
+
+  it("FIXED mode states the stored commission amount", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...OWNER_SALE_CONTRACT, saleCommissionMode: "FIXED" },
+    });
+    expect(ctx.saleCommissionClause).toBe('בעסקת מכר, דמי התיווך יהיו בסך של ₪15,000, בתוספת מע"מ כדין.');
+  });
+
+  it("falls back to the fixed-amount wording when the mode is absent", () => {
+    const ctx = buildContext({ broker: BROKER, client: CLIENT, contract: OWNER_SALE_CONTRACT });
+    expect(ctx.saleCommissionClause).toContain("בסך של ₪15,000");
+  });
+
+  it("falls back to the fixed-amount wording when PERCENT is set without a percent", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...OWNER_SALE_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: null },
+    });
+    expect(ctx.saleCommissionClause).toContain("בסך של ₪15,000");
+  });
+
+  it("exclusivity placeholders render on the sale key", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: {
+        ...OWNER_SALE_CONTRACT,
+        exclusivityStartsAt: new Date("2026-08-01T00:00:00"),
+        exclusivityEndsAt:   new Date("2026-10-31T00:00:00"),
+      },
+    });
+    expect(ctx.exclusivityStartDate).toBe("01.08.2026");
+    expect(ctx.exclusivityEndDate).toBe("31.10.2026");
+  });
+});
+
 // ─── Non-regression — INTERESTED clauses unchanged when templateKey is passed ─
 // The creation route now passes the resolved templateKey for EVERY contract.
 // The interested-client keys must hit the existing branches and produce
@@ -638,6 +699,14 @@ describe("non-regression — INTERESTED wordings unchanged with templateKey pass
       contract: { ...CONTRACT, dealType: "SALE", templateKey: "INTERESTED_BUYER_SALE", saleCommissionMode: "PERCENT", saleCommissionPercent: 2 },
     });
     expect(ctx.saleCommissionClause).toBe('ברכישת נכס – סך השווה ל-2% ממחיר העסקה הכולל, בתוספת מע"מ כדין.');
+  });
+
+  it("INTERESTED_BUYER_SALE fixed clause is byte-identical", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, dealType: "SALE", templateKey: "INTERESTED_BUYER_SALE", saleCommissionMode: "FIXED" },
+    });
+    expect(ctx.saleCommissionClause).toBe('ברכישת נכס – דמי תיווך בסך של ₪15,000, בתוספת מע"מ כדין.');
   });
 
   it("INTERESTED_BUYER_BOTH clauses are byte-identical", () => {
