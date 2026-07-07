@@ -1428,18 +1428,17 @@ export function NewContractForm({ subscription, initialContractType = "intereste
       ...(commissionSaleAgorot !== null ? { commissionSale: commissionSaleAgorot } : {}),
       // Owner-exclusive never hides the address (the owner knows it; toggle hidden).
       hideFullAddressFromClient: isOwner ? false : form.hideFullAddressFromClient,
-      // Rental fee mode — interested rental uses ONE_MONTH/FIXED; the
-      // owner-exclusive rental flow uses MONTHS (1-12) / FIXED. The server
-      // persists these per template key.
+      // Rental fee mode — both RENTAL flows (interested + owner-exclusive) use
+      // MONTHS (1-12) / FIXED; the server persists these per template key.
+      // ONE_MONTH remains a legacy value accepted by the API (maps to 1 month).
+      // BOTH keeps its own wiring below with the legacy ONE_MONTH preset.
       ...(form.dealType === "RENTAL"
-        ? (isOwner
-            ? {
-                rentalCommissionMode: form.rentalCommissionPreset === "fixed" ? "FIXED" : "MONTHS",
-                ...(form.rentalCommissionPreset !== "fixed"
-                  ? { rentalCommissionMonths: parseInt(form.rentalCommissionMonths, 10) || 1 }
-                  : {}),
-              }
-            : { rentalCommissionMode: form.rentalCommissionPreset === "fixed" ? "FIXED" : "ONE_MONTH" })
+        ? {
+            rentalCommissionMode: form.rentalCommissionPreset === "fixed" ? "FIXED" : "MONTHS",
+            ...(form.rentalCommissionPreset !== "fixed"
+              ? { rentalCommissionMonths: parseInt(form.rentalCommissionMonths, 10) || 1 }
+              : {}),
+          }
         : {}),
       // Exclusivity period — owner-exclusive rental only (plain YYYY-MM-DD strings)
       ...(isOwner && form.exclusivityStart && exclusivityEndDate
@@ -1993,9 +1992,10 @@ export function NewContractForm({ subscription, initialContractType = "intereste
 
             {/* ── RENTAL presets (shared between RENTAL and the rental half of BOTH) */}
             {(form.dealType === "RENTAL" || form.dealType === "BOTH") && (() => {
-              // Owner-exclusive: the months option opens a 1-12 selector below;
-              // interested flows keep the fixed one-month preset.
-              const presets: { id: RentalCommissionPreset; label: string; sub?: string }[] = isOwner
+              // RENTAL flows (interested + owner-exclusive): the months option
+              // opens a 1-12 selector below. BOTH keeps the legacy one-month preset.
+              const monthsUi = isOwner || form.dealType === "RENTAL";
+              const presets: { id: RentalCommissionPreset; label: string; sub?: string }[] = monthsUi
                 ? [
                     { id: "one_month", label: "לפי חודשי שכירות"          },
                     { id: "fixed",     label: "סכום ידני (₪)"              },
@@ -2030,8 +2030,8 @@ export function NewContractForm({ subscription, initialContractType = "intereste
                       </button>
                     ))}
                   </div>
-                  {/* Owner-exclusive: number of monthly rents (1-12) */}
-                  {isOwner && form.rentalCommissionPreset !== "fixed" && (
+                  {/* Number of monthly rents (1-12) — interested rental + owner-exclusive */}
+                  {monthsUi && form.rentalCommissionPreset !== "fixed" && (
                     <div className="mb-3">
                       <select
                         value={form.rentalCommissionMonths}

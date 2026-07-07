@@ -159,10 +159,11 @@ export function buildContext(opts: {
 }): TemplateContext {
   const isBoth = opts.contract.dealType === "BOTH";
 
-  // Dynamic rental clause — wording differs between the RENTAL template
-  // ("בעסקאות שכירות ישלם הלקוח…") and the BOTH template ("בעסקת שכירות: …"),
-  // matching the lawyer text of each document. Defaults to the one-month
-  // wording when the mode is absent. The amount always comes from `commission`
+  // Dynamic rental clause — wording differs between the interested-rental
+  // template ("בשכירות – …", incl. MONTHS 1-12), the BOTH template
+  // ("בעסקת שכירות: …") and the owner-exclusive rental template, matching the
+  // lawyer text of each document. Legacy ONE_MONTH / absent modes map to the
+  // one-month sentence. The amount always comes from `commission`
   // (for BOTH that IS the rental-side commission).
   const rentalCommissionClause = opts.contract.templateKey === "OWNER_EXCLUSIVE_RENTAL"
     // Owner-exclusive rental wording: MONTHS states the chosen number of monthly
@@ -183,9 +184,24 @@ export function buildContext(opts: {
     ? (opts.contract.rentalCommissionMode === "FIXED"
         ? `בעסקת שכירות: דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`
         : `בעסקת שכירות: סכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.`)
-    : (opts.contract.rentalCommissionMode === "FIXED"
-        ? `בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בסך ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`
-        : `בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בגובה חודש שכירות אחד, בתוספת מע"מ כדין.`);
+    : (() => {
+        // Interested-rental wording (INTERESTED_BUYER_RENTAL + legacy callers):
+        // MONTHS states the chosen number of monthly rents (1-12, Hebrew words);
+        // FIXED states the stored amount; legacy ONE_MONTH and absent modes map
+        // to the one-month sentence. MONTHS without a valid count falls back to
+        // the fixed-amount sentence — always truthful about the stored commission.
+        const m = opts.contract.rentalCommissionMonths;
+        if (opts.contract.rentalCommissionMode === "MONTHS") {
+          if (m != null && HE_MONTH_WORDS[m]) {
+            return `בשכירות – דמי תיווך בסכום השווה לדמי שכירות של ${HE_MONTH_WORDS[m]}, בתוספת מע"מ כדין.`;
+          }
+          return `בשכירות – דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`;
+        }
+        if (opts.contract.rentalCommissionMode === "FIXED") {
+          return `בשכירות – דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`;
+        }
+        return `בשכירות – דמי תיווך בסכום השווה לדמי שכירות של ${HE_MONTH_WORDS[1]}, בתוספת מע"מ כדין.`;
+      })();
 
   // Dynamic sale clause — PERCENT states the broker's chosen percentage; FIXED
   // (and any absent/incomplete mode) states the stored amount, which is always

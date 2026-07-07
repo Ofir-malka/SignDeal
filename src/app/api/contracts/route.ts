@@ -441,9 +441,14 @@ export async function POST(request: Request) {
         ? (vRentalMode.value ?? (autoKey === "OWNER_EXCLUSIVE_RENTAL" ? "FIXED" : "ONE_MONTH"))
         : null;
 
-    // MONTHS mode (1-12 monthly rents) is supported only by the owner-exclusive
-    // rental template; the count is required with it.
-    if (resolvedRentalMode === "MONTHS" && autoKey !== "OWNER_EXCLUSIVE_RENTAL") {
+    // MONTHS mode (1-12 monthly rents) is supported by the rental templates whose
+    // fee clause is months-based (interested rental + owner-exclusive rental);
+    // the count is required with it. BOTH keeps the legacy ONE_MONTH preset.
+    if (
+      resolvedRentalMode === "MONTHS"
+      && autoKey !== "OWNER_EXCLUSIVE_RENTAL"
+      && autoKey !== "INTERESTED_BUYER_RENTAL"
+    ) {
       return NextResponse.json({ error: "אופן דמי התיווך אינו נתמך עבור סוג חוזה זה" }, { status: 400 });
     }
     const resolvedRentalMonths: number | null =

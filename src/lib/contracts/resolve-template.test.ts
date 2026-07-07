@@ -298,30 +298,70 @@ describe("parseDocumentLines", () => {
   });
 });
 
-// ─── buildContext — rental commission clause (dynamic 6.1) ────────────────────
+// ─── buildContext — interested rental commission clause (dynamic 5.1, v3) ─────
 
-describe("buildContext — rental commission clause", () => {
-  it("FIXED mode produces the fixed-amount wording with the formatted commission", () => {
+describe("buildContext — interested rental commission clause", () => {
+  // CONTRACT is dealType RENTAL with commission = ₪15,000
+
+  it("FIXED mode states the stored commission amount (exact v3 sentence)", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
       contract: { ...CONTRACT, rentalCommissionMode: "FIXED" },
     });
-    expect(ctx.rentalCommissionClause).toContain("בסך");
-    expect(ctx.rentalCommissionClause).toContain(ctx.commission);   // e.g. ₪15,000
-    expect(ctx.rentalCommissionClause).toContain('בתוספת מע"מ כדין');
+    expect(ctx.rentalCommissionClause).toBe('בשכירות – דמי תיווך בסך של ₪15,000, בתוספת מע"מ כדין.');
   });
 
-  it("ONE_MONTH mode produces the one-month wording", () => {
+  it("MONTHS mode with 1 month (exact v3 sentence)", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, templateKey: "INTERESTED_BUYER_RENTAL", rentalCommissionMode: "MONTHS", rentalCommissionMonths: 1 },
+    });
+    expect(ctx.rentalCommissionClause).toBe('בשכירות – דמי תיווך בסכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.');
+  });
+
+  it("MONTHS mode with 2 months", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, templateKey: "INTERESTED_BUYER_RENTAL", rentalCommissionMode: "MONTHS", rentalCommissionMonths: 2 },
+    });
+    expect(ctx.rentalCommissionClause).toContain("דמי שכירות של שני חודשים");
+  });
+
+  it("MONTHS mode with 6 months", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, templateKey: "INTERESTED_BUYER_RENTAL", rentalCommissionMode: "MONTHS", rentalCommissionMonths: 6 },
+    });
+    expect(ctx.rentalCommissionClause).toContain("דמי שכירות של שישה חודשים");
+  });
+
+  it("MONTHS mode with 12 months", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, templateKey: "INTERESTED_BUYER_RENTAL", rentalCommissionMode: "MONTHS", rentalCommissionMonths: 12 },
+    });
+    expect(ctx.rentalCommissionClause).toContain("דמי שכירות של שנים עשר חודשים");
+  });
+
+  it("legacy ONE_MONTH maps to the one-month sentence", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
       contract: { ...CONTRACT, rentalCommissionMode: "ONE_MONTH" },
     });
-    expect(ctx.rentalCommissionClause).toContain("חודש שכירות אחד");
+    expect(ctx.rentalCommissionClause).toBe('בשכירות – דמי תיווך בסכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.');
   });
 
-  it("defaults to the one-month wording when the mode is absent", () => {
+  it("absent mode maps to the one-month sentence", () => {
     const ctx = buildContext({ broker: BROKER, client: CLIENT, contract: CONTRACT });
-    expect(ctx.rentalCommissionClause).toContain("חודש שכירות אחד");
+    expect(ctx.rentalCommissionClause).toContain("דמי שכירות של חודש אחד");
+  });
+
+  it("MONTHS without a month count falls back to the fixed-amount sentence", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, templateKey: "INTERESTED_BUYER_RENTAL", rentalCommissionMode: "MONTHS", rentalCommissionMonths: null },
+    });
+    expect(ctx.rentalCommissionClause).toContain("בסך של ₪15,000");
   });
 });
 
@@ -347,9 +387,9 @@ describe("buildContext — client address", () => {
       broker: BROKER, client: { ...CLIENT, address: "הרצל 1, חיפה" },
       contract: { ...CONTRACT, rentalCommissionMode: "FIXED" },
     });
-    const out = resolveTemplate("כתובת: {{clientAddress}}\n6.1 {{rentalCommissionClause}}", ctx);
+    const out = resolveTemplate("כתובת: {{clientAddress}}\n5.1 {{rentalCommissionClause}}", ctx);
     expect(out).toContain("כתובת: הרצל 1, חיפה");
-    expect(out).toContain("6.1 בעסקאות שכירות");
+    expect(out).toContain("5.1 בשכירות – דמי תיווך");
   });
 });
 
@@ -498,20 +538,20 @@ describe("non-regression — SALE and RENTAL clause wordings unchanged", () => {
     expect(ctx.saleCommissionClause).toBe('ברכישת נכס – דמי תיווך בסך של ₪15,000, בתוספת מע"מ כדין.');
   });
 
-  it("RENTAL one-month wording is byte-identical", () => {
+  it("RENTAL legacy ONE_MONTH pins the v3 one-month sentence", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
       contract: { ...CONTRACT, dealType: "RENTAL", rentalCommissionMode: "ONE_MONTH" },
     });
-    expect(ctx.rentalCommissionClause).toBe('בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בגובה חודש שכירות אחד, בתוספת מע"מ כדין.');
+    expect(ctx.rentalCommissionClause).toBe('בשכירות – דמי תיווך בסכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.');
   });
 
-  it("RENTAL fixed wording is byte-identical", () => {
+  it("RENTAL fixed wording pins the v3 fixed sentence", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
       contract: { ...CONTRACT, dealType: "RENTAL", rentalCommissionMode: "FIXED" },
     });
-    expect(ctx.rentalCommissionClause).toBe('בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בסך ₪15,000, בתוספת מע"מ כדין.');
+    expect(ctx.rentalCommissionClause).toBe('בשכירות – דמי תיווך בסך של ₪15,000, בתוספת מע"מ כדין.');
   });
 });
 
@@ -685,12 +725,12 @@ describe("buildContext — owner-exclusive sale commission clause", () => {
 // byte-identical output.
 
 describe("non-regression — INTERESTED wordings unchanged with templateKey passed", () => {
-  it("INTERESTED_BUYER_RENTAL one-month clause is byte-identical", () => {
+  it("INTERESTED_BUYER_RENTAL legacy ONE_MONTH maps to the v3 one-month sentence", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
       contract: { ...CONTRACT, dealType: "RENTAL", templateKey: "INTERESTED_BUYER_RENTAL", rentalCommissionMode: "ONE_MONTH" },
     });
-    expect(ctx.rentalCommissionClause).toBe('בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בגובה חודש שכירות אחד, בתוספת מע"מ כדין.');
+    expect(ctx.rentalCommissionClause).toBe('בשכירות – דמי תיווך בסכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.');
   });
 
   it("INTERESTED_BUYER_SALE percent clause is byte-identical", () => {
