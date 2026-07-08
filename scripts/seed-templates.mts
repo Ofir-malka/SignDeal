@@ -56,9 +56,10 @@
  *                               PERCENT states the chosen percentage, FIXED (or
  *                               absent mode) states the stored commission amount
  *
- * NOTE: both commission clauses are dealType-aware — for dealType BOTH they use
- * the BOTH document's wording ("בעסקת מכר: …" / "בעסקת שכירות: …"), the sale
- * amount comes from commissionSale and the rental amount from commission.
+ * NOTE: both commission clauses are dealType-aware — for dealType BOTH the sale
+ * clause uses the BOTH wording ("בקנייה – …", amount from commissionSale) and
+ * the rental clause shares the interested wording ("בשכירות – …", amount from
+ * commission, incl. MONTHS 1-12 via rentalCommissionMonths).
  *
  * Dates & metadata
  *   {{today}}           contract creation date, DD.MM.YYYY
@@ -128,14 +129,18 @@ const TEMPLATES: Array<{
     // ── INTERESTED_BUYER_RENTAL · HE ──────────────────────────────────────────
     // Rental variant of the interested-client flow. Resolved by
     // (contractType "החתמת מתעניין" + dealType RENTAL).
+    // v3 (2026-07-08): rebuilt from the updated lawyer agreement ("שכירות (1).docx.pdf",
+    // source title corrected from the erroneous sale wording). Structure now mirrors
+    // the INTERESTED_BUYER_SALE document: single continuous numbering 1-11.
+    // • Clause 4 uses the approved rental-specific trigger wording.
+    // • Clause 5.1 is dynamic via {{rentalCommissionClause}} — interested wording:
+    //   MONTHS (1-12 monthly rents via rentalCommissionMonths) or FIXED amount;
+    //   legacy ONE_MONTH / absent modes map to the one-month sentence.
+    // • Clause 8 uses the approved rental publication wording ("הושכר או שווק").
     // • Broker details are embedded in the body so they appear in the signed HTML
     //   view (ContractTemplate has no separate broker header), not only the PDF.
-    // • Clause 6.1 is dynamic via {{rentalCommissionClause}} (ONE_MONTH / FIXED).
-    // • Property facts (address/rent/commission) are intentionally NOT placed in the
-    //   body — they render through PropertyTable, which honours hideFullAddressFromClient.
-    // • The contract number is intentionally NOT in the body — the renderers' chrome
-    //   (HTML top chip / PDF header meta row) already shows "מסמך מס׳" once per view.
-    // • Original legal numbering is preserved; 6.1/6.2/6.3 render as paragraph text.
+    // • Property facts are NOT in the body (PropertyTable renders them); the
+    //   contract number is chrome-only; 5.1-5.3 render as paragraph text.
     {
       key: "INTERESTED_BUYER_RENTAL",
       language: "HE",
@@ -146,29 +151,24 @@ const TEMPLATES: Array<{
 המתווך: {{brokerName}}, ת.ז {{brokerIdNumber}}, רישיון מתווך מס׳ {{brokerLicense}}, טלפון {{brokerPhone}}
 הלקוח: {{clientName}}, ת.ז {{clientIdNumber}}, כתובת {{clientAddress}}, טלפון {{clientPhone}}, דוא״ל {{clientEmail}}
 
-פרטי הנכסים והתחייבות הלקוח
-1. הלקוח מאשר כי בשלב זה נמסרים לו פרטים כלליים אודות הנכסים המוצעים באמצעות המשרד, לרבות תיאורים, תמונות, נתונים ומידע נוסף לפי שיקול דעת המשרד. כתובתם המלאה של הנכסים תימסר ללקוח לאחר חתימת הסכם זה.
-2. הלקוח מצהיר כי למיטב ידיעתו לא הוצג לו קודם לכן אף אחד מהנכסים נשוא הסכם זה באמצעות גורם אחר, וכי במועד החתימה אינו מכיר את העסקאות המוצעות ביחס אליהם.
-3. ככל שהלקוח יטען לאחר חתימת ההסכם כי הכיר את הנכס או נחשף אליו טרם פנייתו למשרד, יהא עליו להציג אסמכתאות או ראיות התומכות בטענתו.
-4. הלקוח מתחייב לשלם למשרד את דמי התיווך המוסכמים במקרה שיתקשר בעסקת מכירה, רכישה או שכירות ביחס לנכס שהוצג לו על ידי המשרד, בין אם ההתקשרות נעשתה באמצעות המשרד ובין אם נעשתה במישרין מול בעל הנכס או מי מטעמו.
-5. מובהר כי עצם מסירת כתובת הנכס במועד מאוחר יותר אינה גורעת מתוקפו של הסכם זה ואינה פוגעת בהתחייבויות הצדדים מכוחו.
-6. הצדדים מסכימים כי הסכם זה מהווה התחייבות חוזית מלאה ומחייבת לכל דבר ועניין, וכי כל הזכויות והחובות הקבועות בו יחולו ממועד חתימתו.
-הזמנת שירותי תיווך והתחייבויות הלקוח
-1. הלקוח פונה למתווך ומבקש לקבל ממנו שירותי תיווך במקרקעין ביחס לנכסים אשר פרטיהם יימסרו לו על ידי המתווך.
-2. הלקוח מאשר כי קיבל מהמתווך מידע אודות הנכסים המפורטים בטופס זה, וכי מידע זה נמסר לו במסגרת פעילות התיווך של המתווך.
-3. הלקוח מתחייב לעדכן את המתווך ללא דיחוי על כל פנייה, מגע, משא ומתן או התקשרות המתנהלים בינו ו/או מי מטעמו לבין בעל נכס שהוצג לו על ידי המתווך, וכן על כל חתימה על הסכם, זיכרון דברים, התחייבות או מסמך אחר הקשור לביצוע עסקה בנכס כאמור.
-4. מובהר ומוסכם כי התקשרות בעסקה מכל סוג ביחס לאחד הנכסים שהוצגו ללקוח על ידי המתווך, בין במישרין ובין בעקיפין, בין באמצעות הלקוח ובין באמצעות אדם או גוף מטעמו, תקנה למתווך זכות לקבלת דמי תיווך בהתאם להוראות הסכם זה.
-5. הלקוח מתחייב שלא להעביר לצד שלישי כל פרט, מידע או נתון שקיבל מהמתווך ביחס לנכסים שהוצגו לו, אלא לאחר קבלת אישור מראש ובכתב מהמתווך. במקרה של הפרת התחייבות זו, יהיה הלקוח אחראי לכל נזק שייגרם למתווך עקב כך.
-דמי התיווך
-6. עם השלמת התקשרות מחייבת בקשר לנכס שהוצג ללקוח על ידי המתווך, יהיה הלקוח חייב בתשלום דמי תיווך למתווך.
-6.1 {{rentalCommissionClause}}
-6.2 החיוב בדמי התיווך יתגבש במועד חתימת הסכם מחייב או במועד יצירת התחייבות מחייבת לביצוע העסקה, לפי המועד המוקדם מביניהם, והתשלום ישולם במועד זה.
-6.3 אין בהתחייבות הלקוח כאמור כדי לפגוע בזכותו של המתווך לקבל דמי תיווך גם מצד נוסף לעסקה, ככל שהדבר מותר על פי דין.
-הוראות נוספות
-7. הלקוח מאשר כי הומלץ לו לבצע את כל הבדיקות המשפטיות, התכנוניות והמקצועיות הנדרשות באמצעות עורך דין ו/או בעלי מקצוע מתאימים טרם התקשרות בעסקה.
-8. לאחר השלמת העסקה, יהא המתווך רשאי לעשות שימוש במידע בדבר ביצועה, לרבות לצורך פרסום העובדה שהנכס נמכר או הושכר, בכל אמצעי פרסום שיבחר.
-9. כל שינוי, תיקון, הקלה, ארכה או ויתור בקשר להסכם זה יחייבו רק אם נערכו בכתב. הימנעות של מי מהצדדים ממימוש זכות כלשהי לא תיחשב כוויתור עליה ולא תמנע את מימושה בעתיד.
-10. ככל שהסכם זה נחתם על ידי יותר מלקוח אחד, יחולו כל ההתחייבויות המפורטות בו על כל אחד מהם ביחד ולחוד. כל הודעה, אישור, התחייבות או מסמך שייחתמו על ידי אחד מהם בקשר להסכם זה, יחייבו גם את יתר החותמים.`,
+התחייבות לקבלת שירותי תיווך
+1. הלקוח פונה למתווך ומבקש לקבל ממנו שירותי תיווך במקרקעין ביחס לנכסים אשר יוצגו לו על ידי המתווך מעת לעת.
+2. הלקוח מאשר כי המתווך מסר לו מידע אודות הנכסים המפורטים בהסכם זה וכי מידע זה הועבר אליו במסגרת פעילות התיווך של המתווך.
+3. הלקוח מתחייב לעדכן את המתווך ללא דיחוי בכל פנייה, משא ומתן, התקשרות או מגע שיתקיימו בינו ו/או מי מטעמו לבין בעל נכס שהוצג לו על ידי המתווך, וכן להודיע למתווך על חתימה על הסכם, זיכרון דברים או כל התחייבות מחייבת אחרת בקשר לנכס כאמור.
+דמי תיווך
+4. הלקוח מתחייב לשלם למתווך דמי תיווך במקרה שבו יתקשר בעסקת שכירות ביחס לאחד מהנכסים שהוצגו לו באמצעות המתווך, בין אם ההתקשרות בוצעה ישירות מול בעל הנכס ובין אם באמצעות צד אחר מטעמו.
+5. שיעור דמי התיווך יהיה כדלקמן:
+5.1 {{rentalCommissionClause}}
+5.2 הזכאות לדמי התיווך תקום במועד חתימת הסכם מחייב או במועד יצירת התחייבות מחייבת לביצוע העסקה, לפי המועד המוקדם מביניהם, והתשלום ישולם במועד זה.
+5.3 אין בהתחייבות הלקוח כאמור כדי לגרוע מזכותו של המתווך לקבל דמי תיווך גם מהצד השני לעסקה, ככל שהדבר מותר על פי דין.
+סודיות ושימוש במידע
+6. הלקוח מתחייב שלא להעביר לצד שלישי מידע, מסמכים או פרטים שהועברו אליו על ידי המתווך בקשר לנכסים שהוצגו לו. הפרת התחייבות זו תחייב את הלקוח בפיצוי בגין כל נזק שייגרם למתווך עקב ההפרה.
+הוראות כלליות
+7. הלקוח מאשר כי הומלץ לו לקבל ייעוץ משפטי ו/או מקצועי מתאים בטרם התקשרות בעסקה, לרבות באמצעות עורך דין ובעלי מקצוע רלוונטיים אחרים.
+8. לאחר השלמת העסקה, יהא המתווך רשאי לפרסם כי הנכס הושכר או שווק בהצלחה, בכל אמצעי פרסום שימצא לנכון.
+9. כל שינוי, תיקון, ויתור, הקלה או ארכה הנוגעים להסכם זה יהיו תקפים רק אם נערכו בכתב. הימנעות או עיכוב מצד מי מהצדדים במימוש זכות כלשהי לא ייחשבו כוויתור על אותה זכות.
+10. כאשר צד להסכם מורכב ממספר אנשים, תחול על כולם אחריות ביחד ולחוד לכל התחייבויותיהם על פי הסכם זה. חתימתו, אישורו או התחייבותו של אחד מהם בכל עניין הקשור להסכם תחייב גם את יתר החותמים מטעמו.
+11. למען הסר ספק, כל התקשרות של הלקוח ו/או מי מטעמו בקשר לנכס שהוצג על ידי המתווך, תיחשב לעסקה המזכה את המתווך בדמי התיווך המפורטים בהסכם זה.`,
     },
 
     // ── INTERESTED_BUYER_SALE · HE ────────────────────────────────────────────
@@ -184,6 +184,11 @@ const TEMPLATES: Array<{
     // • The law-reference subtitle line is a platform addition (not in the source
     //   document) for structural consistency with the other templates.
     // • Original legal numbering is preserved; 5.1/5.2/5.3 render as paragraph text.
+    // • Re-validated 2026-07-08 against the re-uploaded lawyer doc ("שכירות (1).docx",
+    //   MD5-identical to the original "מכירה .docx"): body unchanged. The clause 5.1
+    //   PERCENT wording in buildContext is the approved platform variant
+    //   ("דמי תיווך בשיעור של X%") — a conscious deviation from the source document's
+    //   "סך השווה ל-X%". Do not revert it to the source wording.
     {
       key: "INTERESTED_BUYER_SALE",
       language: "HE",
@@ -217,44 +222,55 @@ const TEMPLATES: Array<{
     // ── INTERESTED_BUYER_BOTH · HE ────────────────────────────────────────────
     // Combined sale+rental variant of the interested-client flow. Resolved by
     // (contractType "החתמת מתעניין" + dealType BOTH).
+    // v2 (2026-07-08): rebuilt from the BOTH lawyer agreement ("שכירות (1).docx.pdf",
+    // the 46KB variant whose clause 5 carries BOTH fee lines). Structure mirrors
+    // the INTERESTED_BUYER_RENTAL/SALE documents: sections + numbering 1-11.
+    // • Title is the approved BOTH variant ("למכירה ושכירות", with ו — the source
+    //   title wrongly says sale-only).
+    // • Clause 4 uses the approved BOTH trigger wording ("בעסקת מכר ו/או שכירות").
+    // • Clause 5.1 is dynamic via {{rentalCommissionClause}} — BOTH shares the
+    //   interested-rental wording ("בשכירות – …"): MONTHS (1-12 monthly rents via
+    //   rentalCommissionMonths) or FIXED amount from `commission` (the rental
+    //   side); legacy ONE_MONTH / absent modes map to the one-month sentence.
+    //   NOTE: 5.1/5.2 are rental-first (source order; flipped vs the v1 template).
+    // • Clause 5.2 is dynamic via {{saleCommissionClause}} — BOTH wording
+    //   ("בקנייה – …"): PERCENT or FIXED amount from `commissionSale`; the
+    //   source's typos ("בצוספת מע"מ כדיו") are corrected in the dynamic wording.
+    // • Clause 8 uses the approved BOTH publication wording ("נמכר, הושכר או שווק").
     // • Broker details are embedded in the body so they appear in the signed HTML
     //   view (ContractTemplate has no separate broker header), not only the PDF.
-    // • Clause 5.1 is dynamic via {{saleCommissionClause}} (PERCENT / FIXED —
-    //   amount from commissionSale) and clause 5.2 via {{rentalCommissionClause}}
-    //   (ONE_MONTH / FIXED — amount from commission); both use the BOTH wording.
-    // • Clause 6 uses the approved general "sold and/or rented" wording (the
-    //   source document's clause 6 was sale-only).
-    // • Property facts (address/rent/sale price/commissions) are intentionally
-    //   NOT placed in the body — they render through PropertyTable.
-    // • The contract number is intentionally NOT in the body — the renderers'
-    //   chrome (HTML top chip / PDF header meta row) already shows "מסמך מס׳".
-    // • The law-reference subtitle line is a platform addition (not in the source
-    //   text) for structural consistency with the other templates.
-    // • Original legal numbering is preserved; 5.1–5.4 render as paragraph text.
+    // • Property facts are NOT in the body (PropertyTable renders the dual
+    //   rent + sale-price rows); the contract number is chrome-only; 5.1-5.4
+    //   render as paragraph text.
     {
       key: "INTERESTED_BUYER_BOTH",
       language: "HE",
-      title: "הזמנת שירותי תיווך למכירה והשכרת נכס מקרקעין",
-      content: `הזמנת שירותי תיווך למכירה והשכרת נכס מקרקעין
+      title: "הזמנת שירותי תיווך למכירה ושכירות נכס מקרקעין",
+      content: `הזמנת שירותי תיווך למכירה ושכירות נכס מקרקעין
 בהתאם לחוק המתווכים במקרקעין התשנ״ו-1996
 
 המתווך: {{brokerName}}, ת.ז {{brokerIdNumber}}, רישיון מתווך מס׳ {{brokerLicense}}, טלפון {{brokerPhone}}
 הלקוח: {{clientName}}, ת.ז {{clientIdNumber}}, כתובת {{clientAddress}}, טלפון {{clientPhone}}, דוא״ל {{clientEmail}}
 
-1. הלקוח מזמין בזאת מהמתווך שירותי תיווך במקרקעין, בקשר לנכסים המפורטים לעיל ו/או להלן, לפי העניין.
-2. הלקוח מאשר כי הנכסים המפורטים לעיל הוצגו בפניו על ידי המתווך. הלקוח מתחייב לעדכן את המתווך באופן מיידי על כל משא ומתן שיתנהל בינו ו/או בין מי מטעמו לבין בעל הנכס ו/או מי מטעמו, ביחס לאחד או יותר מן הנכסים, וכן להודיע למתווך מיד עם חתימת הסכם מחייב ו/או עם מתן התחייבות לביצוע העסקה, לפי המוקדם מביניהם.
-3. מובהר כי הלקוח מבין ומסכים שכל התקשרות, הסכם או התחייבות שייעשו בינו ו/או בין מי מטעמו לבין בעל הנכס, בקשר לאחד או יותר מהנכסים המפורטים בהזמנה זו, יחייבו את הלקוח בתשלום דמי התיווך למתווך, כמפורט בסעיף 5 להלן.
-4. הלקוח מתחייב לשמור בסוד ולא להעביר לכל צד שלישי מידע, פרטים או נתונים שנמסרו לו על ידי המתווך בנוגע לנכסים המפורטים להלן. ככל שהלקוח יפר התחייבות זו, הוא יישא באחריות לכל נזק, הפסד או הוצאה שייגרמו למתווך כתוצאה מכך.
-5. הלקוח מתחייב לשלם למתווך דמי תיווך, מיד עם חתימת הסכם מחייב ו/או עם מתן התחייבות לביצוע העסקה, לפי המוקדם מביניהם, ביחס לאחד או יותר מהנכסים המפורטים בהזמנה זו.
-דמי התיווך ישולמו באופן הבא:
-5.1 {{saleCommissionClause}}
-5.2 {{rentalCommissionClause}}
-5.3 דמי התיווך ישולמו למתווך מיד עם חתימת הסכם מחייב ו/או עם מתן התחייבות לביצוע העסקה, לפי המוקדם מביניהם.
-5.4 אין באמור לעיל כדי לגרוע מזכותו של המתווך לגבות דמי תיווך גם מהמוכר ו/או מהמשכיר, לפי העניין.
-6. הלקוח מאשר כי לאחר השלמת העסקה, יהיה המתווך רשאי לפרסם ו/או להודיע לציבור כי הנכס נמכר ו/או הושכר, לפי העניין, בכל אמצעי ובכל דרך שימצא לנכון.
-7. הלקוח מאשר כי המתווך המליץ לו להיעזר בשירותי עורך דין ו/או באנשי מקצוע מתאימים נוספים, בהתאם לצורך ולנסיבות העסקה.
-8. כל ויתור, דחייה, ארכה, הנחה או שינוי בתנאי מתנאי הסכם זה לא יהיו תקפים אלא אם נעשו בכתב ונחתמו על ידי הצדדים. אי־מימוש או עיכוב במימוש זכות כלשהי על ידי מי מהצדדים לא ייחשבו כוויתור על אותה זכות, והצד הזכאי יהיה רשאי לממש את זכויותיו, כולן או חלקן, בכל עת, בהתאם להסכם זה ולפי כל דין.
-9. ככל שמי מהצדדים להסכם זה כולל יותר מאדם או גורם אחד, יהיו כל יחידי אותו צד אחראים להתחייבויותיהם על פי הסכם זה ביחד ולחוד. חתימתו של אחד מיחידי אותו צד על כל מסמך, אישור, מכתב או התחייבות הקשורים להסכם זה, לביצועו או לנובע ממנו, תחייב גם את יתר יחידי אותו צד.`,
+התחייבות לקבלת שירותי תיווך
+1. הלקוח פונה למתווך ומבקש לקבל ממנו שירותי תיווך במקרקעין ביחס לנכסים אשר יוצגו לו על ידי המתווך מעת לעת.
+2. הלקוח מאשר כי המתווך מסר לו מידע אודות הנכסים המפורטים בהסכם זה וכי מידע זה הועבר אליו במסגרת פעילות התיווך של המתווך.
+3. הלקוח מתחייב לעדכן את המתווך ללא דיחוי בכל פנייה, משא ומתן, התקשרות או מגע שיתקיימו בינו ו/או מי מטעמו לבין בעל נכס שהוצג לו על ידי המתווך, וכן להודיע למתווך על חתימה על הסכם, זיכרון דברים או כל התחייבות מחייבת אחרת בקשר לנכס כאמור.
+דמי תיווך
+4. הלקוח מתחייב לשלם למתווך דמי תיווך במקרה שבו יתקשר בעסקת מכר ו/או שכירות ביחס לאחד מהנכסים שהוצגו לו באמצעות המתווך, בין אם ההתקשרות בוצעה ישירות מול בעל הנכס ובין אם באמצעות צד אחר מטעמו.
+5. שיעור דמי התיווך יהיה כדלקמן:
+5.1 {{rentalCommissionClause}}
+5.2 {{saleCommissionClause}}
+5.3 הזכאות לדמי התיווך תקום במועד חתימת הסכם מחייב או במועד יצירת התחייבות מחייבת לביצוע העסקה, לפי המועד המוקדם מביניהם, והתשלום ישולם במועד זה.
+5.4 אין בהתחייבות הלקוח כאמור כדי לגרוע מזכותו של המתווך לקבל דמי תיווך גם מהצד השני לעסקה, ככל שהדבר מותר על פי דין.
+סודיות ושימוש במידע
+6. הלקוח מתחייב שלא להעביר לצד שלישי מידע, מסמכים או פרטים שהועברו אליו על ידי המתווך בקשר לנכסים שהוצגו לו. הפרת התחייבות זו תחייב את הלקוח בפיצוי בגין כל נזק שייגרם למתווך עקב ההפרה.
+הוראות כלליות
+7. הלקוח מאשר כי הומלץ לו לקבל ייעוץ משפטי ו/או מקצועי מתאים בטרם התקשרות בעסקה, לרבות באמצעות עורך דין ובעלי מקצוע רלוונטיים אחרים.
+8. לאחר השלמת העסקה, יהא המתווך רשאי לפרסם כי הנכס נמכר, הושכר או שווק בהצלחה, בכל אמצעי פרסום שימצא לנכון.
+9. כל שינוי, תיקון, ויתור, הקלה או ארכה הנוגעים להסכם זה יהיו תקפים רק אם נערכו בכתב. הימנעות או עיכוב מצד מי מהצדדים במימוש זכות כלשהי לא ייחשבו כוויתור על אותה זכות.
+10. כאשר צד להסכם מורכב ממספר אנשים, תחול על כולם אחריות ביחד ולחוד לכל התחייבויותיהם על פי הסכם זה. חתימתו, אישורו או התחייבותו של אחד מהם בכל עניין הקשור להסכם תחייב גם את יתר החותמים מטעמו.
+11. למען הסר ספק, כל התקשרות של הלקוח ו/או מי מטעמו בקשר לנכס שהוצג על ידי המתווך, תיחשב לעסקה המזכה את המתווך בדמי התיווך המפורטים בהסכם זה.`,
     },
 
     // ── OWNER_EXCLUSIVE · HE ──────────────────────────────────────────────────

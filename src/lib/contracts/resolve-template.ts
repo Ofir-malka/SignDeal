@@ -107,6 +107,16 @@ function isoToDateStr(iso: string | Date): string {
 
 const DEAL_TYPE_HE: Record<string, string> = { RENTAL: "שכירות", SALE: "מכירה", BOTH: "גם וגם" };
 
+// Hebrew month-count words for the months-based rental fee clause
+// ("דמי שכירות של חודש אחד / שני חודשים / ..."). Keys match the 1-12 range
+// enforced on Contract.rentalCommissionMonths.
+const HE_MONTH_WORDS: Record<number, string> = {
+  1: "חודש אחד",     2: "שני חודשים",    3: "שלושה חודשים",
+  4: "ארבעה חודשים", 5: "חמישה חודשים",  6: "שישה חודשים",
+  7: "שבעה חודשים",  8: "שמונה חודשים",  9: "תשעה חודשים",
+  10: "עשרה חודשים", 11: "אחד עשר חודשים", 12: "שנים עשר חודשים",
+};
+
 // ── Context builder ───────────────────────────────────────────────────────────
 
 export function buildContext(opts: {
@@ -131,7 +141,8 @@ export function buildContext(opts: {
     dealType:        string;    // "RENTAL" | "SALE" | "BOTH"
     commission:      number;    // agorot (rental commission for BOTH)
     commissionSale?: number | null;  // agorot; only set for BOTH
-    rentalCommissionMode?: "ONE_MONTH" | "FIXED" | null;  // drives clause 6.1; null -> ONE_MONTH wording
+    rentalCommissionMode?: "ONE_MONTH" | "FIXED" | "MONTHS" | null;  // drives the rental clause; null -> ONE_MONTH wording
+    rentalCommissionMonths?: number | null;               // 1-12; only when mode = MONTHS
     saleCommissionMode?:   "PERCENT" | "FIXED" | null;    // drives sale clause 5.1; null -> FIXED wording
     saleCommissionPercent?: number | null;                // human percent (2, 1.5); only for PERCENT
     createdAt:       Date | string;
@@ -139,18 +150,28 @@ export function buildContext(opts: {
 }): TemplateContext {
   const isBoth = opts.contract.dealType === "BOTH";
 
-  // Dynamic rental clause — wording differs between the RENTAL template
-  // ("בעסקאות שכירות ישלם הלקוח…") and the BOTH template ("בעסקת שכירות: …"),
-  // matching the lawyer text of each document. Defaults to the one-month
-  // wording when the mode is absent. The amount always comes from `commission`
-  // (for BOTH that IS the rental-side commission).
-  const rentalCommissionClause = isBoth
-    ? (opts.contract.rentalCommissionMode === "FIXED"
-        ? `בעסקת שכירות: דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`
-        : `בעסקת שכירות: סכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.`)
-    : (opts.contract.rentalCommissionMode === "FIXED"
-        ? `בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בסך ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`
-        : `בעסקאות שכירות ישלם הלקוח למתווך דמי תיווך בגובה חודש שכירות אחד, בתוספת מע"מ כדין.`);
+  // Dynamic rental clause — the interested wording ("בשכירות – …", incl. MONTHS
+  // 1-12), shared by INTERESTED_BUYER_RENTAL and the rental half of
+  // INTERESTED_BUYER_BOTH (their lawyer documents carry the same fee sentence).
+  // Legacy ONE_MONTH / absent modes map to the one-month sentence. The amount
+  // always comes from `commission` (for BOTH that IS the rental-side commission).
+  const rentalCommissionClause = (() => {
+    // MONTHS states the chosen number of monthly rents (1-12, Hebrew words);
+    // FIXED states the stored amount; legacy ONE_MONTH and absent modes map
+    // to the one-month sentence. MONTHS without a valid count falls back to
+    // the fixed-amount sentence — always truthful about the stored commission.
+    const m = opts.contract.rentalCommissionMonths;
+    if (opts.contract.rentalCommissionMode === "MONTHS") {
+      if (m != null && HE_MONTH_WORDS[m]) {
+        return `בשכירות – דמי תיווך בסכום השווה לדמי שכירות של ${HE_MONTH_WORDS[m]}, בתוספת מע"מ כדין.`;
+      }
+      return `בשכירות – דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`;
+    }
+    if (opts.contract.rentalCommissionMode === "FIXED") {
+      return `בשכירות – דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`;
+    }
+    return `בשכירות – דמי תיווך בסכום השווה לדמי שכירות של ${HE_MONTH_WORDS[1]}, בתוספת מע"מ כדין.`;
+  })();
 
   // Dynamic sale clause — PERCENT states the broker's chosen percentage; FIXED
   // (and any absent/incomplete mode) states the stored amount, which is always
@@ -159,11 +180,16 @@ export function buildContext(opts: {
   // (`commission` is the rental side there); for SALE it lives in `commission`.
   const salePct = opts.contract.saleCommissionPercent;
   const saleCommissionClause = isBoth
+    // BOTH sale wording ("בקנייה – …") — the approved platform variant of the
+    // BOTH lawyer document (source typos corrected); the amount comes from
+    // `commissionSale` (the sale side; `commission` is the rental side there).
     ? (opts.contract.saleCommissionMode === "PERCENT" && salePct != null
-        ? `בעסקת מכר: בשיעור של ${String(Number(salePct.toFixed(2)))}% ממחיר הרכישה הכולל של הנכס, בתוספת מע"מ כדין.`
-        : `בעסקת מכר: דמי תיווך בסך של ${formatAgorot(opts.contract.commissionSale ?? opts.contract.commission)}, בתוספת מע"מ כדין.`)
+        ? `בקנייה – דמי תיווך בשיעור של ${String(Number(salePct.toFixed(2)))}% ממחיר העסקה הכולל, בתוספת מע"מ כדין.`
+        : `בקנייה – דמי תיווך בסך של ${formatAgorot(opts.contract.commissionSale ?? opts.contract.commission)}, בתוספת מע"מ כדין.`)
+    // Interested-sale wording — the approved platform variant of the lawyer
+    // document ("דמי תיווך בשיעור של X%"; the source says "סך השווה ל-X%").
     : (opts.contract.saleCommissionMode === "PERCENT" && salePct != null
-        ? `ברכישת נכס – סך השווה ל-${String(Number(salePct.toFixed(2)))}% ממחיר העסקה הכולל, בתוספת מע"מ כדין.`
+        ? `ברכישת נכס – דמי תיווך בשיעור של ${String(Number(salePct.toFixed(2)))}% ממחיר העסקה הכולל, בתוספת מע"מ כדין.`
         : `ברכישת נכס – דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`);
 
   return {
