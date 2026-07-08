@@ -9,7 +9,7 @@ import { resolveTemplate, buildContext } from "@/lib/contracts/resolve-template"
 import { CONTRACT_TYPE } from "@/lib/contracts/contract-types";
 import { rateLimit, getRealIp } from "@/lib/rate-limit";
 import { logAuditEvent } from "@/lib/audit/log-audit-event";
-import { parsePositiveInt, parseNonNegativeInt, parseEnum, parseOptionalEnum, parseOptionalPositiveFloat, firstError } from "@/lib/validate";
+import { parsePositiveInt, parseNonNegativeInt, parseEnum, parseOptionalEnum, parseOptionalPositiveFloat, parseOptionalInt, firstError } from "@/lib/validate";
 import { sendEmail, contractSigningEmail } from "@/lib/email";
 import { parsePropertyAddress } from "@/lib/format-address";
 
@@ -269,7 +269,8 @@ export async function POST(request: Request) {
       propertyId,
       existingClientDbId,
       hideFullAddressFromClient,
-      rentalCommissionMode,   // "ONE_MONTH" | "FIXED" — only meaningful for the rental interested flow
+      rentalCommissionMode,   // "ONE_MONTH" | "FIXED" | "MONTHS" — rental fee mode (interested rental/both)
+      rentalCommissionMonths, // 1-12 — only when rentalCommissionMode = "MONTHS"
       saleCommissionMode,     // "PERCENT" | "FIXED"   — only meaningful for the sale interested flow
       saleCommissionPercent,  // human percent (2, 1.5) — only when saleCommissionMode = "PERCENT"
       language: rawLanguage,
@@ -295,17 +296,19 @@ export async function POST(request: Request) {
     const vCommission = parseNonNegativeInt(commission, "עמלה");
     // Optional: how the rental fee was chosen. Only persisted for the rental
     // interested template (see resolvedRentalMode below); null for everything else.
-    const vRentalMode = parseOptionalEnum(rentalCommissionMode, ["ONE_MONTH", "FIXED"] as const, "אופן דמי התיווך");
+    const vRentalMode = parseOptionalEnum(rentalCommissionMode, ["ONE_MONTH", "FIXED", "MONTHS"] as const, "אופן דמי התיווך");
+    // 1-12 monthly rents — only meaningful when rentalCommissionMode = MONTHS
+    const vRentalMonths = parseOptionalInt(rentalCommissionMonths, "מספר חודשי שכירות", 1, 12);
     // Optional: how the sale fee was chosen (+ its percent). Only persisted for
     // the sale interested template (see resolvedSaleMode below).
     const vSaleMode = parseOptionalEnum(saleCommissionMode, ["PERCENT", "FIXED"] as const, "אופן עמלת מכירה");
     const vSalePct  = parseOptionalPositiveFloat(saleCommissionPercent, "אחוז עמלת מכירה", 100);
-    const validationError = firstError(vDealType, vPropertyPrice, vCommission, vRentalMode, vSaleMode, vSalePct);
+    const validationError = firstError(vDealType, vPropertyPrice, vCommission, vRentalMode, vRentalMonths, vSaleMode, vSalePct);
     if (validationError) {
       return NextResponse.json({ error: validationError }, { status: 400 });
     }
     // Narrowing: all Results are Ok beyond this point (firstError returned early on any Err)
-    if (!vDealType.ok || !vPropertyPrice.ok || !vCommission.ok || !vRentalMode.ok || !vSaleMode.ok || !vSalePct.ok) {
+    if (!vDealType.ok || !vPropertyPrice.ok || !vCommission.ok || !vRentalMode.ok || !vRentalMonths.ok || !vSaleMode.ok || !vSalePct.ok) {
       return NextResponse.json({ error: "Validation error" }, { status: 400 });
     }
     const validatedDealType = vDealType.value;
@@ -411,10 +414,26 @@ export async function POST(request: Request) {
     // Persist the rental commission mode ONLY for templates whose clause needs it
     // (rental + both). Absent mode defaults to ONE_MONTH so the rental clause is
     // deterministic.
-    const resolvedRentalMode: "ONE_MONTH" | "FIXED" | null =
+    const resolvedRentalMode: "ONE_MONTH" | "FIXED" | "MONTHS" | null =
       autoKey === "INTERESTED_BUYER_RENTAL" || autoKey === "INTERESTED_BUYER_BOTH"
         ? (vRentalMode.value ?? "ONE_MONTH")
         : null;
+
+    // MONTHS mode (1-12 monthly rents) is supported by the templates whose rental
+    // fee clause is months-based (interested rental/both); the count is required
+    // with it.
+    if (
+      resolvedRentalMode === "MONTHS"
+      && autoKey !== "INTERESTED_BUYER_RENTAL"
+      && autoKey !== "INTERESTED_BUYER_BOTH"
+    ) {
+      return NextResponse.json({ error: "אופן דמי התיווך אינו נתמך עבור סוג חוזה זה" }, { status: 400 });
+    }
+    const resolvedRentalMonths: number | null =
+      resolvedRentalMode === "MONTHS" ? vRentalMonths.value : null;
+    if (resolvedRentalMode === "MONTHS" && resolvedRentalMonths == null) {
+      return NextResponse.json({ error: "יש לבחור מספר חודשי שכירות" }, { status: 400 });
+    }
 
     // Persist the sale commission mode + percent ONLY for templates whose clause
     // needs them (sale + both). Absent mode defaults to FIXED so the sale clause
@@ -451,7 +470,7 @@ export async function POST(request: Request) {
           // client/broker identity mixing bug (phone/idNumber mismatch between the
           // client details card and the legal document).
           client: { name: client.name, idNumber: client.idNumber || "", phone: client.phone, email: client.email || "", address: client.address ?? null },
-          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: validatedCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, saleCommissionMode: resolvedSaleMode, saleCommissionPercent: resolvedSalePercent, createdAt: new Date() },
+          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: validatedCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, rentalCommissionMonths: resolvedRentalMonths, saleCommissionMode: resolvedSaleMode, saleCommissionPercent: resolvedSalePercent, createdAt: new Date() },
         });
         generatedText = resolveTemplate(tpl.content, ctx);
         resolvedTemplateId = tpl.id;
@@ -478,6 +497,7 @@ export async function POST(request: Request) {
           ...(validatedCommissionSale !== null ? { commissionSale: validatedCommissionSale } : {}),
           ...(validatedPropertySalePrice !== null ? { propertySalePrice: validatedPropertySalePrice } : {}),
           ...(resolvedRentalMode ? { rentalCommissionMode: resolvedRentalMode } : {}),
+          ...(resolvedRentalMonths != null ? { rentalCommissionMonths: resolvedRentalMonths } : {}),
           ...(resolvedSaleMode ? { saleCommissionMode: resolvedSaleMode } : {}),
           ...(resolvedSalePercent != null ? { saleCommissionPercent: resolvedSalePercent } : {}),
           userId: user.id,

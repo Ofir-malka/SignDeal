@@ -102,6 +102,7 @@ interface FormState {
   commissionNis:               string;
   commissionPct:               string;
   rentalCommissionPreset:      RentalCommissionPreset;
+  rentalCommissionMonths:      string;   // "1"–"12"; used by every months-based rental fee flow
   // ── Sale-side commission (BOTH only) ─────────────────────────────────────
   commissionSaleMode: CommissionMode;
   commissionSaleNis:  string;   // BOTH + fixed: sale commission amount in ₪
@@ -138,6 +139,7 @@ const INITIAL: FormState = {
   commissionNis:             "",
   commissionPct:             "",
   rentalCommissionPreset:    "one_month",
+  rentalCommissionMonths:    "1",
   commissionSaleMode:        "percent",
   commissionSaleNis:         "",
   commissionSalePct:         "",
@@ -221,10 +223,13 @@ function calcCommissionAgorot(f: FormState): number {
     if (isNaN(priceNis) || isNaN(pct)) return NaN;
     return Math.round(priceNis * pct);   // priceNis(₪) × pct(%) = commission in agorot
   }
-  // RENTAL and BOTH — "one_month" preset: commission = 1 × monthly rent
+  // RENTAL and BOTH — months preset: commission = N × monthly rent.
+  // Every months-based rental flow (RENTAL + the rental half of BOTH) exposes
+  // a 1-12 selector.
   if ((f.dealType === "RENTAL" || f.dealType === "BOTH") && f.rentalCommissionPreset !== "fixed") {
     if (isNaN(priceNis)) return NaN;
-    return Math.round(priceNis * 100);
+    const months = parseInt(f.rentalCommissionMonths, 10);
+    return Math.round(priceNis * 100 * (Number.isInteger(months) && months >= 1 ? months : 1));
   }
   const commNis = parseNis(f.commissionNis);
   return isNaN(commNis) ? NaN : Math.round(commNis * 100);
@@ -1330,10 +1335,16 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
       commission:                commissionAgorot,
       ...(commissionSaleAgorot !== null ? { commissionSale: commissionSaleAgorot } : {}),
       hideFullAddressFromClient: form.hideFullAddressFromClient,
-      // Rental fee mode — lets the API render the dynamic clause 6.1 wording for the
-      // rental interested template. The server persists it only for that template.
-      ...(form.dealType === "RENTAL"
-        ? { rentalCommissionMode: form.rentalCommissionPreset === "fixed" ? "FIXED" : "ONE_MONTH" }
+      // Rental fee mode — every rental-fee flow (RENTAL + the rental half of
+      // BOTH) uses MONTHS (1-12) / FIXED; the server persists these per template
+      // key. ONE_MONTH remains a legacy value accepted by the API (maps to 1 month).
+      ...(form.dealType === "RENTAL" || form.dealType === "BOTH"
+        ? {
+            rentalCommissionMode: form.rentalCommissionPreset === "fixed" ? "FIXED" : "MONTHS",
+            ...(form.rentalCommissionPreset !== "fixed"
+              ? { rentalCommissionMonths: parseInt(form.rentalCommissionMonths, 10) || 1 }
+              : {}),
+          }
         : {}),
       // Sale fee mode + percent — lets the API render the dynamic clause 5.1 wording
       // for the sale interested template. The server persists them only for that template.
@@ -1345,14 +1356,14 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
               : {}),
           }
         : {}),
-      // BOTH — sale price + both fee modes, from the BOTH-specific state vars
+      // BOTH — sale price + sale fee mode, from the BOTH-specific state vars
       // (commissionSaleMode/commissionSalePct, NOT the SALE-side commissionMode/Pct).
-      // The API requires propertySalePrice for BOTH and renders clauses 5.1/5.2 from
-      // the modes (sale amount from commissionSale, rental amount from commission).
+      // The API requires propertySalePrice for BOTH and renders clause 5.2 from the
+      // mode (sale amount from commissionSale); the rental mode (clause 5.1) is
+      // sent by the shared RENTAL/BOTH spread above.
       ...(form.dealType === "BOTH"
         ? {
             propertySalePrice: Math.round(parseNis(form.salePriceNis) * 100),
-            rentalCommissionMode: form.rentalCommissionPreset === "fixed" ? "FIXED" : "ONE_MONTH",
             saleCommissionMode: form.commissionSaleMode === "percent" ? "PERCENT" : "FIXED",
             ...(form.commissionSaleMode === "percent"
               ? { saleCommissionPercent: parseFloat(form.commissionSalePct) }
@@ -1536,6 +1547,7 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                   commissionNis: "",
                   commissionPct: "",
                   rentalCommissionPreset: "one_month",
+                  rentalCommissionMonths: "1",
                   // Rental template discloses the full address only after signing —
                   // default to hidden; the broker can still uncheck manually.
                   hideFullAddressFromClient: true,
@@ -1565,6 +1577,7 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                   commissionNis: "",
                   commissionPct: "",
                   rentalCommissionPreset: "one_month",
+                  rentalCommissionMonths: "1",
                   hideFullAddressFromClient: false,
                 }));
                 setErrors((prev) => { const n = { ...prev }; delete n.priceNis; delete n.commissionNis; delete n.commissionPct; return n; });
@@ -1595,6 +1608,7 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                   commissionSalePct: "",
                   salePriceNis: "",
                   rentalCommissionPreset: "one_month",
+                  rentalCommissionMonths: "1",
                   commissionSaleMode: "percent",
                   hideFullAddressFromClient: false,
                 }));
@@ -1783,9 +1797,11 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
 
             {/* ── RENTAL presets (shared between RENTAL and the rental half of BOTH) */}
             {(form.dealType === "RENTAL" || form.dealType === "BOTH") && (() => {
+              // Every rental-fee flow (RENTAL + the rental half of BOTH): the
+              // months option opens a 1-12 selector below.
               const presets: { id: RentalCommissionPreset; label: string; sub?: string }[] = [
-                { id: "one_month",   label: "חודש שכירות",    sub: "×1"   },
-                { id: "fixed",       label: "סכום ידני (₪)"              },
+                { id: "one_month", label: "לפי חודשי שכירות"          },
+                { id: "fixed",     label: "סכום ידני (₪)"              },
               ];
               return (
                 <div>
@@ -1813,6 +1829,22 @@ export function NewContractForm({ subscription }: { subscription?: SubscriptionS
                       </button>
                     ))}
                   </div>
+                  {/* Number of monthly rents (1-12) — all months-based rental flows */}
+                  {form.rentalCommissionPreset !== "fixed" && (
+                    <div className="mb-3">
+                      <select
+                        value={form.rentalCommissionMonths}
+                        onChange={(e) => set("rentalCommissionMonths", e.target.value)}
+                        className="w-full sm:w-56 px-3.5 py-2.5 rounded-xl border border-gray-200 bg-white text-base sm:text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                      >
+                        {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                          <option key={n} value={String(n)}>
+                            {n === 1 ? "חודש אחד" : `${n} חודשים`}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   {form.rentalCommissionPreset === "fixed" && (
                     <div>
                       <TextInput id="commissionNis" value={form.commissionNis} onChange={(v) => set("commissionNis", formatNisInput(v))}
