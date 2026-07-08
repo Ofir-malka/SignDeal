@@ -403,7 +403,7 @@ describe("buildContext — sale commission clause", () => {
       broker: BROKER, client: CLIENT,
       contract: { ...SALE_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 2 },
     });
-    expect(ctx.saleCommissionClause).toContain("ל-2% ממחיר העסקה הכולל");
+    expect(ctx.saleCommissionClause).toContain("בשיעור של 2% ממחיר העסקה הכולל");
     expect(ctx.saleCommissionClause).toContain('בתוספת מע"מ כדין');
   });
 
@@ -412,7 +412,7 @@ describe("buildContext — sale commission clause", () => {
       broker: BROKER, client: CLIENT,
       contract: { ...SALE_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 1.5 },
     });
-    expect(ctx.saleCommissionClause).toContain("ל-1.5% ממחיר העסקה הכולל");
+    expect(ctx.saleCommissionClause).toContain("בשיעור של 1.5% ממחיר העסקה הכולל");
   });
 
   it("FIXED mode states the stored commission amount", () => {
@@ -443,7 +443,7 @@ describe("buildContext — sale commission clause", () => {
       contract: { ...SALE_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 2 },
     });
     const out = resolveTemplate("5.1 {{saleCommissionClause}}", ctx);
-    expect(out).toBe('5.1 ברכישת נכס – סך השווה ל-2% ממחיר העסקה הכולל, בתוספת מע"מ כדין.');
+    expect(out).toBe('5.1 ברכישת נכס – דמי תיווך בשיעור של 2% ממחיר העסקה הכולל, בתוספת מע"מ כדין.');
   });
 });
 
@@ -522,12 +522,12 @@ describe("buildContext — BOTH commission clauses", () => {
 // RENTAL wordings byte-identical.
 
 describe("non-regression — SALE and RENTAL clause wordings unchanged", () => {
-  it("SALE percent wording is byte-identical", () => {
+  it("SALE percent wording pins the approved platform sentence", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
       contract: { ...CONTRACT, dealType: "SALE", saleCommissionMode: "PERCENT", saleCommissionPercent: 2 },
     });
-    expect(ctx.saleCommissionClause).toBe('ברכישת נכס – סך השווה ל-2% ממחיר העסקה הכולל, בתוספת מע"מ כדין.');
+    expect(ctx.saleCommissionClause).toBe('ברכישת נכס – דמי תיווך בשיעור של 2% ממחיר העסקה הכולל, בתוספת מע"מ כדין.');
   });
 
   it("SALE fixed wording is byte-identical (amount from commission)", () => {
@@ -733,12 +733,12 @@ describe("non-regression — INTERESTED wordings unchanged with templateKey pass
     expect(ctx.rentalCommissionClause).toBe('בשכירות – דמי תיווך בסכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.');
   });
 
-  it("INTERESTED_BUYER_SALE percent clause is byte-identical", () => {
+  it("INTERESTED_BUYER_SALE percent clause pins the approved platform sentence", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
       contract: { ...CONTRACT, dealType: "SALE", templateKey: "INTERESTED_BUYER_SALE", saleCommissionMode: "PERCENT", saleCommissionPercent: 2 },
     });
-    expect(ctx.saleCommissionClause).toBe('ברכישת נכס – סך השווה ל-2% ממחיר העסקה הכולל, בתוספת מע"מ כדין.');
+    expect(ctx.saleCommissionClause).toBe('ברכישת נכס – דמי תיווך בשיעור של 2% ממחיר העסקה הכולל, בתוספת מע"מ כדין.');
   });
 
   it("INTERESTED_BUYER_SALE fixed clause is byte-identical", () => {

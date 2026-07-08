@@ -220,8 +220,10 @@ export function buildContext(opts: {
     ? (opts.contract.saleCommissionMode === "PERCENT" && salePct != null
         ? `בעסקת מכר: בשיעור של ${String(Number(salePct.toFixed(2)))}% ממחיר הרכישה הכולל של הנכס, בתוספת מע"מ כדין.`
         : `בעסקת מכר: דמי תיווך בסך של ${formatAgorot(opts.contract.commissionSale ?? opts.contract.commission)}, בתוספת מע"מ כדין.`)
+    // Interested-sale wording — the approved platform variant of the lawyer
+    // document ("דמי תיווך בשיעור של X%"; the source says "סך השווה ל-X%").
     : (opts.contract.saleCommissionMode === "PERCENT" && salePct != null
-        ? `ברכישת נכס – סך השווה ל-${String(Number(salePct.toFixed(2)))}% ממחיר העסקה הכולל, בתוספת מע"מ כדין.`
+        ? `ברכישת נכס – דמי תיווך בשיעור של ${String(Number(salePct.toFixed(2)))}% ממחיר העסקה הכולל, בתוספת מע"מ כדין.`
         : `ברכישת נכס – דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`);
 
   return {

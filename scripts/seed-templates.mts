@@ -191,6 +191,11 @@ const TEMPLATES: Array<{
     // • The law-reference subtitle line is a platform addition (not in the source
     //   document) for structural consistency with the other templates.
     // • Original legal numbering is preserved; 5.1/5.2/5.3 render as paragraph text.
+    // • Re-validated 2026-07-08 against the re-uploaded lawyer doc ("שכירות (1).docx",
+    //   MD5-identical to the original "מכירה .docx"): body unchanged. The clause 5.1
+    //   PERCENT wording in buildContext is the approved platform variant
+    //   ("דמי תיווך בשיעור של X%") — a conscious deviation from the source document's
+    //   "סך השווה ל-X%". Do not revert it to the source wording.
     {
       key: "INTERESTED_BUYER_SALE",
       language: "HE",
