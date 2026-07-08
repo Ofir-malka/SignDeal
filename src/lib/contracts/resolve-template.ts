@@ -159,12 +159,12 @@ export function buildContext(opts: {
 }): TemplateContext {
   const isBoth = opts.contract.dealType === "BOTH";
 
-  // Dynamic rental clause — wording differs between the interested-rental
-  // template ("בשכירות – …", incl. MONTHS 1-12), the BOTH template
-  // ("בעסקת שכירות: …") and the owner-exclusive rental template, matching the
-  // lawyer text of each document. Legacy ONE_MONTH / absent modes map to the
-  // one-month sentence. The amount always comes from `commission`
-  // (for BOTH that IS the rental-side commission).
+  // Dynamic rental clause — wording differs between the owner-exclusive rental
+  // template and the interested wording ("בשכירות – …", incl. MONTHS 1-12),
+  // which is shared by INTERESTED_BUYER_RENTAL and the rental half of
+  // INTERESTED_BUYER_BOTH (their lawyer documents carry the same fee sentence).
+  // Legacy ONE_MONTH / absent modes map to the one-month sentence. The amount
+  // always comes from `commission` (for BOTH that IS the rental-side commission).
   const rentalCommissionClause = opts.contract.templateKey === "OWNER_EXCLUSIVE_RENTAL"
     // Owner-exclusive rental wording: MONTHS states the chosen number of monthly
     // rents (1-12, Hebrew words); ONE_MONTH is treated defensively as one month;
@@ -180,12 +180,9 @@ export function buildContext(opts: {
         }
         return `בעסקת שכירות, דמי התיווך יהיו בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`;
       })()
-    : isBoth
-    ? (opts.contract.rentalCommissionMode === "FIXED"
-        ? `בעסקת שכירות: דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`
-        : `בעסקת שכירות: סכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.`)
     : (() => {
-        // Interested-rental wording (INTERESTED_BUYER_RENTAL + legacy callers):
+        // Interested wording (INTERESTED_BUYER_RENTAL, the rental half of
+        // INTERESTED_BUYER_BOTH, + legacy callers):
         // MONTHS states the chosen number of monthly rents (1-12, Hebrew words);
         // FIXED states the stored amount; legacy ONE_MONTH and absent modes map
         // to the one-month sentence. MONTHS without a valid count falls back to
@@ -217,9 +214,12 @@ export function buildContext(opts: {
         ? `בעסקת מכר, דמי התיווך יהיו בשיעור של ${String(Number(salePct.toFixed(2)))}% ממחיר המכירה הכולל של הנכס, בתוספת מע"מ כדין.`
         : `בעסקת מכר, דמי התיווך יהיו בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`)
     : isBoth
+    // BOTH sale wording ("בקנייה – …") — the approved platform variant of the
+    // BOTH lawyer document (source typos corrected); the amount comes from
+    // `commissionSale` (the sale side; `commission` is the rental side there).
     ? (opts.contract.saleCommissionMode === "PERCENT" && salePct != null
-        ? `בעסקת מכר: בשיעור של ${String(Number(salePct.toFixed(2)))}% ממחיר הרכישה הכולל של הנכס, בתוספת מע"מ כדין.`
-        : `בעסקת מכר: דמי תיווך בסך של ${formatAgorot(opts.contract.commissionSale ?? opts.contract.commission)}, בתוספת מע"מ כדין.`)
+        ? `בקנייה – דמי תיווך בשיעור של ${String(Number(salePct.toFixed(2)))}% ממחיר העסקה הכולל, בתוספת מע"מ כדין.`
+        : `בקנייה – דמי תיווך בסך של ${formatAgorot(opts.contract.commissionSale ?? opts.contract.commission)}, בתוספת מע"מ כדין.`)
     // Interested-sale wording — the approved platform variant of the lawyer
     // document ("דמי תיווך בשיעור של X%"; the source says "סך השווה ל-X%").
     : (opts.contract.saleCommissionMode === "PERCENT" && salePct != null

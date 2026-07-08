@@ -451,6 +451,8 @@ describe("buildContext — sale commission clause", () => {
 
 describe("buildContext — BOTH commission clauses", () => {
   // For BOTH: commission = rental-side fee, commissionSale = sale-side fee.
+  // v2 wordings: the rental half shares the interested-rental wording
+  // ("בשכירות – …"); the sale half uses the BOTH wording ("בקנייה – …").
   const BOTH_CONTRACT = {
     ...CONTRACT,
     dealType:       "BOTH",
@@ -458,37 +460,36 @@ describe("buildContext — BOTH commission clauses", () => {
     commissionSale: 30_000_00,   // sale-side:   ₪30,000
   };
 
-  it("sale percent 2% uses the BOTH wording", () => {
+  it("rental MONTHS with 1 month states one month", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
-      contract: { ...BOTH_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 2 },
+      contract: { ...BOTH_CONTRACT, rentalCommissionMode: "MONTHS", rentalCommissionMonths: 1 },
     });
-    expect(ctx.saleCommissionClause).toBe('בעסקת מכר: בשיעור של 2% ממחיר הרכישה הכולל של הנכס, בתוספת מע"מ כדין.');
+    expect(ctx.rentalCommissionClause).toBe('בשכירות – דמי תיווך בסכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.');
   });
 
-  it("sale percent 1.5% renders as 1.5%", () => {
+  it("rental MONTHS with 2 months states two months", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
-      contract: { ...BOTH_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 1.5 },
+      contract: { ...BOTH_CONTRACT, rentalCommissionMode: "MONTHS", rentalCommissionMonths: 2 },
     });
-    expect(ctx.saleCommissionClause).toContain("בשיעור של 1.5% ממחיר הרכישה הכולל");
+    expect(ctx.rentalCommissionClause).toContain("דמי שכירות של שני חודשים");
   });
 
-  it("sale FIXED uses the amount from commissionSale (NOT commission)", () => {
+  it("rental MONTHS with 12 months states twelve months", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
-      contract: { ...BOTH_CONTRACT, saleCommissionMode: "FIXED" },
+      contract: { ...BOTH_CONTRACT, rentalCommissionMode: "MONTHS", rentalCommissionMonths: 12 },
     });
-    expect(ctx.saleCommissionClause).toBe('בעסקת מכר: דמי תיווך בסך של ₪30,000, בתוספת מע"מ כדין.');
-    expect(ctx.saleCommissionClause).not.toContain("₪4,500");
+    expect(ctx.rentalCommissionClause).toContain("דמי שכירות של שנים עשר חודשים");
   });
 
-  it("rental ONE_MONTH uses the BOTH wording", () => {
+  it("rental legacy ONE_MONTH maps to the one-month sentence", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
       contract: { ...BOTH_CONTRACT, rentalCommissionMode: "ONE_MONTH" },
     });
-    expect(ctx.rentalCommissionClause).toBe('בעסקת שכירות: סכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.');
+    expect(ctx.rentalCommissionClause).toBe('בשכירות – דמי תיווך בסכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.');
   });
 
   it("rental FIXED uses the amount from commission (the rental side)", () => {
@@ -496,24 +497,49 @@ describe("buildContext — BOTH commission clauses", () => {
       broker: BROKER, client: CLIENT,
       contract: { ...BOTH_CONTRACT, rentalCommissionMode: "FIXED" },
     });
-    expect(ctx.rentalCommissionClause).toBe('בעסקת שכירות: דמי תיווך בסך של ₪4,500, בתוספת מע"מ כדין.');
+    expect(ctx.rentalCommissionClause).toBe('בשכירות – דמי תיווך בסך של ₪4,500, בתוספת מע"מ כדין.');
     expect(ctx.rentalCommissionClause).not.toContain("₪30,000");
+  });
+
+  it("sale percent 2% uses the BOTH wording", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...BOTH_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 2 },
+    });
+    expect(ctx.saleCommissionClause).toBe('בקנייה – דמי תיווך בשיעור של 2% ממחיר העסקה הכולל, בתוספת מע"מ כדין.');
+  });
+
+  it("sale percent 1.5% renders as 1.5%", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...BOTH_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 1.5 },
+    });
+    expect(ctx.saleCommissionClause).toContain("בקנייה – דמי תיווך בשיעור של 1.5%");
+  });
+
+  it("sale FIXED uses the amount from commissionSale (NOT commission)", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...BOTH_CONTRACT, saleCommissionMode: "FIXED" },
+    });
+    expect(ctx.saleCommissionClause).toBe('בקנייה – דמי תיווך בסך של ₪30,000, בתוספת מע"מ כדין.');
+    expect(ctx.saleCommissionClause).not.toContain("₪4,500");
   });
 
   it("fallbacks: absent modes → one-month rental wording + fixed sale wording from commissionSale", () => {
     const ctx = buildContext({ broker: BROKER, client: CLIENT, contract: BOTH_CONTRACT });
-    expect(ctx.rentalCommissionClause).toContain("סכום השווה לדמי שכירות של חודש אחד");
+    expect(ctx.rentalCommissionClause).toContain("דמי שכירות של חודש אחד");
     expect(ctx.saleCommissionClause).toContain("₪30,000");
   });
 
-  it("resolveTemplate substitutes both BOTH clauses", () => {
+  it("resolveTemplate substitutes both BOTH clauses (rental-first v2 order)", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
-      contract: { ...BOTH_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 2, rentalCommissionMode: "ONE_MONTH" },
+      contract: { ...BOTH_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 2, rentalCommissionMode: "MONTHS", rentalCommissionMonths: 2 },
     });
-    const out = resolveTemplate("5.1 {{saleCommissionClause}}\n5.2 {{rentalCommissionClause}}", ctx);
-    expect(out).toContain("5.1 בעסקת מכר: בשיעור של 2%");
-    expect(out).toContain("5.2 בעסקת שכירות: סכום השווה");
+    const out = resolveTemplate("5.1 {{rentalCommissionClause}}\n5.2 {{saleCommissionClause}}", ctx);
+    expect(out).toContain("5.1 בשכירות – דמי תיווך בסכום השווה לדמי שכירות של שני חודשים");
+    expect(out).toContain("5.2 בקנייה – דמי תיווך בשיעור של 2%");
   });
 });
 
@@ -749,7 +775,7 @@ describe("non-regression — INTERESTED wordings unchanged with templateKey pass
     expect(ctx.saleCommissionClause).toBe('ברכישת נכס – דמי תיווך בסך של ₪15,000, בתוספת מע"מ כדין.');
   });
 
-  it("INTERESTED_BUYER_BOTH clauses are byte-identical", () => {
+  it("INTERESTED_BUYER_BOTH clauses pin the v2 sentences", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
       contract: {
@@ -758,7 +784,7 @@ describe("non-regression — INTERESTED wordings unchanged with templateKey pass
         rentalCommissionMode: "ONE_MONTH", saleCommissionMode: "FIXED",
       },
     });
-    expect(ctx.rentalCommissionClause).toBe('בעסקת שכירות: סכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.');
-    expect(ctx.saleCommissionClause).toBe('בעסקת מכר: דמי תיווך בסך של ₪30,000, בתוספת מע"מ כדין.');
+    expect(ctx.rentalCommissionClause).toBe('בשכירות – דמי תיווך בסכום השווה לדמי שכירות של חודש אחד, בתוספת מע"מ כדין.');
+    expect(ctx.saleCommissionClause).toBe('בקנייה – דמי תיווך בסך של ₪30,000, בתוספת מע"מ כדין.');
   });
 });

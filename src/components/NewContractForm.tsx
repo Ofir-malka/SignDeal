@@ -103,8 +103,8 @@ interface FormState {
   commissionNis:               string;
   commissionPct:               string;
   rentalCommissionPreset:      RentalCommissionPreset;
+  rentalCommissionMonths:      string;   // "1"–"12"; used by every months-based rental fee flow
   // ── Owner-exclusive rental only ───────────────────────────────────────────
-  rentalCommissionMonths:      string;   // "1"–"12"; always "1" for interested flows (never exposed there)
   exclusivityStart:            string;   // "YYYY-MM-DD" (input value)
   exclusivityDurationMode:     "months" | "custom";
   exclusivityMonths:           string;   // quick-chip months ("1"|"3"|"6"|"12")
@@ -234,9 +234,8 @@ function calcCommissionAgorot(f: FormState): number {
     return Math.round(priceNis * pct);   // priceNis(₪) × pct(%) = commission in agorot
   }
   // RENTAL and BOTH — months preset: commission = N × monthly rent.
-  // rentalCommissionMonths is always "1" for interested flows (no UI exposes
-  // it there), so their result is unchanged; the owner-exclusive rental flow
-  // exposes a 1-12 selector.
+  // Every months-based rental flow (interested rental, the rental half of BOTH
+  // and owner-exclusive rental) exposes a 1-12 selector.
   if ((f.dealType === "RENTAL" || f.dealType === "BOTH") && f.rentalCommissionPreset !== "fixed") {
     if (isNaN(priceNis)) return NaN;
     const months = parseInt(f.rentalCommissionMonths, 10);
@@ -1428,11 +1427,11 @@ export function NewContractForm({ subscription, initialContractType = "intereste
       ...(commissionSaleAgorot !== null ? { commissionSale: commissionSaleAgorot } : {}),
       // Owner-exclusive never hides the address (the owner knows it; toggle hidden).
       hideFullAddressFromClient: isOwner ? false : form.hideFullAddressFromClient,
-      // Rental fee mode — both RENTAL flows (interested + owner-exclusive) use
-      // MONTHS (1-12) / FIXED; the server persists these per template key.
-      // ONE_MONTH remains a legacy value accepted by the API (maps to 1 month).
-      // BOTH keeps its own wiring below with the legacy ONE_MONTH preset.
-      ...(form.dealType === "RENTAL"
+      // Rental fee mode — every rental-fee flow (RENTAL + the rental half of
+      // BOTH, interested and owner-exclusive alike) uses MONTHS (1-12) / FIXED;
+      // the server persists these per template key. ONE_MONTH remains a legacy
+      // value accepted by the API (maps to 1 month).
+      ...(form.dealType === "RENTAL" || form.dealType === "BOTH"
         ? {
             rentalCommissionMode: form.rentalCommissionPreset === "fixed" ? "FIXED" : "MONTHS",
             ...(form.rentalCommissionPreset !== "fixed"
@@ -1457,14 +1456,14 @@ export function NewContractForm({ subscription, initialContractType = "intereste
               : {}),
           }
         : {}),
-      // BOTH — sale price + both fee modes, from the BOTH-specific state vars
+      // BOTH — sale price + sale fee mode, from the BOTH-specific state vars
       // (commissionSaleMode/commissionSalePct, NOT the SALE-side commissionMode/Pct).
-      // The API requires propertySalePrice for BOTH and renders clauses 5.1/5.2 from
-      // the modes (sale amount from commissionSale, rental amount from commission).
+      // The API requires propertySalePrice for BOTH and renders clause 5.2 from the
+      // mode (sale amount from commissionSale); the rental mode (clause 5.1) is
+      // sent by the shared RENTAL/BOTH spread above.
       ...(form.dealType === "BOTH"
         ? {
             propertySalePrice: Math.round(parseNis(form.salePriceNis) * 100),
-            rentalCommissionMode: form.rentalCommissionPreset === "fixed" ? "FIXED" : "ONE_MONTH",
             saleCommissionMode: form.commissionSaleMode === "percent" ? "PERCENT" : "FIXED",
             ...(form.commissionSaleMode === "percent"
               ? { saleCommissionPercent: parseFloat(form.commissionSalePct) }
@@ -1992,18 +1991,13 @@ export function NewContractForm({ subscription, initialContractType = "intereste
 
             {/* ── RENTAL presets (shared between RENTAL and the rental half of BOTH) */}
             {(form.dealType === "RENTAL" || form.dealType === "BOTH") && (() => {
-              // RENTAL flows (interested + owner-exclusive): the months option
-              // opens a 1-12 selector below. BOTH keeps the legacy one-month preset.
-              const monthsUi = isOwner || form.dealType === "RENTAL";
-              const presets: { id: RentalCommissionPreset; label: string; sub?: string }[] = monthsUi
-                ? [
-                    { id: "one_month", label: "לפי חודשי שכירות"          },
-                    { id: "fixed",     label: "סכום ידני (₪)"              },
-                  ]
-                : [
-                    { id: "one_month", label: "חודש שכירות",    sub: "×1"  },
-                    { id: "fixed",     label: "סכום ידני (₪)"              },
-                  ];
+              // Every rental-fee flow (interested rental, the rental half of BOTH
+              // and owner-exclusive rental): the months option opens a 1-12
+              // selector below.
+              const presets: { id: RentalCommissionPreset; label: string; sub?: string }[] = [
+                { id: "one_month", label: "לפי חודשי שכירות"          },
+                { id: "fixed",     label: "סכום ידני (₪)"              },
+              ];
               return (
                 <div>
                   <FieldLabel>{form.dealType === "BOTH" ? "עמלת שכירות" : "עמלת תיווך"}</FieldLabel>
@@ -2030,8 +2024,8 @@ export function NewContractForm({ subscription, initialContractType = "intereste
                       </button>
                     ))}
                   </div>
-                  {/* Number of monthly rents (1-12) — interested rental + owner-exclusive */}
-                  {monthsUi && form.rentalCommissionPreset !== "fixed" && (
+                  {/* Number of monthly rents (1-12) — all months-based rental flows */}
+                  {form.rentalCommissionPreset !== "fixed" && (
                     <div className="mb-3">
                       <select
                         value={form.rentalCommissionMonths}
