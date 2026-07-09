@@ -581,17 +581,17 @@ describe("non-regression — SALE and RENTAL clause wordings unchanged", () => {
   });
 });
 
-// ─── buildContext — owner-exclusive rental clause (templateKey-aware) ─────────
+// ─── buildContext — owner service-order rental clause (templateKey-aware) ─────
 
-describe("buildContext — owner-exclusive rental commission clause", () => {
+describe("buildContext — owner service-order rental commission clause", () => {
   const OWNER_CONTRACT = {
     ...CONTRACT,
     dealType:    "RENTAL",
-    templateKey: "OWNER_EXCLUSIVE_RENTAL",
+    templateKey: "OWNER_SERVICE_ORDER_RENTAL",
     commission:  9_000_00,   // ₪9,000 (e.g. 2 × ₪4,500 rent)
   };
 
-  it("MONTHS mode with 1 month", () => {
+  it("MONTHS mode with 1 month (exact sentence, incl. ללא תלות)", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
       contract: { ...OWNER_CONTRACT, rentalCommissionMode: "MONTHS", rentalCommissionMonths: 1 },
@@ -605,14 +605,6 @@ describe("buildContext — owner-exclusive rental commission clause", () => {
       contract: { ...OWNER_CONTRACT, rentalCommissionMode: "MONTHS", rentalCommissionMonths: 2 },
     });
     expect(ctx.rentalCommissionClause).toContain("דמי שכירות של שני חודשים, ללא תלות");
-  });
-
-  it("MONTHS mode with 6 months", () => {
-    const ctx = buildContext({
-      broker: BROKER, client: CLIENT,
-      contract: { ...OWNER_CONTRACT, rentalCommissionMode: "MONTHS", rentalCommissionMonths: 6 },
-    });
-    expect(ctx.rentalCommissionClause).toContain("דמי שכירות של שישה חודשים");
   });
 
   it("MONTHS mode with 12 months", () => {
@@ -631,20 +623,38 @@ describe("buildContext — owner-exclusive rental commission clause", () => {
     expect(ctx.rentalCommissionClause).toBe('בעסקת שכירות, דמי התיווך יהיו בסך של ₪9,000, בתוספת מע"מ כדין.');
   });
 
-  it("MONTHS mode without a month count falls back to the fixed-amount wording", () => {
-    const ctx = buildContext({
-      broker: BROKER, client: CLIENT,
-      contract: { ...OWNER_CONTRACT, rentalCommissionMode: "MONTHS", rentalCommissionMonths: null },
-    });
-    expect(ctx.rentalCommissionClause).toContain("בסך של ₪9,000");
-  });
-
-  it("ONE_MONTH on the owner key is treated as one month (defensive)", () => {
+  it("legacy ONE_MONTH maps to the one-month sentence", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
       contract: { ...OWNER_CONTRACT, rentalCommissionMode: "ONE_MONTH" },
     });
     expect(ctx.rentalCommissionClause).toContain("דמי שכירות של חודש אחד, ללא תלות");
+  });
+
+  it("MONTHS without a month count falls back to the fixed-amount sentence (never one month)", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...OWNER_CONTRACT, rentalCommissionMode: "MONTHS", rentalCommissionMonths: null },
+    });
+    expect(ctx.rentalCommissionClause).toBe('בעסקת שכירות, דמי התיווך יהיו בסך של ₪9,000, בתוספת מע"מ כדין.');
+  });
+
+  it("absent mode falls back to the fixed-amount sentence (never one month)", () => {
+    const ctx = buildContext({ broker: BROKER, client: CLIENT, contract: OWNER_CONTRACT });
+    expect(ctx.rentalCommissionClause).toBe('בעסקת שכירות, דמי התיווך יהיו בסך של ₪9,000, בתוספת מע"מ כדין.');
+  });
+
+  it("the BOTH document's rental clause omits ללא תלות", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: {
+        ...CONTRACT, dealType: "BOTH", templateKey: "OWNER_SERVICE_ORDER_BOTH",
+        commission: 4_500_00, commissionSale: 30_000_00,
+        rentalCommissionMode: "MONTHS", rentalCommissionMonths: 2,
+      },
+    });
+    expect(ctx.rentalCommissionClause).toBe('בעסקת שכירות, דמי התיווך יהיו בסכום השווה לדמי שכירות של שני חודשים, בתוספת מע"מ כדין.');
+    expect(ctx.rentalCommissionClause).not.toContain("ללא תלות");
   });
 });
 
@@ -655,7 +665,7 @@ describe("buildContext — exclusivity period", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
       contract: {
-        ...CONTRACT, dealType: "RENTAL", templateKey: "OWNER_EXCLUSIVE_RENTAL",
+        ...CONTRACT, dealType: "RENTAL",
         exclusivityStartsAt: new Date("2026-08-01T00:00:00"),
         exclusivityEndsAt:   new Date("2026-10-31T00:00:00"),
       },
@@ -674,7 +684,7 @@ describe("buildContext — exclusivity period", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
       contract: {
-        ...CONTRACT, dealType: "RENTAL", templateKey: "OWNER_EXCLUSIVE_RENTAL",
+        ...CONTRACT, dealType: "RENTAL",
         exclusivityStartsAt: new Date("2026-08-01T00:00:00"),
         exclusivityEndsAt:   new Date("2026-10-31T00:00:00"),
       },
@@ -684,22 +694,22 @@ describe("buildContext — exclusivity period", () => {
   });
 });
 
-// ─── buildContext — owner-exclusive sale clause (templateKey-aware) ───────────
+// ─── buildContext — owner service-order sale clause (templateKey-aware) ───────
 
-describe("buildContext — owner-exclusive sale commission clause", () => {
+describe("buildContext — owner service-order sale commission clause", () => {
   const OWNER_SALE_CONTRACT = {
     ...CONTRACT,
     dealType:    "SALE",
-    templateKey: "OWNER_EXCLUSIVE_SALE",
+    templateKey: "OWNER_SERVICE_ORDER_SALE",
     // CONTRACT.commission = 1,500,000 agorot -> ₪15,000
   };
 
-  it("PERCENT mode with 2% states the percentage of the sale price", () => {
+  it("PERCENT mode with 2% states the percentage of the deal value (exact sentence)", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
       contract: { ...OWNER_SALE_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 2 },
     });
-    expect(ctx.saleCommissionClause).toBe('בעסקת מכר, דמי התיווך יהיו בשיעור של 2% ממחיר המכירה הכולל של הנכס, בתוספת מע"מ כדין.');
+    expect(ctx.saleCommissionClause).toBe('בעסקת מכירה, דמי התיווך יהיו בסכום השווה ל-2% משווי העסקה, בתוספת מע"מ כדין.');
   });
 
   it("PERCENT mode with a decimal percentage (1.5) renders as 1.5%", () => {
@@ -707,7 +717,7 @@ describe("buildContext — owner-exclusive sale commission clause", () => {
       broker: BROKER, client: CLIENT,
       contract: { ...OWNER_SALE_CONTRACT, saleCommissionMode: "PERCENT", saleCommissionPercent: 1.5 },
     });
-    expect(ctx.saleCommissionClause).toContain("בשיעור של 1.5% ממחיר המכירה הכולל");
+    expect(ctx.saleCommissionClause).toContain("ל-1.5% משווי העסקה");
   });
 
   it("FIXED mode states the stored commission amount", () => {
@@ -715,7 +725,7 @@ describe("buildContext — owner-exclusive sale commission clause", () => {
       broker: BROKER, client: CLIENT,
       contract: { ...OWNER_SALE_CONTRACT, saleCommissionMode: "FIXED" },
     });
-    expect(ctx.saleCommissionClause).toBe('בעסקת מכר, דמי התיווך יהיו בסך של ₪15,000, בתוספת מע"מ כדין.');
+    expect(ctx.saleCommissionClause).toBe('בעסקת מכירה, דמי התיווך יהיו בסך של ₪15,000, בתוספת מע"מ כדין.');
   });
 
   it("falls back to the fixed-amount wording when the mode is absent", () => {
@@ -731,17 +741,68 @@ describe("buildContext — owner-exclusive sale commission clause", () => {
     expect(ctx.saleCommissionClause).toContain("בסך של ₪15,000");
   });
 
-  it("exclusivity placeholders render on the sale key", () => {
+  // BOTH document — commission (rental side) vs commissionSale (sale side) must never mix.
+  const OWNER_BOTH_CONTRACT = {
+    ...CONTRACT,
+    dealType:       "BOTH",
+    templateKey:    "OWNER_SERVICE_ORDER_BOTH",
+    commission:     4_500_00,    // rental-side: ₪4,500
+    commissionSale: 30_000_00,   // sale-side:   ₪30,000
+  };
+
+  it("BOTH document: sale FIXED uses commissionSale (NOT the rental commission)", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...OWNER_BOTH_CONTRACT, saleCommissionMode: "FIXED" },
+    });
+    expect(ctx.saleCommissionClause).toBe('בעסקת מכירה, דמי התיווך יהיו בסך של ₪30,000, בתוספת מע"מ כדין.');
+    expect(ctx.saleCommissionClause).not.toContain("₪4,500");
+  });
+
+  it("BOTH document: rental FIXED stays on commission (NOT commissionSale)", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...OWNER_BOTH_CONTRACT, rentalCommissionMode: "FIXED", saleCommissionMode: "FIXED" },
+    });
+    expect(ctx.rentalCommissionClause).toBe('בעסקת שכירות, דמי התיווך יהיו בסך של ₪4,500, בתוספת מע"מ כדין.');
+    expect(ctx.rentalCommissionClause).not.toContain("₪30,000");
+  });
+
+  it("BOTH document: rental MONTHS + sale PERCENT render together", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
       contract: {
-        ...OWNER_SALE_CONTRACT,
-        exclusivityStartsAt: new Date("2026-08-01T00:00:00"),
-        exclusivityEndsAt:   new Date("2026-10-31T00:00:00"),
+        ...OWNER_BOTH_CONTRACT,
+        rentalCommissionMode: "MONTHS", rentalCommissionMonths: 3,
+        saleCommissionMode: "PERCENT", saleCommissionPercent: 2,
       },
     });
-    expect(ctx.exclusivityStartDate).toBe("01.08.2026");
-    expect(ctx.exclusivityEndDate).toBe("31.10.2026");
+    expect(ctx.rentalCommissionClause).toContain("דמי שכירות של שלושה חודשים");
+    expect(ctx.saleCommissionClause).toContain("ל-2% משווי העסקה");
+  });
+});
+
+// ─── Deprecated owner-exclusive keys — no longer templateKey-special ──────────
+// OWNER_EXCLUSIVE_RENTAL / OWNER_EXCLUSIVE_SALE are superseded by the owner
+// service-order family. Passing them now falls through to the interested
+// wordings — this affects only unsigned dev-era rows on sign-time regeneration
+// (frozen generatedText is never touched).
+
+describe("deprecated owner-exclusive keys fall through to the interested wordings", () => {
+  it("OWNER_EXCLUSIVE_RENTAL renders the interested rental wording", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, dealType: "RENTAL", templateKey: "OWNER_EXCLUSIVE_RENTAL", rentalCommissionMode: "FIXED" },
+    });
+    expect(ctx.rentalCommissionClause).toBe('בשכירות – דמי תיווך בסך של ₪15,000, בתוספת מע"מ כדין.');
+  });
+
+  it("OWNER_EXCLUSIVE_SALE renders the interested sale wording", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, dealType: "SALE", templateKey: "OWNER_EXCLUSIVE_SALE", saleCommissionMode: "PERCENT", saleCommissionPercent: 2 },
+    });
+    expect(ctx.saleCommissionClause).toBe('ברכישת נכס – דמי תיווך בשיעור של 2% ממחיר העסקה הכולל, בתוספת מע"מ כדין.');
   });
 });
 

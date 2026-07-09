@@ -21,8 +21,11 @@ const KEYS_REQUIRING_CLIENT_ADDRESS = new Set<string>([
   "INTERESTED_BUYER_RENTAL",
   "INTERESTED_BUYER_SALE",
   "INTERESTED_BUYER_BOTH",
-  "OWNER_EXCLUSIVE_RENTAL",
-  "OWNER_EXCLUSIVE_SALE",
+  "OWNER_EXCLUSIVE_RENTAL",      // deprecated key — kept for old dev-era rows
+  "OWNER_EXCLUSIVE_SALE",        // deprecated key — kept for old dev-era rows
+  "OWNER_SERVICE_ORDER_RENTAL",
+  "OWNER_SERVICE_ORDER_SALE",
+  "OWNER_SERVICE_ORDER_BOTH",
 ]);
 
 // ── GET /api/contracts/sign/[token] ──────────────────────────────────────────

@@ -269,12 +269,12 @@ export async function POST(request: Request) {
       propertyId,
       existingClientDbId,
       hideFullAddressFromClient,
-      rentalCommissionMode,   // "ONE_MONTH" | "FIXED" | "MONTHS" — rental fee mode (MONTHS = owner-exclusive rental only)
-      rentalCommissionMonths, // 1-12 — only when rentalCommissionMode = "MONTHS"
-      saleCommissionMode,     // "PERCENT" | "FIXED"   — only meaningful for the sale interested flow
+      rentalCommissionMode,   // "ONE_MONTH" (legacy) | "FIXED" | "MONTHS" — rental fee mode
+      rentalCommissionMonths, // 1-12 — required when rentalCommissionMode = "MONTHS"
+      saleCommissionMode,     // "PERCENT" | "FIXED"   — sale fee mode (interested + owner service-order)
       saleCommissionPercent,  // human percent (2, 1.5) — only when saleCommissionMode = "PERCENT"
-      exclusivityStartsAt,    // exclusivity period start — owner-exclusive templates only
-      exclusivityEndsAt,      // exclusivity period end   — owner-exclusive templates only
+      exclusivityStartsAt,    // exclusivity period start — reserved for OWNER_EXCLUSIVE_GENERAL (Phase 2)
+      exclusivityEndsAt,      // exclusivity period end   — reserved for OWNER_EXCLUSIVE_GENERAL (Phase 2)
       language: rawLanguage,
     } = body;
 
@@ -345,17 +345,6 @@ export async function POST(request: Request) {
       validatedPropertySalePrice = vPropertySalePrice.value;
     }
 
-    // ── Owner-exclusive: RENTAL and SALE variants are implemented ─────────────
-    // BOTH is still blocked so direct API posts cannot fall back to the legacy
-    // OWNER_EXCLUSIVE placeholder template (not lawyer-approved).
-    // Remove when OWNER_EXCLUSIVE_BOTH ships.
-    if (contractType === CONTRACT_TYPE.OWNER_EXCLUSIVE && validatedDealType === "BOTH") {
-      return NextResponse.json(
-        { error: "חוזה בלעדיות אינו נתמך עדיין לעסקה משולבת (מכירה והשכרה)" },
-        { status: 400 },
-      );
-    }
-
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
@@ -417,10 +406,15 @@ export async function POST(request: Request) {
         SALE:   "INTERESTED_BUYER_SALE",
         BOTH:   "INTERESTED_BUYER_BOTH",
       },
+      // Owner flow: the service-order agreement (fee terms) is the PRIMARY
+      // document for every deal type. OWNER_EXCLUSIVE_GENERAL is intentionally
+      // NOT here — the optional exclusivity document is never dealType-resolved
+      // (Phase 2/3 creates it explicitly alongside the primary). The deprecated
+      // OWNER_EXCLUSIVE_RENTAL/SALE keys are no longer reachable.
       [CONTRACT_TYPE.OWNER_EXCLUSIVE]: {
-        RENTAL: "OWNER_EXCLUSIVE_RENTAL",
-        SALE:   "OWNER_EXCLUSIVE_SALE",
-        // BOTH: blocked by the guard above until OWNER_EXCLUSIVE_BOTH ships
+        RENTAL: "OWNER_SERVICE_ORDER_RENTAL",
+        SALE:   "OWNER_SERVICE_ORDER_SALE",
+        BOTH:   "OWNER_SERVICE_ORDER_BOTH",
       },
     };
 
@@ -433,22 +427,28 @@ export async function POST(request: Request) {
       ?? null;
 
     // Persist the rental commission mode ONLY for templates whose clause needs it
-    // (interested rental/both + owner-exclusive rental). Absent mode defaults to
-    // ONE_MONTH for the interested flows and FIXED for owner-exclusive (its
-    // fallback wording states the stored amount) — deterministic either way.
+    // (interested rental/both + owner service-order rental/both). The interested
+    // flows keep their released ONE_MONTH default; the owner service-order flow
+    // requires an explicit choice — missing data must never silently become
+    // one month (product rule).
+    const isOwnerRentalFeeKey =
+      autoKey === "OWNER_SERVICE_ORDER_RENTAL" || autoKey === "OWNER_SERVICE_ORDER_BOTH";
+    if (isOwnerRentalFeeKey && vRentalMode.value == null) {
+      return NextResponse.json({ error: "יש לבחור אופן דמי תיווך" }, { status: 400 });
+    }
     const resolvedRentalMode: "ONE_MONTH" | "FIXED" | "MONTHS" | null =
-      autoKey === "INTERESTED_BUYER_RENTAL" || autoKey === "INTERESTED_BUYER_BOTH" || autoKey === "OWNER_EXCLUSIVE_RENTAL"
-        ? (vRentalMode.value ?? (autoKey === "OWNER_EXCLUSIVE_RENTAL" ? "FIXED" : "ONE_MONTH"))
+      autoKey === "INTERESTED_BUYER_RENTAL" || autoKey === "INTERESTED_BUYER_BOTH" || isOwnerRentalFeeKey
+        ? (vRentalMode.value ?? "ONE_MONTH")
         : null;
 
     // MONTHS mode (1-12 monthly rents) is supported by the templates whose rental
-    // fee clause is months-based (interested rental/both + owner-exclusive rental);
-    // the count is required with it.
+    // fee clause is months-based (interested rental/both + owner service-order
+    // rental/both); the count is required with it.
     if (
       resolvedRentalMode === "MONTHS"
-      && autoKey !== "OWNER_EXCLUSIVE_RENTAL"
       && autoKey !== "INTERESTED_BUYER_RENTAL"
       && autoKey !== "INTERESTED_BUYER_BOTH"
+      && !isOwnerRentalFeeKey
     ) {
       return NextResponse.json({ error: "אופן דמי התיווך אינו נתמך עבור סוג חוזה זה" }, { status: 400 });
     }
@@ -458,26 +458,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "יש לבחור מספר חודשי שכירות" }, { status: 400 });
     }
 
-    // Exclusivity period — required for the owner-exclusive templates,
-    // ignored (forced null) for every other key.
-    let resolvedExclusivityStart: Date | null = null;
-    let resolvedExclusivityEnd: Date | null = null;
-    if (autoKey === "OWNER_EXCLUSIVE_RENTAL" || autoKey === "OWNER_EXCLUSIVE_SALE") {
-      if (!vExclusivityStart.value || !vExclusivityEnd.value) {
-        return NextResponse.json({ error: "יש להזין תקופת בלעדיות" }, { status: 400 });
-      }
-      if (vExclusivityEnd.value <= vExclusivityStart.value) {
-        return NextResponse.json({ error: "תאריך סיום הבלעדיות חייב להיות מאוחר מתאריך ההתחלה" }, { status: 400 });
-      }
-      resolvedExclusivityStart = vExclusivityStart.value;
-      resolvedExclusivityEnd   = vExclusivityEnd.value;
-    }
+    // Exclusivity period — reserved for the general exclusivity document
+    // (OWNER_EXCLUSIVE_GENERAL, Phase 2). No Phase 1 key persists it; the
+    // parsed values are validated but intentionally not stored for any key.
 
     // Persist the sale commission mode + percent ONLY for templates whose clause
-    // needs them (sale + both). Absent mode defaults to FIXED so the sale clause
-    // always states the stored amount (truthful + deterministic across regeneration).
+    // needs them (interested sale/both + owner service-order sale/both). Absent
+    // mode defaults to FIXED so the sale clause always states the stored amount
+    // (truthful + deterministic across regeneration).
     const resolvedSaleMode: "PERCENT" | "FIXED" | null =
-      autoKey === "INTERESTED_BUYER_SALE" || autoKey === "INTERESTED_BUYER_BOTH" || autoKey === "OWNER_EXCLUSIVE_SALE"
+      autoKey === "INTERESTED_BUYER_SALE" || autoKey === "INTERESTED_BUYER_BOTH"
+      || autoKey === "OWNER_SERVICE_ORDER_SALE" || autoKey === "OWNER_SERVICE_ORDER_BOTH"
         ? (vSaleMode.value ?? "FIXED")
         : null;
     const resolvedSalePercent: number | null =
@@ -487,7 +478,7 @@ export async function POST(request: Request) {
     }
 
     if (autoKey) {
-      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_EXCLUSIVE_RENTAL" | "OWNER_EXCLUSIVE_SALE";
+      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_SERVICE_ORDER_RENTAL" | "OWNER_SERVICE_ORDER_SALE" | "OWNER_SERVICE_ORDER_BOTH";
       const templateLang = language as "HE" | "EN" | "FR" | "RU" | "AR";
 
       // Resolve by (templateKey + language), fallback to HE if not found
@@ -508,7 +499,7 @@ export async function POST(request: Request) {
           // client/broker identity mixing bug (phone/idNumber mismatch between the
           // client details card and the legal document).
           client: { name: client.name, idNumber: client.idNumber || "", phone: client.phone, email: client.email || "", address: client.address ?? null },
-          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: validatedCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, rentalCommissionMonths: resolvedRentalMonths, saleCommissionMode: resolvedSaleMode, saleCommissionPercent: resolvedSalePercent, templateKey: autoKey, exclusivityStartsAt: resolvedExclusivityStart, exclusivityEndsAt: resolvedExclusivityEnd, createdAt: new Date() },
+          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: validatedCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, rentalCommissionMonths: resolvedRentalMonths, saleCommissionMode: resolvedSaleMode, saleCommissionPercent: resolvedSalePercent, templateKey: autoKey, createdAt: new Date() },
         });
         generatedText = resolveTemplate(tpl.content, ctx);
         resolvedTemplateId = tpl.id;
@@ -538,8 +529,6 @@ export async function POST(request: Request) {
           ...(resolvedRentalMonths != null ? { rentalCommissionMonths: resolvedRentalMonths } : {}),
           ...(resolvedSaleMode ? { saleCommissionMode: resolvedSaleMode } : {}),
           ...(resolvedSalePercent != null ? { saleCommissionPercent: resolvedSalePercent } : {}),
-          ...(resolvedExclusivityStart ? { exclusivityStartsAt: resolvedExclusivityStart } : {}),
-          ...(resolvedExclusivityEnd ? { exclusivityEndsAt: resolvedExclusivityEnd } : {}),
           userId: user.id,
           clientId: client.id,
           signatureToken,
