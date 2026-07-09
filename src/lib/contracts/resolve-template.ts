@@ -83,6 +83,9 @@ export interface TemplateContext {
   // Exclusivity period (owner-exclusive templates) — DD.MM.YYYY, "—" when absent
   exclusivityStartDate:   string;
   exclusivityEndDate:     string;
+  // Primary service-order sibling (OWNER_EXCLUSIVE_GENERAL only) — "—" when absent
+  serviceOrderNumber:     string;   // sibling doc number, chrome format (last 8 chars, uppercased)
+  serviceOrderDate:       string;   // sibling creation date, DD.MM.YYYY
   // Dates
   today:           string;   // DD.MM.YYYY
   contractId:      string;   // last 8 chars of id, uppercased
@@ -154,6 +157,10 @@ export function buildContext(opts: {
     // Exclusivity period (owner-exclusive templates only)
     exclusivityStartsAt?: Date | string | null;
     exclusivityEndsAt?:   Date | string | null;
+    // Primary service-order sibling (loaded via Contract.relatedContractId) —
+    // fills {{serviceOrderNumber}} / {{serviceOrderDate}} on the general
+    // exclusivity document (OWNER_EXCLUSIVE_GENERAL).
+    serviceOrder?: { id: string; createdAt: Date | string } | null;
     createdAt:       Date | string;
   };
 }): TemplateContext {
@@ -262,6 +269,11 @@ export function buildContext(opts: {
     // Exclusivity period — deterministic from the persisted dates
     exclusivityStartDate: opts.contract.exclusivityStartsAt ? isoToDateStr(opts.contract.exclusivityStartsAt) : "—",
     exclusivityEndDate:   opts.contract.exclusivityEndsAt   ? isoToDateStr(opts.contract.exclusivityEndsAt)   : "—",
+    // Primary service-order sibling reference — identical formatting to the
+    // chrome doc number (contractId) and platform dates, so the exclusivity
+    // document's citation always matches what the sibling displays.
+    serviceOrderNumber: opts.contract.serviceOrder ? String(opts.contract.serviceOrder.id).slice(-8).toUpperCase() : "—",
+    serviceOrderDate:   opts.contract.serviceOrder ? isoToDateStr(opts.contract.serviceOrder.createdAt) : "—",
     today:           isoToDateStr(opts.contract.createdAt),
     contractId:      String(opts.contract.id).slice(-8).toUpperCase(),
   };

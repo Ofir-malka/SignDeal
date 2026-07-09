@@ -108,6 +108,9 @@ export async function GET(
       hideFullAddressFromClient: contract.hideFullAddressFromClient,
       generatedText:             contract.generatedText ?? null,
       language:                  contract.language      ?? "HE",
+      // Resolved template key — lets the signing page gate fee chrome for
+      // fee-free documents (hidesFeeChrome / OWNER_EXCLUSIVE_GENERAL).
+      templateKey:               contract.template?.templateKey ?? null,
     });
   } catch (error) {
     console.error("[GET /api/contracts/sign/:token]", error);
@@ -454,6 +457,10 @@ export async function PATCH(
         client: true,
         user:   { select: { fullName: true, licenseNumber: true, phone: true, idNumber: true } },
         template: { select: { templateKey: true } },
+        // Primary service-order sibling (OWNER_EXCLUSIVE_GENERAL only) — lets
+        // generatedText regeneration refill {{serviceOrderNumber}}/{{serviceOrderDate}}
+        // deterministically. Null for every standalone contract.
+        relatedContract: { select: { id: true, createdAt: true } },
       },
     });
 
@@ -582,6 +589,7 @@ export async function PATCH(
                 templateKey:     contract.template?.templateKey ?? null,
                 exclusivityStartsAt: contract.exclusivityStartsAt,
                 exclusivityEndsAt:   contract.exclusivityEndsAt,
+                serviceOrder:    contract.relatedContract ?? null,
                 createdAt:       contract.createdAt,
               },
             });

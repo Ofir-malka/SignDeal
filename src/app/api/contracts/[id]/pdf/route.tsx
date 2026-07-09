@@ -18,7 +18,7 @@ export async function GET(
 
     const contract = await prisma.contract.findFirst({
       where: { id, userId },
-      include: { client: true, payment: true, user: true },
+      include: { client: true, payment: true, user: true, template: { select: { templateKey: true } } },
     });
 
     if (!contract) {
@@ -64,6 +64,9 @@ export async function GET(
       generatedText:             contract.generatedText ?? null,
       templateId:                contract.templateId    ?? null,
       language:                  contract.language      ?? "HE",
+      // Resolved template key — drives fee-chrome suppression in ContractPDF
+      // (hidesFeeChrome / OWNER_EXCLUSIVE_GENERAL).
+      templateKey:               contract.template?.templateKey ?? null,
     };
 
     const c = apiToContract(apiShape);

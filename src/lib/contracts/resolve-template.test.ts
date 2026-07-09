@@ -18,6 +18,7 @@
 
 import { describe, it, expect } from "vitest";
 import { buildContext, resolveTemplate, parseDocumentLines } from "./resolve-template";
+import { hidesFeeChrome } from "./contract-types";
 
 // ─── Shared fixtures ──────────────────────────────────────────────────────────
 
@@ -691,6 +692,75 @@ describe("buildContext — exclusivity period", () => {
     });
     const out = resolveTemplate("לתקופה שתחילתה ביום {{exclusivityStartDate}} וסיומה ביום {{exclusivityEndDate}}", ctx);
     expect(out).toBe("לתקופה שתחילתה ביום 01.08.2026 וסיומה ביום 31.10.2026");
+  });
+});
+
+// ─── buildContext — service-order sibling reference (OWNER_EXCLUSIVE_GENERAL) ─
+
+describe("buildContext — service-order sibling reference", () => {
+  const SERVICE_ORDER_SIBLING = {
+    id:        "clsvc0rder999",                    // last 8, uppercased -> "0RDER999"
+    createdAt: new Date("2026-07-01T00:00:00"),
+  };
+
+  it("serviceOrderNumber uses the chrome doc-number format (last 8 chars, uppercased)", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, serviceOrder: SERVICE_ORDER_SIBLING },
+    });
+    expect(ctx.serviceOrderNumber).toBe("0RDER999");
+  });
+
+  it("serviceOrderDate formats the sibling's creation date as DD.MM.YYYY", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, serviceOrder: SERVICE_ORDER_SIBLING },
+    });
+    expect(ctx.serviceOrderDate).toBe("01.07.2026");
+  });
+
+  it("falls back to '—' for both when no sibling is linked", () => {
+    const ctx = buildContext({ broker: BROKER, client: CLIENT, contract: CONTRACT });
+    expect(ctx.serviceOrderNumber).toBe("—");
+    expect(ctx.serviceOrderDate).toBe("—");
+  });
+
+  it("resolveTemplate substitutes the clause-12 citation", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, serviceOrder: SERVICE_ORDER_SIBLING },
+    });
+    const out = resolveTemplate(
+      "בהתאם לדמי התיווך שנקבעו בהסכם הזמנת שירותי תיווך מספר {{serviceOrderNumber}} מיום {{serviceOrderDate}}.",
+      ctx,
+    );
+    expect(out).toBe("בהתאם לדמי התיווך שנקבעו בהסכם הזמנת שירותי תיווך מספר 0RDER999 מיום 01.07.2026.");
+  });
+});
+
+// ─── hidesFeeChrome — fee-chrome suppression gate ──────────────────────────────
+// True ONLY for the general exclusivity document; every fee-carrying document
+// (and legacy/unknown keys) must keep its fee chrome.
+
+describe("hidesFeeChrome", () => {
+  it("returns true only for OWNER_EXCLUSIVE_GENERAL", () => {
+    expect(hidesFeeChrome("OWNER_EXCLUSIVE_GENERAL")).toBe(true);
+  });
+
+  it("returns false for every fee-carrying document key", () => {
+    for (const key of [
+      "OWNER_SERVICE_ORDER_RENTAL", "OWNER_SERVICE_ORDER_SALE", "OWNER_SERVICE_ORDER_BOTH",
+      "INTERESTED_BUYER_RENTAL", "INTERESTED_BUYER_SALE", "INTERESTED_BUYER_BOTH",
+    ]) {
+      expect(hidesFeeChrome(key)).toBe(false);
+    }
+  });
+
+  it("returns false for legacy/unknown/null keys", () => {
+    expect(hidesFeeChrome("OWNER_EXCLUSIVE_RENTAL")).toBe(false);
+    expect(hidesFeeChrome("OWNER_EXCLUSIVE")).toBe(false);
+    expect(hidesFeeChrome(null)).toBe(false);
+    expect(hidesFeeChrome(undefined)).toBe(false);
   });
 });
 

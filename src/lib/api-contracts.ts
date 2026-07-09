@@ -36,6 +36,7 @@ export type ApiContractResponse = {
   generatedText?:  string | null;
   signatureToken?: string | null;
   language?:       string | null;
+  templateKey?:    string | null;   // resolved ContractTemplateKey; drives fee-chrome suppression
   requiresClientAddress?: boolean;  // signing page only — whether the client must complete an address
 };
 
@@ -112,6 +113,7 @@ export function apiToContract(c: ApiContractResponse): Contract {
     generatedText:             c.generatedText  ?? null,
     signatureToken:            c.signatureToken ?? null,
     language:                  c.language       ?? "HE",
+    templateKey:               c.templateKey    ?? null,
     // ── Signing audit fields — only present on broker GET responses ───────────
     signatureHashPrefix: c.signatureHash ? c.signatureHash.slice(0, 12) : null,
     hasSignature:        !!c.signatureData,

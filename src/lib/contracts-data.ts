@@ -47,6 +47,7 @@ export interface Contract {
   generatedText?:   string | null;   // frozen snapshot from ContractTemplate; null = hardcoded fallback
   signatureToken?:  string | null;   // public signing URL token; only used on broker-authenticated pages
   language?:        string | null;   // "HE" | "EN" | "FR" | "RU" | "AR"; default "HE"
+  templateKey?:     string | null;   // resolved ContractTemplateKey; drives fee-chrome suppression (hidesFeeChrome)
   // ── Signing audit (broker detail view only) ────────────────────────────────
   signatureHashPrefix?: string | null;  // first 12 hex chars of SHA-256; safe to display
   hasSignature?:        boolean;        // whether signatureData is present
