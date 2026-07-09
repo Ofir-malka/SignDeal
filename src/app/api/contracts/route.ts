@@ -208,11 +208,20 @@ export async function GET() {
     const { userId } = result;
 
     const contracts = await prisma.contract.findMany({
-      where: { userId },
-      include: { client: true, payment: true },
+      // Primaries + standalone contracts only. Secondary package documents (the
+      // linked general exclusivity agreement, relatedContractId != null) are
+      // legally separate records but ONE owner signing package in the broker UI —
+      // they stay reachable via their signing link, /contracts/[id], PDF and /verify.
+      where: { userId, relatedContractId: null },
+      include: { client: true, payment: true, template: { select: { templateKey: true } } },
       orderBy: { createdAt: "desc" },
     });
-    return NextResponse.json(contracts);
+    // Flatten the resolved template key (additive field) — lets broker-side
+    // surfaces gate fee chrome for fee-free documents (hidesFeeChrome /
+    // OWNER_EXCLUSIVE_GENERAL) without a nested template object.
+    return NextResponse.json(
+      contracts.map(({ template, ...c }) => ({ ...c, templateKey: template?.templateKey ?? null })),
+    );
   } catch (error) {
     console.error("[GET /api/contracts]", error);
     return NextResponse.json({ error: "Failed to fetch contracts" }, { status: 500 });
@@ -273,8 +282,9 @@ export async function POST(request: Request) {
       rentalCommissionMonths, // 1-12 — required when rentalCommissionMode = "MONTHS"
       saleCommissionMode,     // "PERCENT" | "FIXED"   — sale fee mode (interested + owner service-order)
       saleCommissionPercent,  // human percent (2, 1.5) — only when saleCommissionMode = "PERCENT"
-      exclusivityStartsAt,    // exclusivity period start — reserved for OWNER_EXCLUSIVE_GENERAL (Phase 2)
-      exclusivityEndsAt,      // exclusivity period end   — reserved for OWNER_EXCLUSIVE_GENERAL (Phase 2)
+      exclusivityStartsAt,    // exclusivity period start — required when includeExclusivity = true
+      exclusivityEndsAt,      // exclusivity period end   — required when includeExclusivity = true
+      includeExclusivity,     // owner flow only — also create the general exclusivity document
       language: rawLanguage,
     } = body;
 
@@ -458,9 +468,29 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "יש לבחור מספר חודשי שכירות" }, { status: 400 });
     }
 
-    // Exclusivity period — reserved for the general exclusivity document
-    // (OWNER_EXCLUSIVE_GENERAL, Phase 2). No Phase 1 key persists it; the
-    // parsed values are validated but intentionally not stored for any key.
+    // ── Owner two-document package (includeExclusivity) ──────────────────────
+    // The optional general exclusivity document (OWNER_EXCLUSIVE_GENERAL) is a
+    // SECONDARY record created alongside an owner service-order primary in one
+    // transaction. It is never dealType-resolved and consumes NO extra usage
+    // unit (see the transaction below).
+    const wantsExclusivity = includeExclusivity === true;
+    const isOwnerServiceKey =
+      autoKey === "OWNER_SERVICE_ORDER_RENTAL" || autoKey === "OWNER_SERVICE_ORDER_SALE" || autoKey === "OWNER_SERVICE_ORDER_BOTH";
+    if (wantsExclusivity && !isOwnerServiceKey) {
+      return NextResponse.json({ error: "הסכם בלעדיות זמין רק בהחתמת בעל נכס" }, { status: 400 });
+    }
+    let resolvedExclusivityStart: Date | null = null;
+    let resolvedExclusivityEnd: Date | null = null;
+    if (wantsExclusivity) {
+      if (!vExclusivityStart.value || !vExclusivityEnd.value) {
+        return NextResponse.json({ error: "יש להזין תקופת בלעדיות" }, { status: 400 });
+      }
+      if (vExclusivityEnd.value <= vExclusivityStart.value) {
+        return NextResponse.json({ error: "תאריך סיום הבלעדיות חייב להיות מאוחר מתאריך ההתחלה" }, { status: 400 });
+      }
+      resolvedExclusivityStart = vExclusivityStart.value;
+      resolvedExclusivityEnd   = vExclusivityEnd.value;
+    }
 
     // Persist the sale commission mode + percent ONLY for templates whose clause
     // needs them (interested sale/both + owner service-order sale/both). Absent
@@ -507,6 +537,25 @@ export async function POST(request: Request) {
       // No active template for this type → graceful fallback (generatedText stays null)
     }
 
+    // Resolve the exclusivity template BEFORE the transaction — fail fast with
+    // nothing created if it is missing (a seeded environment always has it).
+    let exclusivityTpl: { id: string; content: string } | null = null;
+    if (wantsExclusivity) {
+      const exclusivityLang = language as "HE" | "EN" | "FR" | "RU" | "AR";
+      exclusivityTpl =
+        await prisma.contractTemplate.findFirst({
+          where: { templateKey: "OWNER_EXCLUSIVE_GENERAL", language: exclusivityLang, isActive: true },
+          select: { id: true, content: true },
+        }) ??
+        await prisma.contractTemplate.findFirst({
+          where: { templateKey: "OWNER_EXCLUSIVE_GENERAL", language: "HE", isActive: true },
+          select: { id: true, content: true },
+        });
+      if (!exclusivityTpl) {
+        return NextResponse.json({ error: "תבנית הסכם הבלעדיות אינה זמינה" }, { status: 422 });
+      }
+    }
+
     const signatureToken = randomUUID();
 
     // ── Create contract + immutable usage event in one transaction ───────────
@@ -514,7 +563,7 @@ export async function POST(request: Request) {
     // Writing both atomically guarantees no contract can exist without a
     // corresponding usage event (crash-safe) and no event exists without a
     // contract (double-count safe).
-    const contract = await prisma.$transaction(async (tx) => {
+    const { newContract: contract, exclusivityContract } = await prisma.$transaction(async (tx) => {
       const newContract = await tx.contract.create({
         data: {
           contractType,
@@ -546,6 +595,9 @@ export async function POST(request: Request) {
       // Write immutable usage slot.  Plan comes from canCreateContract() above —
       // no extra query needed.  Deleting this contract later will SET NULL on
       // contractId but keep this row, so the monthly count is unaffected.
+      // PRIMARY ONLY: the optional exclusivity secondary below intentionally
+      // writes NO usage event — a two-document owner package consumes exactly
+      // one usage unit.
       await tx.contractUsageEvent.create({
         data: {
           userId: user.id,
@@ -554,7 +606,58 @@ export async function POST(request: Request) {
         },
       });
 
-      return newContract;
+      // ── Optional secondary: the general exclusivity document ───────────────
+      // Created AFTER the primary so its generatedText can cite the primary's
+      // doc number/date ({{serviceOrderNumber}}/{{serviceOrderDate}}); linked
+      // via relatedContractId so sign-time regeneration stays deterministic.
+      let exclusivityRecord: { id: string; signatureToken: string | null } | null = null;
+      if (wantsExclusivity && exclusivityTpl) {
+        const exclusivityCtx = buildContext({
+          broker: { fullName: user.fullName, licenseNumber: user.licenseNumber ?? null, phone: user.phone ?? null, idNumber: user.idNumber ?? null },
+          client: { name: client.name, idNumber: client.idNumber || "", phone: client.phone, email: client.email || "", address: client.address ?? null },
+          contract: {
+            id: "pending",
+            propertyAddress,
+            propertyCity,
+            propertyPrice: validatedPropertyPrice,
+            dealType: validatedDealType,
+            commission: 0,
+            commissionSale: null,
+            templateKey: "OWNER_EXCLUSIVE_GENERAL",
+            exclusivityStartsAt: resolvedExclusivityStart,
+            exclusivityEndsAt:   resolvedExclusivityEnd,
+            serviceOrder: { id: newContract.id, createdAt: newContract.createdAt },
+            createdAt: new Date(),
+          },
+        });
+        exclusivityRecord = await tx.contract.create({
+          data: {
+            contractType,
+            dealType: validatedDealType,
+            propertyAddress,
+            propertyCity,
+            propertyPrice: validatedPropertyPrice,
+            ...(validatedPropertySalePrice !== null ? { propertySalePrice: validatedPropertySalePrice } : {}),
+            commission: 0,   // fee terms live in the service-order sibling; chrome is key-suppressed
+            exclusivityStartsAt: resolvedExclusivityStart!,
+            exclusivityEndsAt:   resolvedExclusivityEnd!,
+            relatedContractId:   newContract.id,
+            userId: user.id,
+            clientId: client.id,
+            signatureToken: randomUUID(),
+            status: "SENT",
+            sentAt: new Date(),
+            hideFullAddressFromClient: false,
+            language,
+            ...(propertyId ? { propertyId } : {}),
+            templateId: exclusivityTpl.id,
+            generatedText: resolveTemplate(exclusivityTpl.content, exclusivityCtx),
+          },
+          select: { id: true, signatureToken: true },
+        });
+      }
+
+      return { newContract, exclusivityContract: exclusivityRecord };
     });
 
     // ── Audit log: contract created ───────────────────────────────────────────
@@ -592,7 +695,46 @@ export async function POST(request: Request) {
       );
     });
 
-    return NextResponse.json(contract, { status: 201 });
+    // ── Optional exclusivity secondary: audit + signing links ────────────────
+    // Mirrors the primary — both documents go to the owner separately, per the
+    // two-documents notice shown in the wizard before submit.
+    if (exclusivityContract) {
+      await logAuditEvent({
+        userId: userId,
+        action: "contract.created",
+        entityType: "contract",
+        entityId: exclusivityContract.id,
+        metadata: { contractType, dealType: validatedDealType, language, templateKey: "OWNER_EXCLUSIVE_GENERAL", relatedContractId: contract.id },
+        ip: getRealIp(request),
+        userAgent: request.headers.get("user-agent"),
+      });
+      await sendContractSms(
+        { id: exclusivityContract.id, signatureToken: exclusivityContract.signatureToken!, propertyAddress, userId: user.id, clientId: client.id },
+        client.phone,
+        client.name,
+        user.fullName,
+      );
+      after(async () => {
+        await sendContractEmail(
+          { id: exclusivityContract.id, signatureToken: exclusivityContract.signatureToken!, propertyAddress, userId: user.id, clientId: client.id },
+          client.email,
+          client.name,
+          user.fullName,
+        );
+      });
+    }
+
+    // Response: byte-identical to the historical shape for a single contract;
+    // a two-document package adds ONE optional additive field (non-breaking).
+    return NextResponse.json(
+      {
+        ...contract,
+        ...(exclusivityContract
+          ? { exclusivityContract: { id: exclusivityContract.id, signatureToken: exclusivityContract.signatureToken } }
+          : {}),
+      },
+      { status: 201 },
+    );
   } catch (error) {
     console.error("[POST /api/contracts]", error);
     // Surface Prisma validation errors explicitly so the UI can show a useful message

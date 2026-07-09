@@ -109,6 +109,7 @@ interface FormState {
   exclusivityDurationMode:     "months" | "custom";
   exclusivityMonths:           string;   // quick-chip months ("1"|"3"|"6"|"12")
   exclusivityEndCustom:        string;   // "YYYY-MM-DD"; only in custom mode
+  includeExclusivity:          boolean;  // owner flow — also create the separate general exclusivity document
   // ── Sale-side commission (BOTH only) ─────────────────────────────────────
   commissionSaleMode: CommissionMode;
   commissionSaleNis:  string;   // BOTH + fixed: sale commission amount in ₪
@@ -119,7 +120,9 @@ interface FormState {
 type Stage =
   | { name: "idle" }
   | { name: "submitting" }
-  | { name: "success"; contractId: string; signatureToken: string; clientName: string }
+  | { name: "success"; contractId: string; signatureToken: string; clientName: string;
+      // Owner two-document package — present when the exclusivity secondary was created
+      exclusivity?: { contractId: string; signatureToken: string } | null }
   | { name: "error"; message: string };
 
 interface FieldError { [key: string]: string }
@@ -150,6 +153,7 @@ const INITIAL: FormState = {
   exclusivityDurationMode:   "months",
   exclusivityMonths:         "3",
   exclusivityEndCustom:      "",
+  includeExclusivity:        false,
   commissionSaleMode:        "percent",
   commissionSaleNis:         "",
   commissionSalePct:         "",
@@ -945,8 +949,9 @@ const CONTRACT_TYPES: Array<{
     ),
   },
   {
-    // RENTAL + SALE are live for this category (defaults to RENTAL when selected);
-    // BOTH is still disabled ("בקרוב") in the UI and rejected by the API.
+    // Service-order-first owner flow: RENTAL / SALE / BOTH are all live
+    // (defaults to RENTAL); an optional separate exclusivity document can be
+    // added via the "הוסף גם הסכם בלעדיות" checkbox.
     id: "exclusivity", label: CONTRACT_TYPE.OWNER_EXCLUSIVE, apiType: CONTRACT_TYPE.OWNER_EXCLUSIVE,
     subtitle: "הסכם בלעדיות עם בעל הנכס",
     iconBg: "bg-emerald-50 text-emerald-600", active: true,
@@ -1005,11 +1010,13 @@ function categoryDefaults(id: ContractTypeId): Partial<FormState> {
     exclusivityDurationMode: "months" as const,
     exclusivityMonths: "3",
     exclusivityEndCustom: "",
+    includeExclusivity: false,
   };
   if (id === "exclusivity") {
-    // Owner-exclusive defaults to RENTAL (SALE is selectable in the deal-type
-    // section; BOTH is still disabled). Exclusivity period seeded (start = today,
-    // 3 months), address never hidden.
+    // Owner flow (service-order first) defaults to RENTAL; SALE and BOTH are
+    // selectable in the deal-type section. Exclusivity period seeded (start =
+    // today, 3 months) for when the broker opts into the exclusivity document;
+    // address never hidden.
     return {
       ...shared,
       dealType: "RENTAL",
@@ -1025,8 +1032,11 @@ function categoryDefaults(id: ContractTypeId): Partial<FormState> {
 
 // ── Success screen ─────────────────────────────────────────────────────────────
 
-function SuccessScreen({ contractId, signatureToken, clientName, onCreateAnother }: {
-  contractId: string; signatureToken: string; clientName: string; onCreateAnother: () => void;
+function SuccessScreen({ contractId, signatureToken, clientName, exclusivity, onCreateAnother }: {
+  contractId: string; signatureToken: string; clientName: string;
+  // Owner two-document package — the secondary exclusivity document, when created
+  exclusivity?: { contractId: string; signatureToken: string } | null;
+  onCreateAnother: () => void;
 }) {
   const baseUrl     = typeof window !== "undefined" ? window.location.origin : "";
   const signingLink = `${baseUrl}/contracts/sign/${signatureToken}`;
@@ -1041,9 +1051,16 @@ function SuccessScreen({ contractId, signatureToken, clientName, onCreateAnother
         </svg>
       </div>
       <div className="space-y-2">
-        <h2 className="text-2xl font-bold text-gray-900">החוזה נוצר בהצלחה!</h2>
+        <h2 className="text-2xl font-bold text-gray-900">
+          {exclusivity ? "המסמכים נוצרו בהצלחה" : "החוזה נוצר בהצלחה!"}
+        </h2>
         <p className="text-gray-500 text-sm">
-          החוזה נשלח ל<span className="font-semibold text-gray-700">{clientName}</span> ב-SMS ובמייל
+          {/* Package: two legal documents, one broker-facing signing package.
+              The link card below points at the PRIMARY service-order contract;
+              the exclusivity document travels on its own SMS/email link. */}
+          {exclusivity
+            ? "נשלחו לבעל הנכס שני מסמכים נפרדים לחתימה: הסכם תיווך והסכם בלעדיות"
+            : <>החוזה נשלח ל<span className="font-semibold text-gray-700">{clientName}</span> ב-SMS ובמייל</>}
         </p>
       </div>
       <div className="w-full max-w-md bg-gray-50 rounded-xl border border-gray-200 px-4 py-3 text-right">
@@ -1343,8 +1360,8 @@ export function NewContractForm({ subscription, initialContractType = "intereste
         if (isNaN(commSaleNis) || commSaleNis < 0) e.commissionSaleNis = "עמלת מכירה חייבת להיות מספר חיובי או 0";
       }
     }
-    // ── Exclusivity period (owner-exclusive rental only) ─────────────────────
-    if (isOwner) {
+    // ── Exclusivity period — only when the exclusivity document is included ──
+    if (isOwner && form.includeExclusivity) {
       if (!form.exclusivityStart) {
         e.exclusivityStart = "תאריך תחילת הבלעדיות הוא שדה חובה";
       }
@@ -1439,8 +1456,10 @@ export function NewContractForm({ subscription, initialContractType = "intereste
               : {}),
           }
         : {}),
-      // Exclusivity period — owner-exclusive rental only (plain YYYY-MM-DD strings)
-      ...(isOwner && form.exclusivityStart && exclusivityEndDate
+      // Owner two-document package — the optional exclusivity document. The
+      // period dates (plain YYYY-MM-DD strings) are sent only when opted in.
+      ...(isOwner ? { includeExclusivity: form.includeExclusivity } : {}),
+      ...(isOwner && form.includeExclusivity && form.exclusivityStart && exclusivityEndDate
         ? {
             exclusivityStartsAt: form.exclusivityStart,
             exclusivityEndsAt:   toInputValue(exclusivityEndDate),
@@ -1485,7 +1504,14 @@ export function NewContractForm({ subscription, initialContractType = "intereste
         throw new Error(body.error ?? "שגיאה ביצירת החוזה");
       }
       const contract = await res.json();
-      setStage({ name: "success", contractId: contract.id, signatureToken: contract.signatureToken, clientName: form.clientName.trim() });
+      setStage({
+        name: "success", contractId: contract.id, signatureToken: contract.signatureToken, clientName: form.clientName.trim(),
+        // Owner two-document package — the API adds exclusivityContract only
+        // when the secondary exclusivity document was created.
+        exclusivity: contract.exclusivityContract
+          ? { contractId: contract.exclusivityContract.id, signatureToken: contract.exclusivityContract.signatureToken }
+          : null,
+      });
     } catch (err) {
       setStage({ name: "error", message: err instanceof Error ? err.message : "שגיאה לא ידועה" });
     }
@@ -1498,6 +1524,7 @@ export function NewContractForm({ subscription, initialContractType = "intereste
         contractId={stage.contractId}
         signatureToken={stage.signatureToken}
         clientName={stage.clientName}
+        exclusivity={stage.exclusivity ?? null}
         onCreateAnother={() => {
           // Reset to the ENTRY category (not always "interested") — a broker who
           // arrived via the owner-exclusive dashboard card stays in that flow.
@@ -1728,12 +1755,9 @@ export function NewContractForm({ subscription, initialContractType = "intereste
                 });
                 setStage((s) => s.name === "error" ? { name: "idle" } : s);
               }}
-              disabled={isOwner}
               className={[
                 "flex items-center gap-2.5 px-5 py-3 rounded-xl border text-sm font-semibold transition-all",
-                isOwner
-                  ? "border-gray-100 bg-gray-50/70 text-gray-400 opacity-60 cursor-not-allowed select-none"
-                  : form.dealType === "BOTH"
+                form.dealType === "BOTH"
                   ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
                   : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
               ].join(" ")}>
@@ -1742,21 +1766,40 @@ export function NewContractForm({ subscription, initialContractType = "intereste
                 <rect x="3" y="3" width="7" height="7" rx="1" fill="currentColor" stroke="none" opacity="0.3" />
               </svg>
               גם וגם
-              {isOwner && (
-                <span className="text-[10px] font-medium text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">בקרוב</span>
-              )}
             </button>
 
           </div>
         </Section>
 
-        {/* ══ 4b. Exclusivity period — owner-exclusive only (rental + sale) ═ */}
-        {/* Only the computed start/end dates are sent to the API; duration mode
-            and text are UI-derived. End dates use the inclusive day-before
-            convention (3 months from 01.08 → 31.10). */}
+        {/* ══ 4b. Optional exclusivity document — owner flow only ═ */}
+        {/* Service-order first: the checkbox opts into a SEPARATE general
+            exclusivity document (OWNER_EXCLUSIVE_GENERAL) created alongside the
+            service-order agreement. Only the computed start/end dates are sent
+            to the API; duration mode and text are UI-derived. End dates use the
+            inclusive day-before convention (3 months from 01.08 → 31.10). */}
         {isOwner && (
-          <Section title="תקופת הבלעדיות" subtitle="התקופה בה המתווך משווק את הנכס בבלעדיות">
+          <Section title="הסכם בלעדיות" subtitle="אופציונלי — מסמך נפרד הנלווה להסכם התיווך">
             <div className="space-y-4">
+
+              {/* Opt-in checkbox — checking it reveals the period fields below */}
+              <label className="flex items-start gap-3 cursor-pointer select-none group">
+                <input
+                  type="checkbox"
+                  checked={form.includeExclusivity}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setForm((prev) => ({ ...prev, includeExclusivity: on }));
+                    setErrors((prev) => { const n = { ...prev }; delete n.exclusivityStart; delete n.exclusivityEnd; return n; });
+                  }}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                />
+                <div>
+                  <p className="text-sm font-medium text-gray-700">הוסף גם הסכם בלעדיות</p>
+                  <p className="text-xs text-gray-400 mt-0.5">ייווצר מסמך בלעדיות נפרד המפנה להסכם התיווך</p>
+                </div>
+              </label>
+
+              {form.includeExclusivity && (<>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -1822,6 +1865,15 @@ export function NewContractForm({ subscription, initialContractType = "intereste
                   שים לב: תקופת הבלעדיות שנבחרה היא {durationTextHe(exclusivityDur)}.
                 </p>
               )}
+
+              {/* Two-documents notice — always visible while the package is opted in */}
+              <div className="px-3.5 py-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+                <span className="text-sm text-amber-700 font-medium">
+                  יישלחו לבעל הנכס שני מסמכים נפרדים: הסכם תיווך והסכם בלעדיות
+                </span>
+              </div>
+
+              </>)}
 
             </div>
           </Section>
