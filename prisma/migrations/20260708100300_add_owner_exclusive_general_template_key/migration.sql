@@ -1,0 +1,21 @@
+-- Migration: add OWNER_EXCLUSIVE_GENERAL to the ContractTemplateKey enum
+--
+-- The general owner exclusivity agreement — deal-type-agnostic, always created
+-- as the OPTIONAL SECONDARY document of an owner service-order agreement. It
+-- carries the exclusivity period and references the primary agreement by
+-- number/date (via Contract.relatedContractId, added by the follow-up
+-- migration); it contains NO fee amounts.
+--
+-- Supersedes (together with the OWNER_SERVICE_ORDER_* keys) the deprecated
+-- OWNER_EXCLUSIVE_RENTAL / OWNER_EXCLUSIVE_SALE keys, which embedded fee
+-- clauses inside the exclusivity document.
+--
+-- PostgreSQL does not allow ALTER TYPE ... ADD VALUE inside a transaction block.
+-- This file must be run outside a transaction (Prisma migrate deploy handles this;
+-- isolated as the only statement per house convention).
+--
+-- Additive only — no existing rows are affected. The IF NOT EXISTS guard makes
+-- this idempotent. Enum values cannot be dropped in PostgreSQL, so rollback is a
+-- forward migration; the unused value is harmless.
+
+ALTER TYPE "ContractTemplateKey" ADD VALUE IF NOT EXISTS 'OWNER_EXCLUSIVE_GENERAL';
