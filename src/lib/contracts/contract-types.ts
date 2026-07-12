@@ -26,13 +26,15 @@ export type ContractTypeValue = (typeof CONTRACT_TYPE)[keyof typeof CONTRACT_TYP
 //
 // Template keys whose documents must not display fee amounts anywhere in the
 // platform chrome: property-table commission rows, the commission-terms
-// section, and the PDF equivalents. The general exclusivity agreement
-// delegates all fee terms to its service-order sibling (clause 12 references
-// it by number/date), so showing an amount here would contradict the document.
+// section, the detail-page fee row, and the PDF equivalents. Both exclusivity
+// documents carry no fee terms of their own: the GENERAL one delegates them to
+// its service-order sibling (clause 12 cites it by number/date), and the
+// standalone ONLY variant creates no owner fee obligation at all — showing an
+// amount would contradict either document.
 //
 // Key-gated by design — NEVER inferred from commission === 0 (a legitimate
 // fee document may carry a zero fee). Returns false for every other key and
 // for legacy/unknown/null keys, so existing documents render unchanged.
 export function hidesFeeChrome(templateKey?: string | null): boolean {
-  return templateKey === "OWNER_EXCLUSIVE_GENERAL";
+  return templateKey === "OWNER_EXCLUSIVE_GENERAL" || templateKey === "OWNER_EXCLUSIVE_ONLY";
 }

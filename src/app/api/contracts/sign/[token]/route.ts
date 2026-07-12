@@ -26,6 +26,7 @@ const KEYS_REQUIRING_CLIENT_ADDRESS = new Set<string>([
   "OWNER_SERVICE_ORDER_RENTAL",
   "OWNER_SERVICE_ORDER_SALE",
   "OWNER_SERVICE_ORDER_BOTH",
+  "OWNER_EXCLUSIVE_ONLY",
 ]);
 
 // ── GET /api/contracts/sign/[token] ──────────────────────────────────────────

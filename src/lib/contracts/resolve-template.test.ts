@@ -739,12 +739,14 @@ describe("buildContext — service-order sibling reference", () => {
 });
 
 // ─── hidesFeeChrome — fee-chrome suppression gate ──────────────────────────────
-// True ONLY for the general exclusivity document; every fee-carrying document
-// (and legacy/unknown keys) must keep its fee chrome.
+// True ONLY for the two exclusivity documents (linked GENERAL + standalone
+// ONLY); every fee-carrying document (and legacy/unknown keys) must keep its
+// fee chrome.
 
 describe("hidesFeeChrome", () => {
-  it("returns true only for OWNER_EXCLUSIVE_GENERAL", () => {
+  it("returns true for both exclusivity document keys", () => {
     expect(hidesFeeChrome("OWNER_EXCLUSIVE_GENERAL")).toBe(true);
+    expect(hidesFeeChrome("OWNER_EXCLUSIVE_ONLY")).toBe(true);
   });
 
   it("returns false for every fee-carrying document key", () => {

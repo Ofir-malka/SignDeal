@@ -248,6 +248,7 @@ enum ContractTemplateKey {
   OWNER_SERVICE_ORDER_SALE   // הזמנת שירותי תיווך בעל נכס — מכירה (dealType = SALE)
   OWNER_SERVICE_ORDER_BOTH   // הזמנת שירותי תיווך בעל נכס — מכירה והשכרה (dealType = BOTH)
   OWNER_EXCLUSIVE_GENERAL    // הסכם בלעדיות כללי — deal-type-agnostic, always the secondary doc
+  OWNER_EXCLUSIVE_ONLY       // הסכם בלעדיות עצמאי — standalone, no owner fee obligation, never linked
 }
 
 // How the rental brokerage fee was chosen by the broker. Drives the dynamic

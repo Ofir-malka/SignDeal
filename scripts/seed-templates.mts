@@ -103,7 +103,7 @@ const p = prisma as any;
 // All {{placeholders}} listed above are supported.
 
 const TEMPLATES: Array<{
-  key: "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_SERVICE_ORDER_RENTAL" | "OWNER_SERVICE_ORDER_SALE" | "OWNER_SERVICE_ORDER_BOTH" | "OWNER_EXCLUSIVE_GENERAL";
+  key: "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_SERVICE_ORDER_RENTAL" | "OWNER_SERVICE_ORDER_SALE" | "OWNER_SERVICE_ORDER_BOTH" | "OWNER_EXCLUSIVE_GENERAL" | "OWNER_EXCLUSIVE_ONLY";
   language: "HE" | "EN" | "FR" | "RU" | "AR";
   title: string;
   content: string;
@@ -455,6 +455,67 @@ const TEMPLATES: Array<{
 16. הלקוח מאשר כי הומלץ לו להסתייע בשירותי עורך דין ו/או באנשי מקצוע מתאימים נוספים, בהתאם לאופי העסקה, לצורך ולנסיבות העניין.`,
     },
 
+    // ── OWNER_EXCLUSIVE_ONLY · HE ─────────────────────────────────────────────
+    // STANDALONE owner exclusivity agreement — for owners who grant marketing
+    // exclusivity WITHOUT committing to owner-side brokerage fees (the broker
+    // may collect only from the other side of the deal). Never linked (no
+    // relatedContractId) and never dealType-resolved; created explicitly by the
+    // owner flow's "exclusivityOnly" mode (Phase 5B). DORMANT until then.
+    //
+    // Derived from OWNER_EXCLUSIVE_GENERAL (Option A — separate key, no
+    // conditional wording). TWIN-TEMPLATE DRIFT WARNING: any future lawyer
+    // revision of either exclusivity body must be diffed against the other.
+    // Differences vs OWNER_EXCLUSIVE_GENERAL:
+    // • Preamble: standalone — the service-order citation sentence is removed
+    //   (no {{serviceOrderNumber}}/{{serviceOrderDate}} anywhere).
+    // • Clause 1: "בהסכם זה ובנספח המצורף לו" (no service-order reference).
+    // • Old clauses 12-14 DELETED ENTIRELY (owner fee obligation / owner-side
+    //   fee collection / inherited fee terms) — approved product/legal decision.
+    // • Old clause 15 kept verbatim -> renumbered 12; old clause 16 kept
+    //   verbatim -> renumbered 13; numbering continuous 1-13.
+    // • Section header renamed "דמי תיווך וזכאות המתווך" -> "הפרת הבלעדיות ופיצוי".
+    // LAWYER REVIEW REQUIRED before production release:
+    // • Clause 8 — post-period continuation as a "regular brokerage order" in a
+    //   document that creates no owner fee obligation.
+    // • Renamed section header (platform-drafted).
+    // • Clause 12 (old 15) — breach compensation is measured as "מלוא דמי
+    //   התיווך שהיו מגיעים לו"; confirm the intended measurement basis given
+    //   there is no owner-side fee term (e.g. counterparty-side fees).
+    // • Fee chrome is suppressed for this key (hidesFeeChrome); the client
+    //   line includes {{clientAddress}}; property facts render via
+    //   PropertyTable as the referenced "נספח"; contract number chrome-only.
+    {
+      key: "OWNER_EXCLUSIVE_ONLY",
+      language: "HE",
+      title: "הסכם בלעדיות לשיווק נכס מקרקעין",
+      content: `הסכם בלעדיות לשיווק נכס מקרקעין
+בהתאם לחוק המתווכים במקרקעין התשנ״ו-1996
+
+המתווך: {{brokerName}}, ת.ז {{brokerIdNumber}}, רישיון מתווך מס׳ {{brokerLicense}}, טלפון {{brokerPhone}}
+הלקוח (בעל הנכס): {{clientName}}, ת.ז {{clientIdNumber}}, כתובת {{clientAddress}}, טלפון {{clientPhone}}, דוא״ל {{clientEmail}}
+
+הסכם זה מתייחס לנכס המפורט בנספח המצורף להלן, וכן לכל עסקת מקרקעין אחרת שתיווצר או תתפתח בקשר עם הנכס ו/או בעקבות הסכם זה.
+
+הצהרות הלקוח ופרטי הנכס
+1. הלקוח מצהיר כי הוא בעל הזכויות בנכס המקרקעין שפרטיו מופיעים בהסכם זה ובנספח המצורף לו, או כי הוא מוסמך כדין מטעם בעל/י הזכויות לפעול בקשר לנכס, לרבות לצורך מכירתו, השכרתו ו/או מסירתו בדמי מפתח, לפי העניין.
+2. הלקוח מאשר כי כל הפרטים שמסר למתווך ביחס לנכס, לרבות פרטי הזכויות, מצב הנכס, תנאי העסקה וכל פרט מהותי אחר, הם פרטים נכונים, מלאים ומדויקים למיטב ידיעתו. הלקוח מסכים כי פרטי הנכס יימסרו לגורמים רלוונטיים, לרבות קונים, שוכרים, מתווכים ו/או גורמים נוספים, ככל שהדבר נדרש לצורך קידום שיווק הנכס.
+3. הלקוח מתחייב להעביר למתווך, ללא דיחוי, מסמכים עדכניים המעידים על הזכויות בנכס, לרבות נסח רישום, אישור זכויות מרשות מקרקעי ישראל, אישור מהחברה המשכנת ו/או כל מסמך אחר הדרוש לצורך בדיקת הזכויות ושיווק הנכס.
+4. הלקוח מסמיך את המתווך ו/או מי מטעמו לפנות בשמו ולצורך שיווק הנכס לכל רשות, עירייה, משרד ממשלתי, גוף ציבורי, חברה משכנת, אדם או גורם רלוונטי אחר, לשם קבלת מידע, מסמכים ונתונים הנוגעים לנכס, וכן להעביר מידע כאמור ללקוחות פוטנציאליים לצורך קידום העסקה.
+מינוי המתווך ותקופת הבלעדיות
+5. הלקוח מזמין בזאת מהמתווך שירותי תיווך במקרקעין וממנה אותו לשווק את הנכס בבלעדיות, לתקופה שתחילתה ביום {{exclusivityStartDate}} וסיומה ביום {{exclusivityEndDate}} להלן: "תקופת הבלעדיות".
+6. במהלך תקופת הבלעדיות יהיה המתווך הגורם המרכז את כלל פעולות השיווק של הנכס. הלקוח מתחייב שלא לפנות, להזמין, לקבל או לאפשר שירותי תיווך מגורם אחר ביחס לנכס בתקופה זו, וכן מתחייב כי כל פנייה, קשר, הצעה או משא ומתן עם קונה, שוכר, מתווך או כל גורם אחר בקשר לנכס ייעשו באמצעות המתווך בלבד.
+7. הלקוח מתחייב להודיע לכל גורם הפונה אליו ישירות בקשר לנכס, לרבות מתווכים, קונים או שוכרים פוטנציאליים, כי הנכס משווק באמצעות המתווך בבלעדיות. כמו כן, הלקוח מתחייב לסיים באופן מיידי כל התחייבות קודמת או מקבילה הסותרת את התחייבויותיו לפי הסכם זה.
+8. לאחר סיום תקופת הבלעדיות, וככל שלא נחתמה עסקה ביחס לנכס, ימשיך הסכם זה לשמש כהזמנת שירותי תיווך רגילה שאינה בבלעדיות. במקרה שבו עסקה תיחתם לאחר תום תקופת הבלעדיות כתוצאה מפעולת המתווך, טיפולו או קשר שנוצר בעקבותיו, יהיה המתווך זכאי לדמי תיווך בהתאם להוראות הסכם זה.
+פעולות המתווך
+9. המתווך מתחייב לפעול לשיווק הנכס בשקידה, במסירות, בנאמנות ובהתאם לשיקול דעתו המקצועי. במסגרת זו יהיה רשאי המתווך לבצע פעולות שיווק, פרסום, הצגת הנכס, יצירת קשר עם לקוחות פוטנציאליים, וכן לשתף מתווכים ומשרדי תיווך נוספים לצורך איתור קונים ו/או שוכרים מתאימים.
+10. פעולות השיווק יבוצעו בהתאם לשיקול דעתו המקצועי של המתווך ובהתאם לפעולות השיווקיות שיפורטו בטופס פעולות השיווק המצורף להזמנה זו, ככל שצורף.
+11. הלקוח מאשר כי ידוע לו שבתקופת הבלעדיות המתווך ממונה על ידו כגורם הפעיל והיחיד לשיווק הנכס, וכי כל פנייה, התעניינות, משא ומתן או עסקה שייקשרו ביחס לנכס בתקופה זו ייחשבו כתוצאה מפעילות השיווק והטיפול של המתווך.
+הפרת הבלעדיות ופיצוי
+12. הפרת התחייבויות הלקוח בתקופת הבלעדיות, לרבות פנייה או התקשרות עם מתווך אחר, ניהול משא ומתן שלא באמצעות המתווך או הסתרת פנייה בקשר לנכס, עלולה לפגוע ביכולתו של המתווך לשמש כגורם היעיל בעסקה. במקרה של הפרה כאמור, יהיה המתווך זכאי לפיצוי בשיעור מלוא דמי התיווך שהיו מגיעים לו אילו נכרתה העסקה באמצעותו, וזאת מבלי לגרוע מכל סעד או פיצוי נוסף בגין נזק שייגרם לו עקב ההפרה.
+המלצה לקבלת ייעוץ מקצועי
+13. הלקוח מאשר כי הומלץ לו להסתייע בשירותי עורך דין ו/או באנשי מקצוע מתאימים נוספים, בהתאם לאופי העסקה, לצורך ולנסיבות העניין.`,
+    },
+
     // ── OWNER_EXCLUSIVE · HE ──────────────────────────────────────────────────
     {
       key: "OWNER_EXCLUSIVE",
@@ -626,7 +687,7 @@ async function upsertTemplates() {
 
   // ── Sanity check: each HE template must have exactly 1 active row ─────────
   console.log("\n── Sanity check (HE templates) ───────────────────────────────");
-  for (const key of ["INTERESTED_BUYER", "OWNER_EXCLUSIVE", "BROKER_COOP", "INTERESTED_BUYER_RENTAL", "INTERESTED_BUYER_SALE", "INTERESTED_BUYER_BOTH", "OWNER_SERVICE_ORDER_RENTAL", "OWNER_SERVICE_ORDER_SALE", "OWNER_SERVICE_ORDER_BOTH", "OWNER_EXCLUSIVE_GENERAL"] as const) {
+  for (const key of ["INTERESTED_BUYER", "OWNER_EXCLUSIVE", "BROKER_COOP", "INTERESTED_BUYER_RENTAL", "INTERESTED_BUYER_SALE", "INTERESTED_BUYER_BOTH", "OWNER_SERVICE_ORDER_RENTAL", "OWNER_SERVICE_ORDER_SALE", "OWNER_SERVICE_ORDER_BOTH", "OWNER_EXCLUSIVE_GENERAL", "OWNER_EXCLUSIVE_ONLY"] as const) {
     const rows = await p.contractTemplate.findMany({
       where: { templateKey: key, language: "HE", isActive: true },
       select: { id: true },
