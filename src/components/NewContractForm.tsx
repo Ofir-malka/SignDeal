@@ -109,7 +109,11 @@ interface FormState {
   exclusivityDurationMode:     "months" | "custom";
   exclusivityMonths:           string;   // quick-chip months ("1"|"3"|"6"|"12")
   exclusivityEndCustom:        string;   // "YYYY-MM-DD"; only in custom mode
-  includeExclusivity:          boolean;  // owner flow — also create the separate general exclusivity document
+  // Owner flow — which document(s) this signing creates:
+  // serviceOnly: one service-order (fee) document; serviceWithExclusivity:
+  // service-order + linked exclusivity package; exclusivityOnly: one standalone
+  // OWNER_EXCLUSIVE_ONLY document (no owner fee obligation, fee fields hidden).
+  ownerMode: "serviceOnly" | "serviceWithExclusivity" | "exclusivityOnly";
   // ── Sale-side commission (BOTH only) ─────────────────────────────────────
   commissionSaleMode: CommissionMode;
   commissionSaleNis:  string;   // BOTH + fixed: sale commission amount in ₪
@@ -153,7 +157,7 @@ const INITIAL: FormState = {
   exclusivityDurationMode:   "months",
   exclusivityMonths:         "3",
   exclusivityEndCustom:      "",
-  includeExclusivity:        false,
+  ownerMode:                 "serviceOnly",
   commissionSaleMode:        "percent",
   commissionSaleNis:         "",
   commissionSalePct:         "",
@@ -1010,7 +1014,7 @@ function categoryDefaults(id: ContractTypeId): Partial<FormState> {
     exclusivityDurationMode: "months" as const,
     exclusivityMonths: "3",
     exclusivityEndCustom: "",
-    includeExclusivity: false,
+    ownerMode: "serviceOnly" as const,
   };
   if (id === "exclusivity") {
     // Owner flow (service-order first) defaults to RENTAL; SALE and BOTH are
@@ -1159,6 +1163,10 @@ export function NewContractForm({ subscription, initialContractType = "intereste
   // Only cards with active:true are selectable.
   const [contractTypeId, setContractTypeId] = useState<ContractTypeId>(initialContractType);
   const isOwner = contractTypeId === "exclusivity";
+  // exclusivityOnly: the standalone exclusivity document carries no owner fee —
+  // every fee field/validation is skipped and the payload sends commission: 0
+  // (the API additionally forces it server-side).
+  const hideFeeFields = isOwner && form.ownerMode === "exclusivityOnly";
 
   // ── Exclusivity period derivation (owner-exclusive rental only) ────────────
   // End date uses the inclusive day-before convention (3 months from 01.08 →
@@ -1336,32 +1344,36 @@ export function NewContractForm({ subscription, initialContractType = "intereste
         ? "מחיר הנכס חייב להיות מספר חיובי"
         : "שכירות חודשית חייבת להיות מספר חיובי";
     }
-    // ── Rental commission (RENTAL + BOTH) ────────────────────────────────────
-    if (form.dealType === "SALE" && form.commissionMode === "percent") {
-      const pct = parseFloat(form.commissionPct);
-      if (isNaN(pct) || pct < 0 || pct > 100) e.commissionPct = "אחוז עמלה חייב להיות בין 0 ל-100";
-    } else if ((form.dealType === "RENTAL" || form.dealType === "BOTH") && form.rentalCommissionPreset !== "fixed") {
-      // preset auto-calculates from monthly rent — no manual input to validate
-    } else {
-      const commNis = parseNis(form.commissionNis);
-      if (isNaN(commNis) || commNis < 0) e.commissionNis = "עמלת תיווך חייבת להיות מספר חיובי או 0";
-    }
-    // ── Sale commission + sale price (BOTH only) ─────────────────────────────
+    // ── Sale price (BOTH) — always required: it is persisted as
+    // propertySalePrice and displayed in the contract property table (annex),
+    // in EVERY owner mode including exclusivityOnly.
     if (form.dealType === "BOTH") {
-      // Sale price is always required for BOTH — it is persisted as
-      // propertySalePrice and displayed in the contract property table.
       const salePriceNis = parseNis(form.salePriceNis);
       if (isNaN(salePriceNis) || salePriceNis <= 0) e.salePriceNis = "מחיר מכירה חייב להיות מספר חיובי";
-      if (form.commissionSaleMode === "percent") {
-        const pct = parseFloat(form.commissionSalePct);
-        if (isNaN(pct) || pct < 0 || pct > 100) e.commissionSalePct = "אחוז עמלה למכירה חייב להיות בין 0 ל-100";
+    }
+    // ── Fee amounts — skipped entirely for the standalone exclusivity mode ───
+    if (!hideFeeFields) {
+      if (form.dealType === "SALE" && form.commissionMode === "percent") {
+        const pct = parseFloat(form.commissionPct);
+        if (isNaN(pct) || pct < 0 || pct > 100) e.commissionPct = "אחוז עמלה חייב להיות בין 0 ל-100";
+      } else if ((form.dealType === "RENTAL" || form.dealType === "BOTH") && form.rentalCommissionPreset !== "fixed") {
+        // preset auto-calculates from monthly rent — no manual input to validate
       } else {
-        const commSaleNis = parseNis(form.commissionSaleNis);
-        if (isNaN(commSaleNis) || commSaleNis < 0) e.commissionSaleNis = "עמלת מכירה חייבת להיות מספר חיובי או 0";
+        const commNis = parseNis(form.commissionNis);
+        if (isNaN(commNis) || commNis < 0) e.commissionNis = "עמלת תיווך חייבת להיות מספר חיובי או 0";
+      }
+      if (form.dealType === "BOTH") {
+        if (form.commissionSaleMode === "percent") {
+          const pct = parseFloat(form.commissionSalePct);
+          if (isNaN(pct) || pct < 0 || pct > 100) e.commissionSalePct = "אחוז עמלה למכירה חייב להיות בין 0 ל-100";
+        } else {
+          const commSaleNis = parseNis(form.commissionSaleNis);
+          if (isNaN(commSaleNis) || commSaleNis < 0) e.commissionSaleNis = "עמלת מכירה חייבת להיות מספר חיובי או 0";
+        }
       }
     }
-    // ── Exclusivity period — only when the exclusivity document is included ──
-    if (isOwner && form.includeExclusivity) {
+    // ── Exclusivity period — required by both exclusivity modes ──────────────
+    if (isOwner && form.ownerMode !== "serviceOnly") {
       if (!form.exclusivityStart) {
         e.exclusivityStart = "תאריך תחילת הבלעדיות הוא שדה חובה";
       }
@@ -1440,15 +1452,17 @@ export function NewContractForm({ subscription, initialContractType = "intereste
       propertyAddress,
       propertyCity:              form.propertyCity.trim(),
       propertyPrice:             priceAgorot,
-      commission:                commissionAgorot,
-      ...(commissionSaleAgorot !== null ? { commissionSale: commissionSaleAgorot } : {}),
+      // exclusivityOnly carries no fee — send 0 explicitly (the fee inputs are
+      // hidden, so the calculator would yield NaN); the API also forces 0.
+      commission:                hideFeeFields ? 0 : commissionAgorot,
+      ...(!hideFeeFields && commissionSaleAgorot !== null ? { commissionSale: commissionSaleAgorot } : {}),
       // Owner-exclusive never hides the address (the owner knows it; toggle hidden).
       hideFullAddressFromClient: isOwner ? false : form.hideFullAddressFromClient,
       // Rental fee mode — every rental-fee flow (RENTAL + the rental half of
       // BOTH, interested and owner-exclusive alike) uses MONTHS (1-12) / FIXED;
       // the server persists these per template key. ONE_MONTH remains a legacy
       // value accepted by the API (maps to 1 month).
-      ...(form.dealType === "RENTAL" || form.dealType === "BOTH"
+      ...((form.dealType === "RENTAL" || form.dealType === "BOTH") && !hideFeeFields
         ? {
             rentalCommissionMode: form.rentalCommissionPreset === "fixed" ? "FIXED" : "MONTHS",
             ...(form.rentalCommissionPreset !== "fixed"
@@ -1456,10 +1470,10 @@ export function NewContractForm({ subscription, initialContractType = "intereste
               : {}),
           }
         : {}),
-      // Owner two-document package — the optional exclusivity document. The
-      // period dates (plain YYYY-MM-DD strings) are sent only when opted in.
-      ...(isOwner ? { includeExclusivity: form.includeExclusivity } : {}),
-      ...(isOwner && form.includeExclusivity && form.exclusivityStart && exclusivityEndDate
+      // Owner document mode + exclusivity period. The period dates (plain
+      // YYYY-MM-DD strings) are sent for both exclusivity modes.
+      ...(isOwner ? { ownerMode: form.ownerMode } : {}),
+      ...(isOwner && form.ownerMode !== "serviceOnly" && form.exclusivityStart && exclusivityEndDate
         ? {
             exclusivityStartsAt: form.exclusivityStart,
             exclusivityEndsAt:   toInputValue(exclusivityEndDate),
@@ -1467,7 +1481,7 @@ export function NewContractForm({ subscription, initialContractType = "intereste
         : {}),
       // Sale fee mode + percent — lets the API render the dynamic clause 5.1 wording
       // for the sale interested template. The server persists them only for that template.
-      ...(form.dealType === "SALE"
+      ...(form.dealType === "SALE" && !hideFeeFields
         ? {
             saleCommissionMode: form.commissionMode === "percent" ? "PERCENT" : "FIXED",
             ...(form.commissionMode === "percent"
@@ -1482,10 +1496,15 @@ export function NewContractForm({ subscription, initialContractType = "intereste
       // sent by the shared RENTAL/BOTH spread above.
       ...(form.dealType === "BOTH"
         ? {
+            // Sale price is annex data — sent in EVERY mode incl. exclusivityOnly.
             propertySalePrice: Math.round(parseNis(form.salePriceNis) * 100),
-            saleCommissionMode: form.commissionSaleMode === "percent" ? "PERCENT" : "FIXED",
-            ...(form.commissionSaleMode === "percent"
-              ? { saleCommissionPercent: parseFloat(form.commissionSalePct) }
+            ...(!hideFeeFields
+              ? {
+                  saleCommissionMode: form.commissionSaleMode === "percent" ? "PERCENT" : "FIXED",
+                  ...(form.commissionSaleMode === "percent"
+                    ? { saleCommissionPercent: parseFloat(form.commissionSalePct) }
+                    : {}),
+                }
               : {}),
           }
         : {}),
@@ -1771,35 +1790,51 @@ export function NewContractForm({ subscription, initialContractType = "intereste
           </div>
         </Section>
 
-        {/* ══ 4b. Optional exclusivity document — owner flow only ═ */}
-        {/* Service-order first: the checkbox opts into a SEPARATE general
-            exclusivity document (OWNER_EXCLUSIVE_GENERAL) created alongside the
-            service-order agreement. Only the computed start/end dates are sent
-            to the API; duration mode and text are UI-derived. End dates use the
-            inclusive day-before convention (3 months from 01.08 → 31.10). */}
+        {/* ══ 4a. Owner document mode — which document(s) this signing creates ═ */}
+        {/* serviceOnly: one service-order (fee) document. serviceWithExclusivity:
+            service-order + linked general exclusivity document (one package, one
+            usage unit). exclusivityOnly: one standalone OWNER_EXCLUSIVE_ONLY
+            document with no owner fee obligation — the fee section is hidden and
+            the API forces commission = 0. */}
         {isOwner && (
-          <Section title="הסכם בלעדיות" subtitle="אופציונלי — מסמך נפרד הנלווה להסכם התיווך">
-            <div className="space-y-4">
-
-              {/* Opt-in checkbox — checking it reveals the period fields below */}
-              <label className="flex items-start gap-3 cursor-pointer select-none group">
-                <input
-                  type="checkbox"
-                  checked={form.includeExclusivity}
-                  onChange={(e) => {
-                    const on = e.target.checked;
-                    setForm((prev) => ({ ...prev, includeExclusivity: on }));
-                    setErrors((prev) => { const n = { ...prev }; delete n.exclusivityStart; delete n.exclusivityEnd; return n; });
+          <Section title="מסמכי החתמה" subtitle="בחר אילו מסמכים ייווצרו ויישלחו לבעל הנכס">
+            <div className="flex flex-wrap gap-2">
+              {([
+                { id: "serviceOnly",            label: "הסכם תיווך בלבד"            },
+                { id: "serviceWithExclusivity", label: "הסכם תיווך + הסכם בלעדיות" },
+                { id: "exclusivityOnly",        label: "הסכם בלעדיות בלבד"          },
+              ] as const).map((m) => (
+                <button key={m.id} type="button"
+                  onClick={() => {
+                    setForm((prev) => ({ ...prev, ownerMode: m.id }));
+                    setErrors((prev) => {
+                      const n = { ...prev };
+                      delete n.exclusivityStart; delete n.exclusivityEnd;
+                      delete n.commissionNis; delete n.commissionPct;
+                      delete n.commissionSaleNis; delete n.commissionSalePct;
+                      return n;
+                    });
                   }}
-                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                />
-                <div>
-                  <p className="text-sm font-medium text-gray-700">הוסף גם הסכם בלעדיות</p>
-                  <p className="text-xs text-gray-400 mt-0.5">ייווצר מסמך בלעדיות נפרד המפנה להסכם התיווך</p>
-                </div>
-              </label>
+                  className={[
+                    "px-3 py-2 rounded-xl border text-xs font-semibold transition-all",
+                    form.ownerMode === m.id
+                      ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
+                      : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
+                  ].join(" ")}>
+                  {m.label}
+                </button>
+              ))}
+            </div>
+          </Section>
+        )}
 
-              {form.includeExclusivity && (<>
+        {/* ══ 4b. Exclusivity period — both exclusivity modes ═ */}
+        {/* Only the computed start/end dates are sent to the API; duration mode
+            and text are UI-derived. End dates use the inclusive day-before
+            convention (3 months from 01.08 → 31.10). */}
+        {isOwner && form.ownerMode !== "serviceOnly" && (
+          <Section title="הסכם בלעדיות" subtitle="תקופת הבלעדיות של מסמך הבלעדיות">
+            <div className="space-y-4">
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -1866,14 +1901,14 @@ export function NewContractForm({ subscription, initialContractType = "intereste
                 </p>
               )}
 
-              {/* Two-documents notice — always visible while the package is opted in */}
-              <div className="px-3.5 py-2.5 bg-amber-50 border border-amber-200 rounded-xl">
-                <span className="text-sm text-amber-700 font-medium">
-                  יישלחו לבעל הנכס שני מסמכים נפרדים: הסכם תיווך והסכם בלעדיות
-                </span>
-              </div>
-
-              </>)}
+              {/* Two-documents notice — package mode only */}
+              {form.ownerMode === "serviceWithExclusivity" && (
+                <div className="px-3.5 py-2.5 bg-amber-50 border border-amber-200 rounded-xl">
+                  <span className="text-sm text-amber-700 font-medium">
+                    יישלחו לבעל הנכס שני מסמכים נפרדים: הסכם תיווך והסכם בלעדיות
+                  </span>
+                </div>
+              )}
 
             </div>
           </Section>
@@ -2038,6 +2073,9 @@ export function NewContractForm({ subscription, initialContractType = "intereste
         </Section>
 
         {/* ══ 6. Financial ══════════════════════════════════════════════════ */}
+        {/* Fee section — hidden entirely for the standalone exclusivity mode
+            (the document carries no owner fee; the API forces commission = 0) */}
+        {!hideFeeFields && (
         <Section title="עמלת תיווך">
           <div className="space-y-6">
 
@@ -2206,6 +2244,7 @@ export function NewContractForm({ subscription, initialContractType = "intereste
 
           </div>
         </Section>
+        )}
 
         {/* ══ 7. Language ═══════════════════════════════════════════════════ */}
         {/* Intentionally placed last — language is rarely changed; keeping it

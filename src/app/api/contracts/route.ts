@@ -282,9 +282,10 @@ export async function POST(request: Request) {
       rentalCommissionMonths, // 1-12 — required when rentalCommissionMode = "MONTHS"
       saleCommissionMode,     // "PERCENT" | "FIXED"   — sale fee mode (interested + owner service-order)
       saleCommissionPercent,  // human percent (2, 1.5) — only when saleCommissionMode = "PERCENT"
-      exclusivityStartsAt,    // exclusivity period start — required when includeExclusivity = true
-      exclusivityEndsAt,      // exclusivity period end   — required when includeExclusivity = true
-      includeExclusivity,     // owner flow only — also create the general exclusivity document
+      exclusivityStartsAt,    // exclusivity period start — required when the mode includes exclusivity
+      exclusivityEndsAt,      // exclusivity period end   — required when the mode includes exclusivity
+      includeExclusivity,     // LEGACY alias — true maps to ownerMode "serviceWithExclusivity"
+      ownerMode,              // "serviceOnly" (default) | "serviceWithExclusivity" | "exclusivityOnly"
       language: rawLanguage,
     } = body;
 
@@ -318,23 +319,40 @@ export async function POST(request: Request) {
     // Exclusivity period — required later when the resolved key is owner-exclusive
     const vExclusivityStart = parseOptionalDate(exclusivityStartsAt, "תחילת תקופת הבלעדיות");
     const vExclusivityEnd   = parseOptionalDate(exclusivityEndsAt,   "סיום תקופת הבלעדיות");
-    const validationError = firstError(vDealType, vPropertyPrice, vCommission, vRentalMode, vRentalMonths, vSaleMode, vSalePct, vExclusivityStart, vExclusivityEnd);
+    // Owner document mode — which owner document(s) this submission creates
+    const vOwnerMode = parseOptionalEnum(ownerMode, ["serviceOnly", "serviceWithExclusivity", "exclusivityOnly"] as const, "מצב מסמכי החתמה");
+    const validationError = firstError(vDealType, vPropertyPrice, vCommission, vRentalMode, vRentalMonths, vSaleMode, vSalePct, vExclusivityStart, vExclusivityEnd, vOwnerMode);
     if (validationError) {
       return NextResponse.json({ error: validationError }, { status: 400 });
     }
     // Narrowing: all Results are Ok beyond this point (firstError returned early on any Err)
-    if (!vDealType.ok || !vPropertyPrice.ok || !vCommission.ok || !vRentalMode.ok || !vRentalMonths.ok || !vSaleMode.ok || !vSalePct.ok || !vExclusivityStart.ok || !vExclusivityEnd.ok) {
+    if (!vDealType.ok || !vPropertyPrice.ok || !vCommission.ok || !vRentalMode.ok || !vRentalMonths.ok || !vSaleMode.ok || !vSalePct.ok || !vExclusivityStart.ok || !vExclusivityEnd.ok || !vOwnerMode.ok) {
       return NextResponse.json({ error: "Validation error" }, { status: 400 });
     }
     const validatedDealType = vDealType.value;
     const validatedPropertyPrice = vPropertyPrice.value;
     const validatedCommission = vCommission.value;
 
+    // ── Owner document mode ───────────────────────────────────────────────────
+    // serviceOnly (default): one service-order document (fee terms).
+    // serviceWithExclusivity: service-order primary + linked OWNER_EXCLUSIVE_GENERAL.
+    // exclusivityOnly: one standalone OWNER_EXCLUSIVE_ONLY document — it creates
+    // no owner fee obligation, so every commission amount/mode is skipped and
+    // forced off server-side (the UI hiding the fields is not the guarantee).
+    // Legacy alias: includeExclusivity === true (older payloads, ownerMode
+    // omitted) maps to serviceWithExclusivity.
+    const resolvedOwnerMode: "serviceOnly" | "serviceWithExclusivity" | "exclusivityOnly" =
+      vOwnerMode.value ?? (includeExclusivity === true ? "serviceWithExclusivity" : "serviceOnly");
+    const isExclusivityOnly = resolvedOwnerMode === "exclusivityOnly";
+    // The standalone exclusivity document carries no fee — commission forced 0.
+    const effectiveCommission = isExclusivityOnly ? 0 : validatedCommission;
+
     // ── BOTH deal type: validate commissionSale (sale-side commission) ────────
     // SALE and RENTAL contracts must NOT include commissionSale.
-    // BOTH contracts must include a non-negative integer for the sale commission.
+    // BOTH contracts must include a non-negative integer for the sale commission
+    // — except exclusivityOnly, whose document carries no fee (forced null).
     let validatedCommissionSale: number | null = null;
-    if (validatedDealType === "BOTH") {
+    if (validatedDealType === "BOTH" && !isExclusivityOnly) {
       const vCommissionSale = parseNonNegativeInt(commissionSale, "עמלת מכירה");
       if (!vCommissionSale.ok) {
         return NextResponse.json({ error: vCommissionSale.error }, { status: 400 });
@@ -431,10 +449,18 @@ export async function POST(request: Request) {
     let generatedText: string | null = null;
     let resolvedTemplateId: string | null = null;
 
-    const autoKey =
+    let autoKey =
       TEMPLATE_KEY_BY_TYPE_AND_DEAL[contractType]?.[validatedDealType]
       ?? CONTRACT_TYPE_TO_TEMPLATE_KEY[contractType]
       ?? null;
+    // exclusivityOnly: the standalone exclusivity document replaces the
+    // dealType-resolved service-order key. dealType itself stays validated and
+    // stored — it drives the annex price rows (rent / sale price / BOTH dual).
+    // Every downstream fee-mode allowlist excludes this key, so no commission
+    // modes are validated or persisted for it.
+    if (isExclusivityOnly) {
+      autoKey = "OWNER_EXCLUSIVE_ONLY";
+    }
 
     // Persist the rental commission mode ONLY for templates whose clause needs it
     // (interested rental/both + owner service-order rental/both). The interested
@@ -468,20 +494,21 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "יש לבחור מספר חודשי שכירות" }, { status: 400 });
     }
 
-    // ── Owner two-document package (includeExclusivity) ──────────────────────
-    // The optional general exclusivity document (OWNER_EXCLUSIVE_GENERAL) is a
-    // SECONDARY record created alongside an owner service-order primary in one
-    // transaction. It is never dealType-resolved and consumes NO extra usage
-    // unit (see the transaction below).
-    const wantsExclusivity = includeExclusivity === true;
-    const isOwnerServiceKey =
-      autoKey === "OWNER_SERVICE_ORDER_RENTAL" || autoKey === "OWNER_SERVICE_ORDER_SALE" || autoKey === "OWNER_SERVICE_ORDER_BOTH";
-    if (wantsExclusivity && !isOwnerServiceKey) {
+    // ── Owner exclusivity modes ───────────────────────────────────────────────
+    // serviceWithExclusivity: the general exclusivity document
+    // (OWNER_EXCLUSIVE_GENERAL) is a SECONDARY record created alongside the
+    // owner service-order primary in one transaction — never dealType-resolved,
+    // consumes NO extra usage unit (see the transaction below).
+    // exclusivityOnly: the standalone document (OWNER_EXCLUSIVE_ONLY) is the
+    // single record itself. Both modes require the exclusivity period; both are
+    // owner-flow-only.
+    const wantsExclusivity = resolvedOwnerMode === "serviceWithExclusivity";
+    if (resolvedOwnerMode !== "serviceOnly" && contractType !== CONTRACT_TYPE.OWNER_EXCLUSIVE) {
       return NextResponse.json({ error: "הסכם בלעדיות זמין רק בהחתמת בעל נכס" }, { status: 400 });
     }
     let resolvedExclusivityStart: Date | null = null;
     let resolvedExclusivityEnd: Date | null = null;
-    if (wantsExclusivity) {
+    if (resolvedOwnerMode !== "serviceOnly") {
       if (!vExclusivityStart.value || !vExclusivityEnd.value) {
         return NextResponse.json({ error: "יש להזין תקופת בלעדיות" }, { status: 400 });
       }
@@ -508,7 +535,7 @@ export async function POST(request: Request) {
     }
 
     if (autoKey) {
-      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_SERVICE_ORDER_RENTAL" | "OWNER_SERVICE_ORDER_SALE" | "OWNER_SERVICE_ORDER_BOTH";
+      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_SERVICE_ORDER_RENTAL" | "OWNER_SERVICE_ORDER_SALE" | "OWNER_SERVICE_ORDER_BOTH" | "OWNER_EXCLUSIVE_ONLY";
       const templateLang = language as "HE" | "EN" | "FR" | "RU" | "AR";
 
       // Resolve by (templateKey + language), fallback to HE if not found
@@ -529,7 +556,7 @@ export async function POST(request: Request) {
           // client/broker identity mixing bug (phone/idNumber mismatch between the
           // client details card and the legal document).
           client: { name: client.name, idNumber: client.idNumber || "", phone: client.phone, email: client.email || "", address: client.address ?? null },
-          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: validatedCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, rentalCommissionMonths: resolvedRentalMonths, saleCommissionMode: resolvedSaleMode, saleCommissionPercent: resolvedSalePercent, templateKey: autoKey, createdAt: new Date() },
+          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: effectiveCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, rentalCommissionMonths: resolvedRentalMonths, saleCommissionMode: resolvedSaleMode, saleCommissionPercent: resolvedSalePercent, templateKey: autoKey, exclusivityStartsAt: resolvedExclusivityStart, exclusivityEndsAt: resolvedExclusivityEnd, createdAt: new Date() },
         });
         generatedText = resolveTemplate(tpl.content, ctx);
         resolvedTemplateId = tpl.id;
@@ -571,9 +598,14 @@ export async function POST(request: Request) {
           propertyAddress,
           propertyCity,
           propertyPrice: validatedPropertyPrice,
-          commission: validatedCommission,
+          commission: effectiveCommission,
           ...(validatedCommissionSale !== null ? { commissionSale: validatedCommissionSale } : {}),
           ...(validatedPropertySalePrice !== null ? { propertySalePrice: validatedPropertySalePrice } : {}),
+          // exclusivityOnly: the standalone document itself carries the period
+          // (clause 5); the package mode persists it on the SECONDARY instead.
+          ...(isExclusivityOnly && resolvedExclusivityStart && resolvedExclusivityEnd
+            ? { exclusivityStartsAt: resolvedExclusivityStart, exclusivityEndsAt: resolvedExclusivityEnd }
+            : {}),
           ...(resolvedRentalMode ? { rentalCommissionMode: resolvedRentalMode } : {}),
           ...(resolvedRentalMonths != null ? { rentalCommissionMonths: resolvedRentalMonths } : {}),
           ...(resolvedSaleMode ? { saleCommissionMode: resolvedSaleMode } : {}),
