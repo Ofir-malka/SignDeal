@@ -249,6 +249,8 @@ enum ContractTemplateKey {
   OWNER_SERVICE_ORDER_BOTH   // הזמנת שירותי תיווך בעל נכס — מכירה והשכרה (dealType = BOTH)
   OWNER_EXCLUSIVE_GENERAL    // הסכם בלעדיות כללי — deal-type-agnostic, always the secondary doc
   OWNER_EXCLUSIVE_ONLY       // הסכם בלעדיות עצמאי — standalone, no owner fee obligation, never linked
+  // ── Broker cooperation family (Broker A = SignDeal user; Broker B signs) ───
+  BROKER_COOP_SHARED_POOL    // הסכם שיתוף פעולה — קופה משותפת (all dealTypes; equal split per legal text)
 }
 
 // How the rental brokerage fee was chosen by the broker. Drives the dynamic
@@ -315,6 +317,14 @@ model Contract {
   // {{exclusivityEndDate}} in the frozen generatedText.
   exclusivityStartsAt DateTime?
   exclusivityEndsAt   DateTime?
+
+  // Broker-cooperation documents (BROKER_COOP_SHARED_POOL): the counterparty
+  // (cooperating) broker's license number — optional, a snapshot on the
+  // document itself. Lives on Contract, not Client: Client models the generic
+  // signer shared by every family, and this stays valid unchanged when the
+  // counterparty later becomes a real SignDeal user. Rendered conditionally
+  // via {{counterpartyBrokerLicenseSuffix}} (empty when absent — never "—").
+  counterpartyBrokerLicenseNumber String?
 
   // Dates
   createdAt       DateTime        @default(now())
