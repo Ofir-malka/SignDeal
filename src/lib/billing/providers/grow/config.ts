@@ -34,6 +34,16 @@ export function isGrowSaasRecurringEnabled(): boolean {
   return boolEnv("ENABLE_GROW_RECURRING_CHARGES");
 }
 
+/**
+ * Gate for ACTING on Grow SaaS webhook events (Rail A dispatcher). SEPARATE from the
+ * checkout + recurring gates. Default OFF = SHADOW MODE: the webhook dispatcher still
+ * classifies and captures grow_saas WebhookEvents, but the handler never mutates
+ * subscription state. Polling (bridge + client poller) remains the primary mechanism.
+ */
+export function isGrowSaasWebhookEnabled(): boolean {
+  return boolEnv("GROW_SAAS_WEBHOOK_ENABLED");
+}
+
 function growSaasEnvironment(): "sandbox" | "production" {
   const v = (process.env.GROW_SAAS_ENVIRONMENT ?? "sandbox").trim().toLowerCase();
   return v === "production" ? "production" : "sandbox";

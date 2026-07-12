@@ -56,9 +56,10 @@
  *                               PERCENT states the chosen percentage, FIXED (or
  *                               absent mode) states the stored commission amount
  *
- * NOTE: both commission clauses are dealType-aware — for dealType BOTH they use
- * the BOTH document's wording ("בעסקת מכר: …" / "בעסקת שכירות: …"), the sale
- * amount comes from commissionSale and the rental amount from commission.
+ * NOTE: both commission clauses are dealType-aware — for dealType BOTH the sale
+ * clause uses the BOTH wording ("בקנייה – …", amount from commissionSale) and
+ * the rental clause shares the interested wording ("בשכירות – …", amount from
+ * commission, incl. MONTHS 1-12 via rentalCommissionMonths).
  * The rental clause is additionally templateKey-aware: the owner service-order
  * keys (OWNER_SERVICE_ORDER_RENTAL/BOTH) use the owner wording, incl. MONTHS
  * mode (1-12 monthly rents, Hebrew words); the standalone rental document adds

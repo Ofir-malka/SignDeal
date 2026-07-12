@@ -252,12 +252,12 @@ enum ContractTemplateKey {
 }
 
 // How the rental brokerage fee was chosen by the broker. Drives the dynamic
-// wording of clause 6.1 in the INTERESTED_BUYER_RENTAL template. Null for
-// SALE/BOTH and for every legacy contract.
+// wording of the rental fee clause in the interested rental/BOTH templates.
+// Null for legacy contracts and for flows without a rental-side fee.
 enum RentalCommissionMode {
-  ONE_MONTH   // חודש שכירות אחד
+  ONE_MONTH   // חודש שכירות אחד (legacy value; maps to the one-month wording)
   FIXED       // סכום קבוע
-  MONTHS      // מספר חודשי שכירות (1–12) — rentalCommissionMonths holds the count (owner-exclusive rental)
+  MONTHS      // מספר חודשי שכירות — הכמות נשמרת ב-rentalCommissionMonths (1-12)
 }
 
 // How the sale brokerage fee was chosen by the broker. Drives the dynamic
@@ -305,7 +305,7 @@ model Contract {
   commission      Int             // stored in agorot (rental commission for BOTH; full commission for SALE/RENTAL)
   commissionSale  Int?            // stored in agorot; only set when dealType = BOTH (sale-side commission)
   rentalCommissionMode RentalCommissionMode? // null for SALE/BOTH & legacy; drives rental clause 6.1 wording
-  rentalCommissionMonths Int?                // 1–12; set only when rentalCommissionMode = MONTHS (owner-exclusive rental)
+  rentalCommissionMonths Int?                // 1-12; set only when rentalCommissionMode = MONTHS
   saleCommissionMode    SaleCommissionMode?  // null for non-sale-template & legacy; drives sale clause 5.1 wording
   saleCommissionPercent Float?               // human percent (2, 1.5); set only when saleCommissionMode = PERCENT
 

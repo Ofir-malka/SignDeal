@@ -113,7 +113,7 @@ function isoToDateStr(iso: string | Date): string {
 
 const DEAL_TYPE_HE: Record<string, string> = { RENTAL: "שכירות", SALE: "מכירה", BOTH: "גם וגם" };
 
-// Hebrew month-count words for the owner-exclusive rental fee clause
+// Hebrew month-count words for the months-based rental fee clause
 // ("דמי שכירות של חודש אחד / שני חודשים / ..."). Keys match the 1-12 range
 // enforced on Contract.rentalCommissionMonths.
 const HE_MONTH_WORDS: Record<number, string> = {

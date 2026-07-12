@@ -191,8 +191,9 @@ const CARDS: CardDef[] = [
     iconBg:   "bg-indigo-50 text-indigo-600",
   },
   {
-    // Live — rental + sale variants; the form defaults to RENTAL for this
-    // category (SALE selectable there) and the API rejects owner-exclusive BOTH.
+    // Live — the owner flow supports RENTAL / SALE / BOTH with three document
+    // modes (serviceOnly / serviceWithExclusivity / exclusivityOnly) inside
+    // /contracts/new; this card deep-links straight into it.
     href:     "/contracts/new?type=owner-exclusive",
     icon:     <IconExclusivity />,
     title:    CONTRACT_TYPE.OWNER_EXCLUSIVE,
