@@ -5,6 +5,7 @@ import Link from "next/link";
 import type { Contract } from "@/lib/contracts-data";
 import type { SignatureStatus, PaymentStatus } from "@/lib/contracts-data";
 import { type ApiContractResponse, apiToContract } from "@/lib/api-contracts";
+import { hidesFeeChrome } from "@/lib/contracts/contract-types";
 
 // ─── Status badges ────────────────────────────────────────────────────────────
 
@@ -308,9 +309,12 @@ async function deleteContract(id: number | string) {
                           )}
                         </td>
 
-                        {/* Commission */}
+                        {/* Commission — "—" for fee-free documents (the standalone
+                            exclusivity agreement carries no owner fee) */}
                         <td className="px-4 py-4 hidden md:table-cell">
-                          <span className="text-sm font-semibold text-gray-900">{c.commission}</span>
+                          <span className="text-sm font-semibold text-gray-900">
+                            {hidesFeeChrome(c.templateKey) ? "—" : c.commission}
+                          </span>
                         </td>
 
                         {/* Sent date */}

@@ -36,7 +36,13 @@ export type ApiContractResponse = {
   generatedText?:  string | null;
   signatureToken?: string | null;
   language?:       string | null;
+  templateKey?:    string | null;   // resolved ContractTemplateKey; drives fee-chrome suppression
   requiresClientAddress?: boolean;  // signing page only — whether the client must complete an address
+  // ── Owner two-document package (detail GET only) ────────────────────────────
+  linkedExclusivityContract?: {     // set on the PRIMARY when a linked exclusivity doc exists
+    id: string; status: string; signatureToken: string | null; createdAt: string;
+  } | null;
+  linkedPrimaryContractId?: string | null;  // set on the SECONDARY (back-link to the primary)
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -112,6 +118,16 @@ export function apiToContract(c: ApiContractResponse): Contract {
     generatedText:             c.generatedText  ?? null,
     signatureToken:            c.signatureToken ?? null,
     language:                  c.language       ?? "HE",
+    templateKey:               c.templateKey    ?? null,
+    // ── Owner two-document package (detail view only) ─────────────────────────
+    linkedExclusivity: c.linkedExclusivityContract
+      ? {
+          contractId:      c.linkedExclusivityContract.id,
+          signatureStatus: STATUS_MAP[c.linkedExclusivityContract.status] ?? "טיוטה",
+          signatureToken:  c.linkedExclusivityContract.signatureToken,
+        }
+      : null,
+    linkedPrimaryContractId: c.linkedPrimaryContractId ?? null,
     // ── Signing audit fields — only present on broker GET responses ───────────
     signatureHashPrefix: c.signatureHash ? c.signatureHash.slice(0, 12) : null,
     hasSignature:        !!c.signatureData,

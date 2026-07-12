@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import Link from "next/link";
 import type { Contract, SignatureStatus, PaymentStatus } from "@/lib/contracts-data";
 import { ContractDealWrapper } from "@/components/ContractDealWrapper";
+import { hidesFeeChrome } from "@/lib/contracts/contract-types";
 import { parsePropertyAddress } from "@/lib/format-address";
 
 // ─── Status badges ────────────────────────────────────────────────────────────
@@ -158,6 +160,73 @@ function SignatureAuditStrip({ contract: c }: { contract: Contract }) {
   );
 }
 
+// ─── Owner two-document package blocks ────────────────────────────────────────
+
+// Shown on the PRIMARY service-order detail when a linked general exclusivity
+// document exists — the package is one broker-facing flow, but the secondary
+// is a separate legal document with its own signing link and status.
+function LinkedExclusivityCard({ linked }: { linked: NonNullable<Contract["linkedExclusivity"]> }) {
+  const [copied, setCopied] = useState(false);
+  const signingLink =
+    typeof window !== "undefined" && linked.signatureToken
+      ? `${window.location.origin}/contracts/sign/${linked.signatureToken}`
+      : null;
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5">
+      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">
+        מסמך מקושר
+      </h3>
+      <div className="space-y-3">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-gray-900">הסכם בלעדיות</p>
+            <p className="text-xs text-gray-400 mt-0.5">הסכם בלעדיות נשלח כחלק מחבילת החתמה זו.</p>
+          </div>
+          <StatusBadge status={linked.signatureStatus} styleMap={SIG_STYLE} />
+        </div>
+        <div className="flex flex-col sm:flex-row gap-2 pt-1">
+          <Link
+            href={`/contracts/${linked.contractId}`}
+            className="flex-1 py-2 rounded-xl bg-indigo-600 text-xs font-semibold text-white text-center hover:bg-indigo-700 transition-all"
+          >
+            צפייה במסמך
+          </Link>
+          {signingLink && (
+            <button
+              type="button"
+              onClick={() => {
+                navigator.clipboard.writeText(signingLink).catch(() => {});
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              }}
+              className="flex-1 py-2 rounded-xl border border-gray-200 text-xs font-semibold text-gray-700 hover:bg-gray-50 transition-all"
+            >
+              {copied ? "✓ הועתק!" : "העתק קישור לחתימה"}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Shown when the SECONDARY exclusivity document is opened directly — links the
+// broker back to the primary service-order agreement of the package.
+function LinkedPrimaryStrip({ primaryId }: { primaryId: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 bg-indigo-50/60 border border-indigo-100 rounded-xl px-4 py-3 mb-5">
+      <p className="text-sm text-indigo-900 font-medium">מסמך זה מקושר להסכם תיווך</p>
+      <Link
+        href={`/contracts/${primaryId}`}
+        className="text-xs font-semibold text-indigo-600 hover:text-indigo-800 shrink-0"
+      >
+        צפייה בהסכם התיווך
+      </Link>
+    </div>
+  );
+}
+
 // ─── Main export ──────────────────────────────────────────────────────────────
 
 export function ContractDetail({ contract: c }: { contract: Contract }) {
@@ -169,6 +238,9 @@ export function ContractDetail({ contract: c }: { contract: Contract }) {
     <ContractDealWrapper
       contract={c}
       infoCards={
+        <>
+        {/* Secondary exclusivity document opened directly — back-link strip */}
+        {c.linkedPrimaryContractId && <LinkedPrimaryStrip primaryId={c.linkedPrimaryContractId} />}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mb-6">
           <InfoCard
             title="פרטי לקוח"
@@ -204,15 +276,21 @@ export function ContractDetail({ contract: c }: { contract: Contract }) {
                   ? <StatusBadge status={c.paymentStatus} styleMap={PAY_STYLE} />
                   : "—"
               },
-              { label: "עמלה",         value: c.commission  },
+              // Fee row is key-gated off for fee-free documents (the general
+              // exclusivity agreement carries no fee terms of its own).
+              ...(hidesFeeChrome(c.templateKey) ? [] : [{ label: "עמלה", value: c.commission as ReactNode }]),
               { label: "נשלח בתאריך", value: c.sentDate     },
               { label: "נחתם בתאריך", value: c.signedDate   },
             ]}
           />
 
+          {/* Linked exclusivity document — owner two-document package */}
+          {c.linkedExclusivity && <LinkedExclusivityCard linked={c.linkedExclusivity} />}
+
           {/* Signature audit strip — only shown when signed */}
           {isSigned && <SignatureAuditStrip contract={c} />}
         </div>
+        </>
       }
     />
   );

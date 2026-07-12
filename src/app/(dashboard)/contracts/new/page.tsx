@@ -1,8 +1,15 @@
 import { redirect }         from "next/navigation";
 import { auth }              from "@/lib/auth";
 import { DashboardShell }    from "@/components/DashboardShell";
-import { NewContractForm }   from "@/components/NewContractForm";
+import { NewContractForm, type ContractTypeId } from "@/components/NewContractForm";
 import { canCreateContract, getPlanLabel } from "@/lib/subscription";
+
+// ?type= → contract-category preselect (dashboard quick cards deep-link here).
+// Strict allowlist: unknown/missing values fall back to the interested default,
+// so the URL surface cannot put the form into an unsupported state.
+const TYPE_PARAM_TO_CARD: Record<string, ContractTypeId> = {
+  "owner-exclusive": "exclusivity",
+};
 
 /**
  * /contracts/new — unified one-page contract creation form.
@@ -24,9 +31,16 @@ export const metadata = {
   title: "חוזה חדש | SignDeal",
 };
 
-export default async function NewContractPage() {
+export default async function NewContractPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ type?: string }>;
+}) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
+
+  const { type } = await searchParams;
+  const initialContractType: ContractTypeId = TYPE_PARAM_TO_CARD[type ?? ""] ?? "interested";
 
   const check = await canCreateContract(session.user.id);
   const subscription = {
@@ -47,7 +61,7 @@ export default async function NewContractPage() {
     <DashboardShell>
       <main className="flex-1 overflow-y-auto px-4 sm:px-8 py-6 sm:py-8">
         <div className="max-w-3xl mx-auto">
-          <NewContractForm subscription={subscription} />
+          <NewContractForm subscription={subscription} initialContractType={initialContractType} />
         </div>
       </main>
     </DashboardShell>

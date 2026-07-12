@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import type { Contract } from "@/lib/contracts-data";
 import { parseDocumentLines, splitAtClauses } from "@/lib/contracts/resolve-template";
 import { getLabels, isRtlLang } from "@/lib/contracts/labels";
+import { hidesFeeChrome } from "@/lib/contracts/contract-types";
 import { formatPropertyAddress, parsePropertyAddress } from "@/lib/format-address";
 
 // ─── Document-body renderer ───────────────────────────────────────────────────
@@ -79,10 +80,14 @@ function PropertyTable({
     // BOTH only — sale asking price; hidden on legacy BOTH rows where it is absent
     ...(c.dealType === "גם וגם" && c.propertySalePrice
       ? [[labels.salePrice, c.propertySalePrice] as [string, string]] : []),
-    // For BOTH: show rental commission first, then sale commission separately
-    ...(c.dealType === "גם וגם" && c.commissionSale
-      ? [["עמלת שכירות", c.commission] as [string, string], ["עמלת מכירה", c.commissionSale] as [string, string]]
-      : [[labels.commission, c.commission] as [string, string]]),
+    // For BOTH: show rental commission first, then sale commission separately.
+    // Fee rows are key-gated off for fee-free documents (OWNER_EXCLUSIVE_GENERAL
+    // delegates all fee terms to its service-order sibling).
+    ...(hidesFeeChrome(c.templateKey)
+      ? []
+      : c.dealType === "גם וגם" && c.commissionSale
+        ? [["עמלת שכירות", c.commission] as [string, string], ["עמלת מכירה", c.commissionSale] as [string, string]]
+        : [[labels.commission, c.commission] as [string, string]]),
   ];
   return (
     <div className="border border-gray-200 rounded-lg overflow-hidden">
@@ -300,7 +305,8 @@ export function ContractTemplate({
         </Section>
       </div>
 
-      {/* Commission */}
+      {/* Commission — key-gated off for fee-free documents (OWNER_EXCLUSIVE_GENERAL) */}
+      {!hidesFeeChrome(c.templateKey) && (
       <div className="px-6 py-5">
         <Section title={labels.commissionTerms}>
           {c.dealType === "גם וגם" ? (
@@ -318,6 +324,7 @@ export function ContractTemplate({
           )}
         </Section>
       </div>
+      )}
 
       {/* Terms */}
       <div className="px-6 py-5">

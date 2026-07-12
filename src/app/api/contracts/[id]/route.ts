@@ -20,12 +20,33 @@ export async function GET(
         client: true,
         payment: true,
         activities: { orderBy: { createdAt: "desc" } },
+        // Resolved template key — the broker detail view gates fee chrome with
+        // it (hidesFeeChrome / OWNER_EXCLUSIVE_GENERAL).
+        template: { select: { templateKey: true } },
+        // Owner two-document package child — v1 supports exactly one linked
+        // general exclusivity document per primary.
+        relatedContracts: {
+          where:  { template: { templateKey: "OWNER_EXCLUSIVE_GENERAL" } },
+          select: { id: true, status: true, signatureToken: true, createdAt: true },
+          take: 1,
+        },
+        // Reverse direction — set when THIS contract is the secondary, so the
+        // detail view can link back to its primary service-order agreement.
+        relatedContract: { select: { id: true } },
       },
     });
     if (!contract) {
       return NextResponse.json({ error: "Contract not found" }, { status: 404 });
     }
-    return NextResponse.json(contract);
+    // Flatten the relations into additive fields — existing consumers keep the
+    // exact historical contract shape plus three optional extras.
+    const { template, relatedContracts, relatedContract, ...c } = contract;
+    return NextResponse.json({
+      ...c,
+      templateKey:               template?.templateKey ?? null,
+      linkedExclusivityContract: relatedContracts[0] ?? null,
+      linkedPrimaryContractId:   relatedContract?.id ?? null,
+    });
   } catch (error) {
     console.error("[GET /api/contracts/:id]", error);
     return NextResponse.json({ error: "Failed to fetch contract" }, { status: 500 });

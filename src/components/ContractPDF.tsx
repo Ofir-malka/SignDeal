@@ -3,6 +3,7 @@ import { Document, Page, View, Text, Image, StyleSheet, Font } from "@react-pdf/
 import type { Contract } from "@/lib/contracts-data";
 import { parseDocumentLines, splitAtClauses } from "@/lib/contracts/resolve-template";
 import { getLabels, isRtlLang } from "@/lib/contracts/labels";
+import { hidesFeeChrome } from "@/lib/contracts/contract-types";
 import { formatPropertyAddress, parsePropertyAddress } from "@/lib/format-address";
 
 // ── Broker info passed from the PDF route ─────────────────────────────────────
@@ -415,10 +416,14 @@ export function ContractPDF({ contract: c, broker }: { contract: Contract; broke
       // BOTH only — sale asking price; hidden on legacy BOTH rows where it is absent
       ...(c.dealType === "גם וגם" && c.propertySalePrice
         ? [[labels.salePrice, c.propertySalePrice] as [string, string]] : []),
-      // BOTH: split into two commission rows
-      ...(c.dealType === "גם וגם" && c.commissionSale
-        ? [["עמלת שכירות", c.commission] as [string, string], ["עמלת מכירה", c.commissionSale] as [string, string]]
-        : [[labels.commission, c.commission] as [string, string]]),
+      // BOTH: split into two commission rows.
+      // Fee rows are key-gated off for fee-free documents (OWNER_EXCLUSIVE_GENERAL
+      // delegates all fee terms to its service-order sibling).
+      ...(hidesFeeChrome(c.templateKey)
+        ? []
+        : c.dealType === "גם וגם" && c.commissionSale
+          ? [["עמלת שכירות", c.commission] as [string, string], ["עמלת מכירה", c.commissionSale] as [string, string]]
+          : [[labels.commission, c.commission] as [string, string]]),
     ];
 
     const docLang = (c.language ?? "HE").toLowerCase();
@@ -547,7 +552,8 @@ export function ContractPDF({ contract: c, broker }: { contract: Contract; broke
           <PropertyTablePDF rows={propertyRows} isRtl={isRtl} />
         </View>
 
-        {/* Commission */}
+        {/* Commission — key-gated off for fee-free documents (OWNER_EXCLUSIVE_GENERAL) */}
+        {!hidesFeeChrome(c.templateKey) && (
         <View style={S.section}>
           <Text style={[S.sectionTitle, { textAlign: td }]}>ד. {labels.commissionTerms}</Text>
           {c.dealType === "גם וגם" ? (
@@ -568,6 +574,7 @@ export function ContractPDF({ contract: c, broker }: { contract: Contract; broke
             </Text>
           )}
         </View>
+        )}
 
         {/* Terms */}
         <View style={S.section}>

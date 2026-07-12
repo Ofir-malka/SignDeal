@@ -21,6 +21,12 @@ const KEYS_REQUIRING_CLIENT_ADDRESS = new Set<string>([
   "INTERESTED_BUYER_RENTAL",
   "INTERESTED_BUYER_SALE",
   "INTERESTED_BUYER_BOTH",
+  "OWNER_EXCLUSIVE_RENTAL",      // deprecated key — kept for old dev-era rows
+  "OWNER_EXCLUSIVE_SALE",        // deprecated key — kept for old dev-era rows
+  "OWNER_SERVICE_ORDER_RENTAL",
+  "OWNER_SERVICE_ORDER_SALE",
+  "OWNER_SERVICE_ORDER_BOTH",
+  "OWNER_EXCLUSIVE_ONLY",
 ]);
 
 // ── GET /api/contracts/sign/[token] ──────────────────────────────────────────
@@ -103,6 +109,9 @@ export async function GET(
       hideFullAddressFromClient: contract.hideFullAddressFromClient,
       generatedText:             contract.generatedText ?? null,
       language:                  contract.language      ?? "HE",
+      // Resolved template key — lets the signing page gate fee chrome for
+      // fee-free documents (hidesFeeChrome / OWNER_EXCLUSIVE_GENERAL).
+      templateKey:               contract.template?.templateKey ?? null,
     });
   } catch (error) {
     console.error("[GET /api/contracts/sign/:token]", error);
@@ -449,6 +458,10 @@ export async function PATCH(
         client: true,
         user:   { select: { fullName: true, licenseNumber: true, phone: true, idNumber: true } },
         template: { select: { templateKey: true } },
+        // Primary service-order sibling (OWNER_EXCLUSIVE_GENERAL only) — lets
+        // generatedText regeneration refill {{serviceOrderNumber}}/{{serviceOrderDate}}
+        // deterministically. Null for every standalone contract.
+        relatedContract: { select: { id: true, createdAt: true } },
       },
     });
 
@@ -571,8 +584,13 @@ export async function PATCH(
                 commission:      contract.commission,
                 commissionSale:  contract.commissionSale ?? null,
                 rentalCommissionMode: contract.rentalCommissionMode,
+                rentalCommissionMonths: contract.rentalCommissionMonths,
                 saleCommissionMode:   contract.saleCommissionMode,
                 saleCommissionPercent: contract.saleCommissionPercent,
+                templateKey:     contract.template?.templateKey ?? null,
+                exclusivityStartsAt: contract.exclusivityStartsAt,
+                exclusivityEndsAt:   contract.exclusivityEndsAt,
+                serviceOrder:    contract.relatedContract ?? null,
                 createdAt:       contract.createdAt,
               },
             });

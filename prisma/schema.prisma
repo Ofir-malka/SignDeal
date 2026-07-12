@@ -237,6 +237,18 @@ enum ContractTemplateKey {
   INTERESTED_BUYER_RENTAL   // החתמת מתעניין — שכירות (resolved when dealType = RENTAL)
   INTERESTED_BUYER_SALE     // החתמת מתעניין — מכירה (resolved when dealType = SALE)
   INTERESTED_BUYER_BOTH     // החתמת מתעניין — מכירה והשכרה (resolved when dealType = BOTH)
+  // ── Deprecated owner keys — DO NOT resolve to these from app code ──────────
+  // Superseded by the OWNER_SERVICE_ORDER_* + OWNER_EXCLUSIVE_GENERAL family:
+  // fee terms and exclusivity are separate legal documents. Values kept for
+  // Postgres referential integrity (dev rows may still reference them).
+  OWNER_EXCLUSIVE_RENTAL    // deprecated — old exclusivity-with-fees rental doc
+  OWNER_EXCLUSIVE_SALE      // deprecated — old exclusivity-with-fees sale doc
+  // ── Owner two-document family (service-order first; exclusivity optional) ──
+  OWNER_SERVICE_ORDER_RENTAL // הזמנת שירותי תיווך בעל נכס — השכרה (dealType = RENTAL)
+  OWNER_SERVICE_ORDER_SALE   // הזמנת שירותי תיווך בעל נכס — מכירה (dealType = SALE)
+  OWNER_SERVICE_ORDER_BOTH   // הזמנת שירותי תיווך בעל נכס — מכירה והשכרה (dealType = BOTH)
+  OWNER_EXCLUSIVE_GENERAL    // הסכם בלעדיות כללי — deal-type-agnostic, always the secondary doc
+  OWNER_EXCLUSIVE_ONLY       // הסכם בלעדיות עצמאי — standalone, no owner fee obligation, never linked
 }
 
 // How the rental brokerage fee was chosen by the broker. Drives the dynamic
@@ -297,6 +309,13 @@ model Contract {
   saleCommissionMode    SaleCommissionMode?  // null for non-sale-template & legacy; drives sale clause 5.1 wording
   saleCommissionPercent Float?               // human percent (2, 1.5); set only when saleCommissionMode = PERCENT
 
+  // Exclusivity period (owner-exclusive templates only; null elsewhere).
+  // End date follows the inclusive day-before convention in the UI
+  // (3 months from 01.08 -> 31.10). Rendered via {{exclusivityStartDate}} /
+  // {{exclusivityEndDate}} in the frozen generatedText.
+  exclusivityStartsAt DateTime?
+  exclusivityEndsAt   DateTime?
+
   // Dates
   createdAt       DateTime        @default(now())
   sentAt          DateTime?
@@ -332,6 +351,18 @@ model Contract {
   payment         Payment?
   messages        Message[]
   usageEvent      ContractUsageEvent? // one immutable usage slot; survives contract deletion
+
+  // ── Owner two-document package ──────────────────────────────────────────────
+  // The general exclusivity agreement (OWNER_EXCLUSIVE_GENERAL) legally
+  // references its owner service-order agreement by number/date, so the
+  // SECONDARY (exclusivity) contract points at its PRIMARY (service-order)
+  // sibling. Null for every standalone contract. Also the anchor for the
+  // one-usage-unit-per-package rule (only the primary gets a usage event).
+  relatedContractId String?
+  relatedContract   Contract?  @relation("OwnerDocumentPackage", fields: [relatedContractId], references: [id], onDelete: SetNull)
+  relatedContracts  Contract[] @relation("OwnerDocumentPackage")
+
+  @@index([relatedContractId])
 }
 
 // ── Payment ────────────────────────────────────────────────────────────────────

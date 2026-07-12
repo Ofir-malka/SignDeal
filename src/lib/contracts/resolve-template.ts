@@ -80,6 +80,12 @@ export interface TemplateContext {
   rentalCommissionClause: string;
   // Dynamic sale clause 5.1 — full sentence built from the sale commission mode
   saleCommissionClause:   string;
+  // Exclusivity period (owner-exclusive templates) — DD.MM.YYYY, "—" when absent
+  exclusivityStartDate:   string;
+  exclusivityEndDate:     string;
+  // Primary service-order sibling (OWNER_EXCLUSIVE_GENERAL only) — "—" when absent
+  serviceOrderNumber:     string;   // sibling doc number, chrome format (last 8 chars, uppercased)
+  serviceOrderDate:       string;   // sibling creation date, DD.MM.YYYY
   // Dates
   today:           string;   // DD.MM.YYYY
   contractId:      string;   // last 8 chars of id, uppercased
@@ -145,33 +151,67 @@ export function buildContext(opts: {
     rentalCommissionMonths?: number | null;               // 1-12; only when mode = MONTHS
     saleCommissionMode?:   "PERCENT" | "FIXED" | null;    // drives sale clause 5.1; null -> FIXED wording
     saleCommissionPercent?: number | null;                // human percent (2, 1.5); only for PERCENT
+    // Resolved template key — selects template-specific clause wordings
+    // (e.g. the owner service-order keys vs the interested-client wordings).
+    templateKey?:    string | null;
+    // Exclusivity period (owner-exclusive templates only)
+    exclusivityStartsAt?: Date | string | null;
+    exclusivityEndsAt?:   Date | string | null;
+    // Primary service-order sibling (loaded via Contract.relatedContractId) —
+    // fills {{serviceOrderNumber}} / {{serviceOrderDate}} on the general
+    // exclusivity document (OWNER_EXCLUSIVE_GENERAL).
+    serviceOrder?: { id: string; createdAt: Date | string } | null;
     createdAt:       Date | string;
   };
 }): TemplateContext {
   const isBoth = opts.contract.dealType === "BOTH";
 
-  // Dynamic rental clause — the interested wording ("בשכירות – …", incl. MONTHS
-  // 1-12), shared by INTERESTED_BUYER_RENTAL and the rental half of
-  // INTERESTED_BUYER_BOTH (their lawyer documents carry the same fee sentence).
-  // Legacy ONE_MONTH / absent modes map to the one-month sentence. The amount
-  // always comes from `commission` (for BOTH that IS the rental-side commission).
-  const rentalCommissionClause = (() => {
-    // MONTHS states the chosen number of monthly rents (1-12, Hebrew words);
-    // FIXED states the stored amount; legacy ONE_MONTH and absent modes map
-    // to the one-month sentence. MONTHS without a valid count falls back to
-    // the fixed-amount sentence — always truthful about the stored commission.
-    const m = opts.contract.rentalCommissionMonths;
-    if (opts.contract.rentalCommissionMode === "MONTHS") {
-      if (m != null && HE_MONTH_WORDS[m]) {
-        return `בשכירות – דמי תיווך בסכום השווה לדמי שכירות של ${HE_MONTH_WORDS[m]}, בתוספת מע"מ כדין.`;
-      }
-      return `בשכירות – דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`;
-    }
-    if (opts.contract.rentalCommissionMode === "FIXED") {
-      return `בשכירות – דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`;
-    }
-    return `בשכירות – דמי תיווך בסכום השווה לדמי שכירות של ${HE_MONTH_WORDS[1]}, בתוספת מע"מ כדין.`;
-  })();
+  // Dynamic rental clause — wording differs between the owner service-order
+  // documents ("בעסקת שכירות, דמי התיווך יהיו…") and the interested wording
+  // ("בשכירות – …"), shared by INTERESTED_BUYER_RENTAL and the rental half of
+  // INTERESTED_BUYER_BOTH. Both families support MONTHS (1-12, Hebrew words);
+  // legacy ONE_MONTH maps to the one-month sentence. The amount always comes
+  // from `commission` (for BOTH that IS the rental-side commission).
+  const isOwnerServiceRental = opts.contract.templateKey === "OWNER_SERVICE_ORDER_RENTAL";
+  const rentalCommissionClause = (isOwnerServiceRental || opts.contract.templateKey === "OWNER_SERVICE_ORDER_BOTH")
+    // Owner service-order wording (clause 6; clause 7 in the BOTH document):
+    // MONTHS states the chosen number of monthly rents; ONE_MONTH is accepted
+    // only as legacy API compatibility; FIXED states the stored amount.
+    // Absent/incomplete data (unreachable past route validation — the mode and
+    // the MONTHS count are REQUIRED for these keys) falls back to the
+    // fixed-amount sentence, never silently to one month. The standalone rental
+    // document carries "ללא תלות במשך תקופת השכירות"; the BOTH document's
+    // rental clause omits it (per the lawyer sources).
+    ? (() => {
+        const tail = isOwnerServiceRental ? ", ללא תלות במשך תקופת השכירות" : "";
+        const m = opts.contract.rentalCommissionMonths;
+        if (opts.contract.rentalCommissionMode === "MONTHS" && m != null && HE_MONTH_WORDS[m]) {
+          return `בעסקת שכירות, דמי התיווך יהיו בסכום השווה לדמי שכירות של ${HE_MONTH_WORDS[m]}${tail}, בתוספת מע"מ כדין.`;
+        }
+        if (opts.contract.rentalCommissionMode === "ONE_MONTH") {
+          return `בעסקת שכירות, דמי התיווך יהיו בסכום השווה לדמי שכירות של ${HE_MONTH_WORDS[1]}${tail}, בתוספת מע"מ כדין.`;
+        }
+        return `בעסקת שכירות, דמי התיווך יהיו בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`;
+      })()
+    : (() => {
+        // Interested wording (INTERESTED_BUYER_RENTAL, the rental half of
+        // INTERESTED_BUYER_BOTH, + legacy callers):
+        // MONTHS states the chosen number of monthly rents (1-12, Hebrew words);
+        // FIXED states the stored amount; legacy ONE_MONTH and absent modes map
+        // to the one-month sentence. MONTHS without a valid count falls back to
+        // the fixed-amount sentence — always truthful about the stored commission.
+        const m = opts.contract.rentalCommissionMonths;
+        if (opts.contract.rentalCommissionMode === "MONTHS") {
+          if (m != null && HE_MONTH_WORDS[m]) {
+            return `בשכירות – דמי תיווך בסכום השווה לדמי שכירות של ${HE_MONTH_WORDS[m]}, בתוספת מע"מ כדין.`;
+          }
+          return `בשכירות – דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`;
+        }
+        if (opts.contract.rentalCommissionMode === "FIXED") {
+          return `בשכירות – דמי תיווך בסך של ${formatAgorot(opts.contract.commission)}, בתוספת מע"מ כדין.`;
+        }
+        return `בשכירות – דמי תיווך בסכום השווה לדמי שכירות של ${HE_MONTH_WORDS[1]}, בתוספת מע"מ כדין.`;
+      })();
 
   // Dynamic sale clause — PERCENT states the broker's chosen percentage; FIXED
   // (and any absent/incomplete mode) states the stored amount, which is always
@@ -179,7 +219,20 @@ export function buildContext(opts: {
   // CRITICAL: for BOTH the sale-side amount lives in `commissionSale`
   // (`commission` is the rental side there); for SALE it lives in `commission`.
   const salePct = opts.contract.saleCommissionPercent;
-  const saleCommissionClause = isBoth
+  const saleCommissionClause = (opts.contract.templateKey === "OWNER_SERVICE_ORDER_SALE" || opts.contract.templateKey === "OWNER_SERVICE_ORDER_BOTH")
+    // Owner service-order sale wording (clause 6): PERCENT states the chosen
+    // percentage of the deal value; FIXED (and any absent/incomplete mode)
+    // states the stored amount — from `commission` for the standalone SALE
+    // document and from `commissionSale` for the BOTH document (where
+    // `commission` is the rental side). Truthful + deterministic either way.
+    ? (opts.contract.saleCommissionMode === "PERCENT" && salePct != null
+        ? `בעסקת מכירה, דמי התיווך יהיו בסכום השווה ל-${String(Number(salePct.toFixed(2)))}% משווי העסקה, בתוספת מע"מ כדין.`
+        : `בעסקת מכירה, דמי התיווך יהיו בסך של ${formatAgorot(
+            opts.contract.templateKey === "OWNER_SERVICE_ORDER_BOTH"
+              ? (opts.contract.commissionSale ?? opts.contract.commission)
+              : opts.contract.commission,
+          )}, בתוספת מע"מ כדין.`)
+    : isBoth
     // BOTH sale wording ("בקנייה – …") — the approved platform variant of the
     // BOTH lawyer document (source typos corrected); the amount comes from
     // `commissionSale` (the sale side; `commission` is the rental side there).
@@ -210,9 +263,17 @@ export function buildContext(opts: {
     ...(opts.contract.commissionSale != null
       ? { commissionSale: formatAgorot(opts.contract.commissionSale) }
       : {}),
-    // Dynamic clauses — computed above; wording is dealType-aware (BOTH vs RENTAL/SALE).
+    // Dynamic clauses — computed above; wording is templateKey/dealType-aware.
     rentalCommissionClause,
     saleCommissionClause,
+    // Exclusivity period — deterministic from the persisted dates
+    exclusivityStartDate: opts.contract.exclusivityStartsAt ? isoToDateStr(opts.contract.exclusivityStartsAt) : "—",
+    exclusivityEndDate:   opts.contract.exclusivityEndsAt   ? isoToDateStr(opts.contract.exclusivityEndsAt)   : "—",
+    // Primary service-order sibling reference — identical formatting to the
+    // chrome doc number (contractId) and platform dates, so the exclusivity
+    // document's citation always matches what the sibling displays.
+    serviceOrderNumber: opts.contract.serviceOrder ? String(opts.contract.serviceOrder.id).slice(-8).toUpperCase() : "—",
+    serviceOrderDate:   opts.contract.serviceOrder ? isoToDateStr(opts.contract.serviceOrder.createdAt) : "—",
     today:           isoToDateStr(opts.contract.createdAt),
     contractId:      String(opts.contract.id).slice(-8).toUpperCase(),
   };
