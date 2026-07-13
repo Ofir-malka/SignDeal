@@ -89,6 +89,10 @@ interface FormState {
   // level Contract field — intentionally NOT one of the Client-record fields
   // above (editing it must not deselect a picked client).
   counterpartyBrokerLicense: string;
+  // Broker cooperation only: which cooperation agreement is created. Sent as
+  // coopType for the cooperation category only; the route resolves sharedPool →
+  // BROKER_COOP_SHARED_POOL (default), eachSide → BROKER_COOP_EACH_SIDE.
+  coopType: "sharedPool" | "eachSide";
   // ── Structured property address ───────────────────────────────────────────
   // Street + number are stored in `propertyAddress` as "<street> <number>".
   // Floor and apartment are appended with "||" separators and rendered as
@@ -145,6 +149,7 @@ const INITIAL: FormState = {
   clientIdNumber:            "",
   skipEmailId:               false,
   counterpartyBrokerLicense: "",
+  coopType:                  "sharedPool",
   propertyStreet:            "",
   propertyNumber:            "",
   propertyFloor:             "",
@@ -1025,6 +1030,7 @@ function categoryDefaults(id: ContractTypeId): Partial<FormState> {
     exclusivityEndCustom: "",
     ownerMode: "serviceOnly" as const,
     counterpartyBrokerLicense: "",
+    coopType: "sharedPool" as const,
   };
   if (id === "exclusivity") {
     // Owner flow (service-order first) defaults to RENTAL; SALE and BOTH are
@@ -1565,9 +1571,13 @@ export function NewContractForm({ subscription, initialContractType = "intereste
               : {}),
           }
         : {}),
+      // Cooperation subtype — resolves the template key server-side
+      // (sharedPool → BROKER_COOP_SHARED_POOL, eachSide → BROKER_COOP_EACH_SIDE).
+      // Sent only for the cooperation category.
+      ...(isCoop ? { coopType: form.coopType } : {}),
       // Broker cooperation — Broker B's license number (optional free text).
       // Omitted when empty/whitespace; the API trims it, persists it only for
-      // the cooperation key, and renders the party-line suffix from it.
+      // the cooperation keys, and renders the party-line suffix from it.
       ...(isCoop && form.counterpartyBrokerLicense.trim()
         ? { counterpartyBrokerLicenseNumber: form.counterpartyBrokerLicense.trim() }
         : {}),
@@ -1675,16 +1685,30 @@ export function NewContractForm({ subscription, initialContractType = "intereste
           </div>
         </Section>
 
-        {/* ══ 1a. Cooperation subtype — static single-subtype indicator ═════ */}
-        {/* Only קופה משותפת exists today, so there is no state/selector — this
-            names the document being created; a real selector arrives with
-            subtype #2. */}
+        {/* ══ 1a. Cooperation subtype — which cooperation agreement is created ═ */}
+        {/* sharedPool: fees pooled and split equally (BROKER_COOP_SHARED_POOL).
+            eachSide: each broker collects only from the client they represent
+            (BROKER_COOP_EACH_SIDE). Both subtypes share the entire surrounding
+            form (party fields, license, deal type, fee-free behavior) — the
+            selector changes only the resolved template. */}
         {isCoop && (
           <Section title="סוג שיתוף פעולה">
             <div className="flex flex-wrap gap-2">
-              <span className="inline-flex px-3 py-2 rounded-xl border text-xs font-semibold border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300">
-                קופה משותפת
-              </span>
+              {([
+                { id: "sharedPool", label: "קופה משותפת"              },
+                { id: "eachSide",   label: "כל מתווך גובה מהצד שלו" },
+              ] as const).map((o) => (
+                <button key={o.id} type="button"
+                  onClick={() => set("coopType", o.id)}
+                  className={[
+                    "px-3 py-2 rounded-xl border text-xs font-semibold transition-all",
+                    form.coopType === o.id
+                      ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
+                      : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
+                  ].join(" ")}>
+                  {o.label}
+                </button>
+              ))}
             </div>
           </Section>
         )}
