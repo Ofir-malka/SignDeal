@@ -1,0 +1,23 @@
+-- Migration: add BROKER_COOP_BUYER_TO_SELLER to the ContractTemplateKey enum
+--
+-- Third subtype of the broker-cooperation family ("הסכם שיתוף פעולה בין
+-- מתווכים — מתווך הקונה מעביר למתווך המוכר"): the buyer/tenant-side broker
+-- collects the brokerage fee from the client it represents and, from those
+-- fees, transfers to the seller/landlord-side broker an agreed percent of the
+-- deal price plus VAT, within an agreed number of days from actual collection.
+-- Same signer model as the other subtypes: Broker A is the SignDeal user,
+-- Broker B is the external cooperating broker who signs via the standard
+-- signing link (modeled through the existing Client relation). The document
+-- states only the agreed percent — never a computed amount — so fee chrome is
+-- suppressed for it (hidesFeeChrome, wired in Phase 4B).
+-- Dormant until Phase 4B wires resolution + seed (coopType = buyer-to-seller).
+--
+-- PostgreSQL does not allow ALTER TYPE ... ADD VALUE inside a transaction block.
+-- This file must be run outside a transaction (Prisma migrate deploy handles this;
+-- isolated as the only statement per house convention).
+--
+-- Additive only — no existing rows are affected. The IF NOT EXISTS guard makes
+-- this idempotent. Enum values cannot be dropped in PostgreSQL, so rollback is a
+-- forward migration; the unused value is harmless.
+
+ALTER TYPE "ContractTemplateKey" ADD VALUE IF NOT EXISTS 'BROKER_COOP_BUYER_TO_SELLER';
