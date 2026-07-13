@@ -738,15 +738,61 @@ describe("buildContext — service-order sibling reference", () => {
   });
 });
 
+// ─── buildContext — counterparty broker license suffix ────────────────────────
+// Broker-cooperation documents (BROKER_COOP_SHARED_POOL): the optional Broker B
+// license renders as an inline suffix on the מתווך ב׳ party line — a full
+// ", רישיון תיווך מס׳ X" when present, an EMPTY string when absent. The
+// document must never show a dangling "רישיון תיווך מס׳ —".
+
+describe("buildContext — counterparty broker license suffix", () => {
+  it("renders the exact suffix when a license is present", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, counterpartyBrokerLicenseNumber: "54321" },
+    });
+    expect(ctx.counterpartyBrokerLicenseSuffix).toBe(", רישיון תיווך מס׳ 54321");
+  });
+
+  it("renders an empty string when the license is missing", () => {
+    const ctx = buildContext({ broker: BROKER, client: CLIENT, contract: CONTRACT });
+    expect(ctx.counterpartyBrokerLicenseSuffix).toBe("");
+  });
+
+  it("renders an empty string when the license is whitespace-only", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, counterpartyBrokerLicenseNumber: "   " },
+    });
+    expect(ctx.counterpartyBrokerLicenseSuffix).toBe("");
+  });
+
+  it("party-line round-trip renders with and without the suffix (no dangling text)", () => {
+    const line = "מתווך ב׳: {{clientName}}, ת.ז {{clientIdNumber}}, טלפון {{clientPhone}}, דוא״ל {{clientEmail}}{{counterpartyBrokerLicenseSuffix}}";
+    const withLicense = resolveTemplate(line, buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, counterpartyBrokerLicenseNumber: "54321" },
+    }));
+    expect(withLicense).toBe(`מתווך ב׳: ${CLIENT.name}, ת.ז ${CLIENT.idNumber}, טלפון ${CLIENT.phone}, דוא״ל ${CLIENT.email}, רישיון תיווך מס׳ 54321`);
+    const withoutLicense = resolveTemplate(line, buildContext({
+      broker: BROKER, client: CLIENT, contract: CONTRACT,
+    }));
+    expect(withoutLicense).toBe(`מתווך ב׳: ${CLIENT.name}, ת.ז ${CLIENT.idNumber}, טלפון ${CLIENT.phone}, דוא״ל ${CLIENT.email}`);
+    expect(withoutLicense).not.toContain("רישיון תיווך מס׳");
+    expect(withoutLicense).not.toContain("—,");
+  });
+});
+
 // ─── hidesFeeChrome — fee-chrome suppression gate ──────────────────────────────
-// True ONLY for the two exclusivity documents (linked GENERAL + standalone
-// ONLY); every fee-carrying document (and legacy/unknown keys) must keep its
-// fee chrome.
+// True ONLY for the fee-free documents: the two exclusivity documents (linked
+// GENERAL + standalone ONLY) and the broker-cooperation shared-pool agreement
+// (fee-division terms, no amounts); every fee-carrying document (and
+// legacy/unknown keys) must keep its fee chrome.
 
 describe("hidesFeeChrome", () => {
-  it("returns true for both exclusivity document keys", () => {
+  it("returns true for every fee-free document key", () => {
     expect(hidesFeeChrome("OWNER_EXCLUSIVE_GENERAL")).toBe(true);
     expect(hidesFeeChrome("OWNER_EXCLUSIVE_ONLY")).toBe(true);
+    expect(hidesFeeChrome("BROKER_COOP_SHARED_POOL")).toBe(true);
   });
 
   it("returns false for every fee-carrying document key", () => {

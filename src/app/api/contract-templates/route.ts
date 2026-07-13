@@ -46,10 +46,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "content is required" }, { status: 400 });
     }
 
-    // Deprecated keys (OWNER_EXCLUSIVE_RENTAL/SALE) are intentionally excluded:
-    // they remain in the enum/DB for old rows, but admins must not create new
-    // templates under them.
-    const VALID_KEYS  = ["INTERESTED_BUYER", "OWNER_EXCLUSIVE", "BROKER_COOP", "INTERESTED_BUYER_RENTAL", "INTERESTED_BUYER_SALE", "INTERESTED_BUYER_BOTH", "OWNER_SERVICE_ORDER_RENTAL", "OWNER_SERVICE_ORDER_SALE", "OWNER_SERVICE_ORDER_BOTH", "OWNER_EXCLUSIVE_GENERAL", "OWNER_EXCLUSIVE_ONLY"];
+    // Deprecated/retired keys (OWNER_EXCLUSIVE_RENTAL/SALE and the legacy
+    // generic BROKER_COOP) are intentionally excluded: they remain in the
+    // enum/DB for old rows, but admins must not create new templates under
+    // them — BROKER_COOP_SHARED_POOL is the cooperation family's active key.
+    const VALID_KEYS  = ["INTERESTED_BUYER", "OWNER_EXCLUSIVE", "INTERESTED_BUYER_RENTAL", "INTERESTED_BUYER_SALE", "INTERESTED_BUYER_BOTH", "OWNER_SERVICE_ORDER_RENTAL", "OWNER_SERVICE_ORDER_SALE", "OWNER_SERVICE_ORDER_BOTH", "OWNER_EXCLUSIVE_GENERAL", "OWNER_EXCLUSIVE_ONLY", "BROKER_COOP_SHARED_POOL"];
     const VALID_LANGS = ["HE", "EN", "FR", "RU", "AR"];
 
     const resolvedKey  = templateKey && VALID_KEYS.includes(templateKey)   ? templateKey              : undefined;

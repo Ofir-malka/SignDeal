@@ -286,6 +286,7 @@ export async function POST(request: Request) {
       exclusivityEndsAt,      // exclusivity period end   — required when the mode includes exclusivity
       includeExclusivity,     // LEGACY alias — true maps to ownerMode "serviceWithExclusivity"
       ownerMode,              // "serviceOnly" (default) | "serviceWithExclusivity" | "exclusivityOnly"
+      counterpartyBrokerLicenseNumber, // broker cooperation only — optional Broker B license number
       language: rawLanguage,
     } = body;
 
@@ -344,15 +345,26 @@ export async function POST(request: Request) {
     const resolvedOwnerMode: "serviceOnly" | "serviceWithExclusivity" | "exclusivityOnly" =
       vOwnerMode.value ?? (includeExclusivity === true ? "serviceWithExclusivity" : "serviceOnly");
     const isExclusivityOnly = resolvedOwnerMode === "exclusivityOnly";
-    // The standalone exclusivity document carries no fee — commission forced 0.
-    const effectiveCommission = isExclusivityOnly ? 0 : validatedCommission;
+    // Broker-cooperation documents carry no fee amounts either (shared-pool
+    // division terms only) — same fee-free treatment as exclusivityOnly.
+    const isBrokerCoop = contractType === CONTRACT_TYPE.BROKER_COOP;
+    // Fee-free documents: commission forced 0 server-side regardless of the
+    // body value (the UI hiding the fields is not the guarantee).
+    const effectiveCommission = (isExclusivityOnly || isBrokerCoop) ? 0 : validatedCommission;
+    // Sanitized optional counterparty (Broker B) license — trimmed; empty/non-
+    // string becomes null. Persisted only for the cooperation key below.
+    const coopLicense =
+      typeof counterpartyBrokerLicenseNumber === "string" && counterpartyBrokerLicenseNumber.trim()
+        ? counterpartyBrokerLicenseNumber.trim()
+        : null;
 
     // ── BOTH deal type: validate commissionSale (sale-side commission) ────────
     // SALE and RENTAL contracts must NOT include commissionSale.
     // BOTH contracts must include a non-negative integer for the sale commission
-    // — except exclusivityOnly, whose document carries no fee (forced null).
+    // — except the fee-free documents (exclusivityOnly / broker cooperation),
+    // whose documents carry no fee amounts (forced null).
     let validatedCommissionSale: number | null = null;
-    if (validatedDealType === "BOTH" && !isExclusivityOnly) {
+    if (validatedDealType === "BOTH" && !isExclusivityOnly && !isBrokerCoop) {
       const vCommissionSale = parseNonNegativeInt(commissionSale, "עמלת מכירה");
       if (!vCommissionSale.ok) {
         return NextResponse.json({ error: vCommissionSale.error }, { status: 400 });
@@ -426,7 +438,9 @@ export async function POST(request: Request) {
     const CONTRACT_TYPE_TO_TEMPLATE_KEY: Record<string, string> = {
       [CONTRACT_TYPE.INTERESTED]:      "INTERESTED_BUYER",
       [CONTRACT_TYPE.OWNER_EXCLUSIVE]: "OWNER_EXCLUSIVE",
-      [CONTRACT_TYPE.BROKER_COOP]:     "BROKER_COOP",
+      // BROKER_COOP is intentionally absent: the legacy generic key is retired
+      // (never used in production) — every cooperation creation resolves via
+      // the dealType map below to BROKER_COOP_SHARED_POOL.
     };
     const TEMPLATE_KEY_BY_TYPE_AND_DEAL: Record<string, Partial<Record<string, string>>> = {
       [CONTRACT_TYPE.INTERESTED]: {
@@ -443,6 +457,15 @@ export async function POST(request: Request) {
         RENTAL: "OWNER_SERVICE_ORDER_RENTAL",
         SALE:   "OWNER_SERVICE_ORDER_SALE",
         BOTH:   "OWNER_SERVICE_ORDER_BOTH",
+      },
+      // Broker cooperation: the shared-pool agreement is the first production
+      // key of the family; every deal type resolves to it (dealType still
+      // drives the annex price rows). A future coopType selector slots in here
+      // when a second cooperation subtype ships (pattern: ownerMode).
+      [CONTRACT_TYPE.BROKER_COOP]: {
+        RENTAL: "BROKER_COOP_SHARED_POOL",
+        SALE:   "BROKER_COOP_SHARED_POOL",
+        BOTH:   "BROKER_COOP_SHARED_POOL",
       },
     };
 
@@ -535,7 +558,7 @@ export async function POST(request: Request) {
     }
 
     if (autoKey) {
-      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_SERVICE_ORDER_RENTAL" | "OWNER_SERVICE_ORDER_SALE" | "OWNER_SERVICE_ORDER_BOTH" | "OWNER_EXCLUSIVE_ONLY";
+      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_SERVICE_ORDER_RENTAL" | "OWNER_SERVICE_ORDER_SALE" | "OWNER_SERVICE_ORDER_BOTH" | "OWNER_EXCLUSIVE_ONLY" | "BROKER_COOP_SHARED_POOL";
       const templateLang = language as "HE" | "EN" | "FR" | "RU" | "AR";
 
       // Resolve by (templateKey + language), fallback to HE if not found
@@ -556,7 +579,7 @@ export async function POST(request: Request) {
           // client/broker identity mixing bug (phone/idNumber mismatch between the
           // client details card and the legal document).
           client: { name: client.name, idNumber: client.idNumber || "", phone: client.phone, email: client.email || "", address: client.address ?? null },
-          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: effectiveCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, rentalCommissionMonths: resolvedRentalMonths, saleCommissionMode: resolvedSaleMode, saleCommissionPercent: resolvedSalePercent, templateKey: autoKey, exclusivityStartsAt: resolvedExclusivityStart, exclusivityEndsAt: resolvedExclusivityEnd, createdAt: new Date() },
+          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: effectiveCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, rentalCommissionMonths: resolvedRentalMonths, saleCommissionMode: resolvedSaleMode, saleCommissionPercent: resolvedSalePercent, templateKey: autoKey, exclusivityStartsAt: resolvedExclusivityStart, exclusivityEndsAt: resolvedExclusivityEnd, counterpartyBrokerLicenseNumber: autoKey === "BROKER_COOP_SHARED_POOL" ? coopLicense : null, createdAt: new Date() },
         });
         generatedText = resolveTemplate(tpl.content, ctx);
         resolvedTemplateId = tpl.id;
@@ -599,6 +622,11 @@ export async function POST(request: Request) {
           propertyCity,
           propertyPrice: validatedPropertyPrice,
           commission: effectiveCommission,
+          // Broker cooperation: optional counterparty (Broker B) license —
+          // persisted so sign-time regeneration keeps the party-line suffix.
+          ...(autoKey === "BROKER_COOP_SHARED_POOL" && coopLicense
+            ? { counterpartyBrokerLicenseNumber: coopLicense }
+            : {}),
           ...(validatedCommissionSale !== null ? { commissionSale: validatedCommissionSale } : {}),
           ...(validatedPropertySalePrice !== null ? { propertySalePrice: validatedPropertySalePrice } : {}),
           // exclusivityOnly: the standalone document itself carries the period

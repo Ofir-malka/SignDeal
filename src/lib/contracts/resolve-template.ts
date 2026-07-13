@@ -86,6 +86,9 @@ export interface TemplateContext {
   // Primary service-order sibling (OWNER_EXCLUSIVE_GENERAL only) — "—" when absent
   serviceOrderNumber:     string;   // sibling doc number, chrome format (last 8 chars, uppercased)
   serviceOrderDate:       string;   // sibling creation date, DD.MM.YYYY
+  // Counterparty broker license (broker-cooperation documents) — inline suffix
+  // for the מתווך ב׳ party line: ", רישיון תיווך מס׳ X" or "" when absent
+  counterpartyBrokerLicenseSuffix: string;
   // Dates
   today:           string;   // DD.MM.YYYY
   contractId:      string;   // last 8 chars of id, uppercased
@@ -161,6 +164,9 @@ export function buildContext(opts: {
     // fills {{serviceOrderNumber}} / {{serviceOrderDate}} on the general
     // exclusivity document (OWNER_EXCLUSIVE_GENERAL).
     serviceOrder?: { id: string; createdAt: Date | string } | null;
+    // Counterparty (cooperating) broker license — broker-cooperation documents
+    // (BROKER_COOP_SHARED_POOL); optional, from Contract.counterpartyBrokerLicenseNumber.
+    counterpartyBrokerLicenseNumber?: string | null;
     createdAt:       Date | string;
   };
 }): TemplateContext {
@@ -274,6 +280,12 @@ export function buildContext(opts: {
     // document's citation always matches what the sibling displays.
     serviceOrderNumber: opts.contract.serviceOrder ? String(opts.contract.serviceOrder.id).slice(-8).toUpperCase() : "—",
     serviceOrderDate:   opts.contract.serviceOrder ? isoToDateStr(opts.contract.serviceOrder.createdAt) : "—",
+    // Counterparty broker license (broker-cooperation documents) — inline
+    // suffix appended to the מתווך ב׳ party line; empty when absent, so the
+    // document never renders a dangling "רישיון תיווך מס׳ —".
+    counterpartyBrokerLicenseSuffix: opts.contract.counterpartyBrokerLicenseNumber?.trim()
+      ? `, רישיון תיווך מס׳ ${opts.contract.counterpartyBrokerLicenseNumber.trim()}`
+      : "",
     today:           isoToDateStr(opts.contract.createdAt),
     contractId:      String(opts.contract.id).slice(-8).toUpperCase(),
   };

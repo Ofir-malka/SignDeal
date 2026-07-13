@@ -591,6 +591,9 @@ export async function PATCH(
                 exclusivityStartsAt: contract.exclusivityStartsAt,
                 exclusivityEndsAt:   contract.exclusivityEndsAt,
                 serviceOrder:    contract.relatedContract ?? null,
+                // Broker cooperation: keeps the מתווך ב׳ license suffix
+                // deterministic across sign-time regeneration.
+                counterpartyBrokerLicenseNumber: contract.counterpartyBrokerLicenseNumber,
                 createdAt:       contract.createdAt,
               },
             });

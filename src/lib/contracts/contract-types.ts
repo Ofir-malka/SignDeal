@@ -32,9 +32,17 @@ export type ContractTypeValue = (typeof CONTRACT_TYPE)[keyof typeof CONTRACT_TYP
 // standalone ONLY variant creates no owner fee obligation at all — showing an
 // amount would contradict either document.
 //
+// The broker-cooperation shared-pool agreement is likewise fee-free chrome-wise:
+// it is a fee-DIVISION agreement (equal split after actual collection) with no
+// specific commission amount — the UI must show "—", never ₪0.
+//
 // Key-gated by design — NEVER inferred from commission === 0 (a legitimate
 // fee document may carry a zero fee). Returns false for every other key and
 // for legacy/unknown/null keys, so existing documents render unchanged.
 export function hidesFeeChrome(templateKey?: string | null): boolean {
-  return templateKey === "OWNER_EXCLUSIVE_GENERAL" || templateKey === "OWNER_EXCLUSIVE_ONLY";
+  return (
+    templateKey === "OWNER_EXCLUSIVE_GENERAL"
+    || templateKey === "OWNER_EXCLUSIVE_ONLY"
+    || templateKey === "BROKER_COOP_SHARED_POOL"
+  );
 }
