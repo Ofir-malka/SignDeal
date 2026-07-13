@@ -251,6 +251,7 @@ enum ContractTemplateKey {
   OWNER_EXCLUSIVE_ONLY       // הסכם בלעדיות עצמאי — standalone, no owner fee obligation, never linked
   // ── Broker cooperation family (Broker A = SignDeal user; Broker B signs) ───
   BROKER_COOP_SHARED_POOL    // הסכם שיתוף פעולה — קופה משותפת (all dealTypes; equal split per legal text)
+  BROKER_COOP_EACH_SIDE      // הסכם שיתוף פעולה — כל מתווך גובה מהצד שלו (all dealTypes; each broker collects from own side, no shared pool)
 }
 
 // How the rental brokerage fee was chosen by the broker. Drives the dynamic
