@@ -9,6 +9,7 @@ import { canCreateContract, getPlanLabel } from "@/lib/subscription";
 // so the URL surface cannot put the form into an unsupported state.
 const TYPE_PARAM_TO_CARD: Record<string, ContractTypeId> = {
   "owner-exclusive": "exclusivity",
+  "cooperation":     "cooperation",
 };
 
 /**

@@ -242,8 +242,11 @@ export function ContractDetail({ contract: c }: { contract: Contract }) {
         {/* Secondary exclusivity document opened directly — back-link strip */}
         {c.linkedPrimaryContractId && <LinkedPrimaryStrip primaryId={c.linkedPrimaryContractId} />}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mb-6">
+          {/* Cooperation documents: the signing party is Broker B, not a client —
+              document-facing title (deliberately "פרטי המתווך", not the creation
+              form's "פרטי המתווך השני"). */}
           <InfoCard
-            title="פרטי לקוח"
+            title={c.templateKey === "BROKER_COOP_SHARED_POOL" ? "פרטי המתווך" : "פרטי לקוח"}
             rows={[
               { label: "שם מלא",      value: c.client      },
               { label: "טלפון",       value: c.clientPhone  },

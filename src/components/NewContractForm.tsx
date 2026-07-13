@@ -85,6 +85,10 @@ interface FormState {
   clientEmail:       string;
   clientIdNumber:    string;
   skipEmailId:       boolean;
+  // Broker cooperation only: Broker B's license number (optional). A document-
+  // level Contract field — intentionally NOT one of the Client-record fields
+  // above (editing it must not deselect a picked client).
+  counterpartyBrokerLicense: string;
   // ── Structured property address ───────────────────────────────────────────
   // Street + number are stored in `propertyAddress` as "<street> <number>".
   // Floor and apartment are appended with "||" separators and rendered as
@@ -140,6 +144,7 @@ const INITIAL: FormState = {
   clientEmail:               "",
   clientIdNumber:            "",
   skipEmailId:               false,
+  counterpartyBrokerLicense: "",
   propertyStreet:            "",
   propertyNumber:            "",
   propertyFloor:             "",
@@ -968,10 +973,14 @@ const CONTRACT_TYPES: Array<{
     ),
   },
   {
-    // Display label is intentionally shorter than the canonical apiType string.
+    // Live — shared-pool cooperation (Broker A = the SignDeal user; Broker B =
+    // the cooperating broker signs). Every dealType resolves server-side to
+    // BROKER_COOP_SHARED_POOL; the flow is fee-free (fee section hidden,
+    // commission forced 0). Display label is intentionally shorter than the
+    // canonical apiType string.
     id: "cooperation", label: "הסכם שיתוף פעולה", apiType: CONTRACT_TYPE.BROKER_COOP,
     subtitle: "שיתוף עסקה עם מתווך שותף",
-    iconBg: "bg-violet-50 text-violet-600", active: false,
+    iconBg: "bg-violet-50 text-violet-600", active: true,
     icon: (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none"
         stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -1015,6 +1024,7 @@ function categoryDefaults(id: ContractTypeId): Partial<FormState> {
     exclusivityMonths: "3",
     exclusivityEndCustom: "",
     ownerMode: "serviceOnly" as const,
+    counterpartyBrokerLicense: "",
   };
   if (id === "exclusivity") {
     // Owner flow (service-order first) defaults to RENTAL; SALE and BOTH are
@@ -1163,10 +1173,55 @@ export function NewContractForm({ subscription, initialContractType = "intereste
   // Only cards with active:true are selectable.
   const [contractTypeId, setContractTypeId] = useState<ContractTypeId>(initialContractType);
   const isOwner = contractTypeId === "exclusivity";
-  // exclusivityOnly: the standalone exclusivity document carries no owner fee —
-  // every fee field/validation is skipped and the payload sends commission: 0
-  // (the API additionally forces it server-side).
-  const hideFeeFields = isOwner && form.ownerMode === "exclusivityOnly";
+  const isCoop  = contractTypeId === "cooperation";
+  // Fee-free flows: the standalone exclusivity document creates no owner fee
+  // obligation, and the cooperation agreement divides fees after collection
+  // rather than setting an amount — every fee field/validation is skipped and
+  // the payload sends commission: 0 (the API additionally forces it server-side).
+  const hideFeeFields = (isOwner && form.ownerMode === "exclusivityOnly") || isCoop;
+
+  // Signing-party wording — the Client record is the buyer/renter in the
+  // interested flow, the property owner in the owner flow, and the cooperating
+  // broker (Broker B) in the cooperation flow. The interested and owner strings
+  // are byte-identical to the historical inline ternaries.
+  const party = isCoop
+    ? {
+        section:    "פרטי המתווך השני",
+        name:       "שם המתווך",
+        phone:      "טלפון המתווך",
+        email:      "אימייל המתווך",
+        idNumber:   "תעודת זהות המתווך",
+        skipLabel:  "אין לי כרגע ת״ז / מייל — המתווך ישלים לפני החתימה",
+        skipHint:   "המתווך יתבקש להשלים פרטים אלו לפני שיוכל לחתום על החוזה",
+        nameError:  "שם המתווך הוא שדה חובה",
+        phoneError: "טלפון המתווך הוא שדה חובה",
+        emailError: "אימייל המתווך הוא שדה חובה (או סמן 'אין לי כרגע')",
+      }
+    : isOwner
+      ? {
+          section:    "פרטי בעל הנכס",
+          name:       "שם בעל הנכס",
+          phone:      "טלפון בעל הנכס",
+          email:      "אימייל בעל הנכס",
+          idNumber:   "תעודת זהות בעל הנכס",
+          skipLabel:  "אין לי כרגע ת״ז / מייל — בעל הנכס ישלים לפני החתימה",
+          skipHint:   "בעל הנכס יתבקש להשלים פרטים אלו לפני שיוכל לחתום על החוזה",
+          nameError:  "שם בעל הנכס הוא שדה חובה",
+          phoneError: "טלפון בעל הנכס הוא שדה חובה",
+          emailError: "אימייל בעל הנכס הוא שדה חובה (או סמן 'אין לי כרגע')",
+        }
+      : {
+          section:    "פרטי לקוח",
+          name:       "שם לקוח",
+          phone:      "טלפון לקוח",
+          email:      "אימייל לקוח",
+          idNumber:   "תעודת זהות לקוח",
+          skipLabel:  "אין לי כרגע ת״ז / מייל — הלקוח ישלים לפני החתימה",
+          skipHint:   "הלקוח יתבקש להשלים פרטים אלו לפני שיוכל לחתום על החוזה",
+          nameError:  "שם לקוח הוא שדה חובה",
+          phoneError: "טלפון לקוח הוא שדה חובה",
+          emailError: "אימייל לקוח הוא שדה חובה (או סמן 'אין לי כרגע')",
+        };
 
   // ── Exclusivity period derivation (owner-exclusive rental only) ────────────
   // End date uses the inclusive day-before convention (3 months from 01.08 →
@@ -1330,10 +1385,10 @@ export function NewContractForm({ subscription, initialContractType = "intereste
   // ── Validation ────────────────────────────────────────────────────────────
   function validate(): FieldError {
     const e: FieldError = {};
-    if (!form.clientName.trim())  e.clientName  = isOwner ? "שם בעל הנכס הוא שדה חובה" : "שם לקוח הוא שדה חובה";
-    if (!form.clientPhone.trim()) e.clientPhone = isOwner ? "טלפון בעל הנכס הוא שדה חובה" : "טלפון לקוח הוא שדה חובה";
+    if (!form.clientName.trim())  e.clientName  = party.nameError;
+    if (!form.clientPhone.trim()) e.clientPhone = party.phoneError;
     if (!form.skipEmailId) {
-      if (!form.clientEmail.trim())    e.clientEmail    = isOwner ? "אימייל בעל הנכס הוא שדה חובה (או סמן 'אין לי כרגע')" : "אימייל לקוח הוא שדה חובה (או סמן 'אין לי כרגע')";
+      if (!form.clientEmail.trim())    e.clientEmail    = party.emailError;
       if (!form.clientIdNumber.trim()) e.clientIdNumber = "תעודת זהות היא שדה חובה (או סמן 'אין לי כרגע')";
     }
     if (!form.propertyStreet.trim()) e.propertyStreet = "שם רחוב הוא שדה חובה";
@@ -1452,12 +1507,14 @@ export function NewContractForm({ subscription, initialContractType = "intereste
       propertyAddress,
       propertyCity:              form.propertyCity.trim(),
       propertyPrice:             priceAgorot,
-      // exclusivityOnly carries no fee — send 0 explicitly (the fee inputs are
-      // hidden, so the calculator would yield NaN); the API also forces 0.
+      // Fee-free flows (standalone exclusivity / cooperation) carry no fee —
+      // send 0 explicitly (the fee inputs are hidden, so the calculator would
+      // yield NaN); the API also forces 0.
       commission:                hideFeeFields ? 0 : commissionAgorot,
       ...(!hideFeeFields && commissionSaleAgorot !== null ? { commissionSale: commissionSaleAgorot } : {}),
-      // Owner-exclusive never hides the address (the owner knows it; toggle hidden).
-      hideFullAddressFromClient: isOwner ? false : form.hideFullAddressFromClient,
+      // Owner-exclusive and cooperation never hide the address (the owner knows
+      // it; Broker B must see the property facts; toggle hidden for both).
+      hideFullAddressFromClient: (isOwner || isCoop) ? false : form.hideFullAddressFromClient,
       // Rental fee mode — every rental-fee flow (RENTAL + the rental half of
       // BOTH, interested and owner-exclusive alike) uses MONTHS (1-12) / FIXED;
       // the server persists these per template key. ONE_MONTH remains a legacy
@@ -1507,6 +1564,12 @@ export function NewContractForm({ subscription, initialContractType = "intereste
                 }
               : {}),
           }
+        : {}),
+      // Broker cooperation — Broker B's license number (optional free text).
+      // Omitted when empty/whitespace; the API trims it, persists it only for
+      // the cooperation key, and renders the party-line suffix from it.
+      ...(isCoop && form.counterpartyBrokerLicense.trim()
+        ? { counterpartyBrokerLicenseNumber: form.counterpartyBrokerLicense.trim() }
         : {}),
       // Pass existingClientDbId when broker picked an existing client so the
       // API links the contract to the existing Client row (no duplicate).
@@ -1612,8 +1675,22 @@ export function NewContractForm({ subscription, initialContractType = "intereste
           </div>
         </Section>
 
+        {/* ══ 1a. Cooperation subtype — static single-subtype indicator ═════ */}
+        {/* Only קופה משותפת exists today, so there is no state/selector — this
+            names the document being created; a real selector arrives with
+            subtype #2. */}
+        {isCoop && (
+          <Section title="סוג שיתוף פעולה">
+            <div className="flex flex-wrap gap-2">
+              <span className="inline-flex px-3 py-2 rounded-xl border text-xs font-semibold border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300">
+                קופה משותפת
+              </span>
+            </div>
+          </Section>
+        )}
+
         {/* ══ 2. Client details ═════════════════════════════════════════════ */}
-        <Section title={isOwner ? "פרטי בעל הנכס" : "פרטי לקוח"}>
+        <Section title={party.section}>
           <div className="space-y-4" ref={firstErrorRef}>
 
             {/* Existing client picker */}
@@ -1626,12 +1703,12 @@ export function NewContractForm({ subscription, initialContractType = "intereste
             {/* Manual fields — always editable */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <FieldLabel htmlFor="clientName">{isOwner ? "שם בעל הנכס" : "שם לקוח"}</FieldLabel>
+                <FieldLabel htmlFor="clientName">{party.name}</FieldLabel>
                 <TextInput id="clientName" value={form.clientName} onChange={(v) => set("clientName", v)}
                   placeholder="ישראל ישראלי" error={errors.clientName} />
               </div>
               <div>
-                <FieldLabel htmlFor="clientPhone">{isOwner ? "טלפון בעל הנכס" : "טלפון לקוח"}</FieldLabel>
+                <FieldLabel htmlFor="clientPhone">{party.phone}</FieldLabel>
                 <TextInput id="clientPhone" value={form.clientPhone} onChange={(v) => set("clientPhone", v)}
                   placeholder="050-0000000" type="tel" error={errors.clientPhone} />
               </div>
@@ -1639,16 +1716,31 @@ export function NewContractForm({ subscription, initialContractType = "intereste
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <FieldLabel htmlFor="clientEmail" optional={form.skipEmailId}>{isOwner ? "אימייל בעל הנכס" : "אימייל לקוח"}</FieldLabel>
+                <FieldLabel htmlFor="clientEmail" optional={form.skipEmailId}>{party.email}</FieldLabel>
                 <TextInput id="clientEmail" value={form.clientEmail} onChange={(v) => set("clientEmail", v)}
                   placeholder="client@example.com" type="email" disabled={form.skipEmailId} error={errors.clientEmail} />
               </div>
               <div>
-                <FieldLabel htmlFor="clientIdNumber" optional={form.skipEmailId}>{isOwner ? "תעודת זהות בעל הנכס" : "תעודת זהות לקוח"}</FieldLabel>
+                <FieldLabel htmlFor="clientIdNumber" optional={form.skipEmailId}>{party.idNumber}</FieldLabel>
                 <TextInput id="clientIdNumber" value={form.clientIdNumber} onChange={(v) => set("clientIdNumber", v)}
                   placeholder="000000000" disabled={form.skipEmailId} error={errors.clientIdNumber} />
               </div>
             </div>
+
+            {/* Broker B license — cooperation only. A document-level Contract
+                field: editing it must NOT clear a picked client (not part of
+                CLIENT_MANUAL_FIELDS) and it stays enabled under skipEmailId
+                (it isn't signer-completion data). */}
+            {isCoop && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <FieldLabel htmlFor="counterpartyBrokerLicense" optional>מספר רישיון תיווך</FieldLabel>
+                  <TextInput id="counterpartyBrokerLicense" value={form.counterpartyBrokerLicense}
+                    onChange={(v) => set("counterpartyBrokerLicense", v)}
+                    placeholder="12345" />
+                </div>
+              </div>
+            )}
 
             {/* Skip checkbox */}
             <label className="flex items-start gap-3 cursor-pointer select-none group">
@@ -1673,10 +1765,10 @@ export function NewContractForm({ subscription, initialContractType = "intereste
               </div>
               <div>
                 <p className="text-sm font-medium text-gray-700">
-                  {isOwner ? "אין לי כרגע ת״ז / מייל — בעל הנכס ישלים לפני החתימה" : "אין לי כרגע ת״ז / מייל — הלקוח ישלים לפני החתימה"}
+                  {party.skipLabel}
                 </p>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {isOwner ? "בעל הנכס יתבקש להשלים פרטים אלו לפני שיוכל לחתום על החוזה" : "הלקוח יתבקש להשלים פרטים אלו לפני שיוכל לחתום על החוזה"}
+                  {party.skipHint}
                 </p>
               </div>
             </label>
@@ -1702,9 +1794,10 @@ export function NewContractForm({ subscription, initialContractType = "intereste
                   rentalCommissionPreset: "one_month",
                   rentalCommissionMonths: "1",
                   // Interested rental template discloses the full address only after
-                  // signing — default to hidden (broker can uncheck). The owner flow
-                  // never hides (the owner knows their own address).
-                  hideFullAddressFromClient: isOwner ? false : true,
+                  // signing — default to hidden (broker can uncheck). The owner and
+                  // cooperation flows never hide (the owner knows their own address;
+                  // Broker B must see the property facts).
+                  hideFullAddressFromClient: (isOwner || isCoop) ? false : true,
                 }));
                 setErrors((prev) => { const n = { ...prev }; delete n.priceNis; delete n.commissionNis; delete n.commissionPct; return n; });
                 setStage((s) => s.name === "error" ? { name: "idle" } : s);
@@ -1986,9 +2079,10 @@ export function NewContractForm({ subscription, initialContractType = "intereste
               </div>
             </div>
 
-            {/* Hide-address toggle — hidden for owner-exclusive: the owner knows
-                their own address, and the payload forces the flag to false. */}
-            {!isOwner && (
+            {/* Hide-address toggle — hidden for owner-exclusive (the owner knows
+                their own address) and cooperation (Broker B must see the property
+                facts); the payload forces the flag to false for both. */}
+            {!isOwner && !isCoop && (
             <label className="flex items-start gap-3 cursor-pointer select-none group">
               <div className="relative mt-0.5 flex-shrink-0">
                 <input
