@@ -784,15 +784,16 @@ describe("buildContext — counterparty broker license suffix", () => {
 
 // ─── hidesFeeChrome — fee-chrome suppression gate ──────────────────────────────
 // True ONLY for the fee-free documents: the two exclusivity documents (linked
-// GENERAL + standalone ONLY) and the broker-cooperation shared-pool agreement
-// (fee-division terms, no amounts); every fee-carrying document (and
-// legacy/unknown keys) must keep its fee chrome.
+// GENERAL + standalone ONLY) and both broker-cooperation subtypes (shared-pool
+// division terms + each-side own-collection terms, no amounts); every
+// fee-carrying document (and legacy/unknown keys) must keep its fee chrome.
 
 describe("hidesFeeChrome", () => {
   it("returns true for every fee-free document key", () => {
     expect(hidesFeeChrome("OWNER_EXCLUSIVE_GENERAL")).toBe(true);
     expect(hidesFeeChrome("OWNER_EXCLUSIVE_ONLY")).toBe(true);
     expect(hidesFeeChrome("BROKER_COOP_SHARED_POOL")).toBe(true);
+    expect(hidesFeeChrome("BROKER_COOP_EACH_SIDE")).toBe(true);
   });
 
   it("returns false for every fee-carrying document key", () => {

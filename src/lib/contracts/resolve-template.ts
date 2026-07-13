@@ -165,7 +165,8 @@ export function buildContext(opts: {
     // exclusivity document (OWNER_EXCLUSIVE_GENERAL).
     serviceOrder?: { id: string; createdAt: Date | string } | null;
     // Counterparty (cooperating) broker license — broker-cooperation documents
-    // (BROKER_COOP_SHARED_POOL); optional, from Contract.counterpartyBrokerLicenseNumber.
+    // (BROKER_COOP_SHARED_POOL and BROKER_COOP_EACH_SIDE); optional, from
+    // Contract.counterpartyBrokerLicenseNumber. The suffix is key-agnostic.
     counterpartyBrokerLicenseNumber?: string | null;
     createdAt:       Date | string;
   };

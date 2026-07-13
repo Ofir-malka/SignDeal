@@ -287,6 +287,7 @@ export async function POST(request: Request) {
       includeExclusivity,     // LEGACY alias — true maps to ownerMode "serviceWithExclusivity"
       ownerMode,              // "serviceOnly" (default) | "serviceWithExclusivity" | "exclusivityOnly"
       counterpartyBrokerLicenseNumber, // broker cooperation only — optional Broker B license number
+      coopType,               // broker cooperation only — "sharedPool" (default) | "eachSide"
       language: rawLanguage,
     } = body;
 
@@ -357,6 +358,18 @@ export async function POST(request: Request) {
       typeof counterpartyBrokerLicenseNumber === "string" && counterpartyBrokerLicenseNumber.trim()
         ? counterpartyBrokerLicenseNumber.trim()
         : null;
+
+    // Cooperation subtype selector. Validated ONLY for the cooperation category:
+    // a stray coopType on any other category is ignored (never a 400), per the
+    // approved contract. parseOptionalEnum returns ok(null) for omitted/empty
+    // (→ sharedPool default) and err only for a non-empty invalid value (→ 400
+    // here). Applied to the resolved template key after autoKey is computed.
+    const vCoopType = parseOptionalEnum(coopType, ["sharedPool", "eachSide"] as const, "סוג שיתוף הפעולה");
+    if (isBrokerCoop && !vCoopType.ok) {
+      return NextResponse.json({ error: vCoopType.error }, { status: 400 });
+    }
+    const resolvedCoopType: "sharedPool" | "eachSide" =
+      (isBrokerCoop && vCoopType.ok ? vCoopType.value : null) ?? "sharedPool";
 
     // ── BOTH deal type: validate commissionSale (sale-side commission) ────────
     // SALE and RENTAL contracts must NOT include commissionSale.
@@ -484,6 +497,16 @@ export async function POST(request: Request) {
     if (isExclusivityOnly) {
       autoKey = "OWNER_EXCLUSIVE_ONLY";
     }
+    // Cooperation subtype: the shared-pool baseline (from the dealType map above)
+    // is overridden to the each-side template when coopType = "eachSide".
+    // Omitted/sharedPool keeps BROKER_COOP_SHARED_POOL — the default.
+    if (isBrokerCoop && resolvedCoopType === "eachSide") {
+      autoKey = "BROKER_COOP_EACH_SIDE";
+    }
+    // Whether the resolved key is a broker-cooperation document (either subtype).
+    // Gates the optional Broker B license persistence + buildContext pass below —
+    // generalized from the single shared-pool key so both subtypes carry it.
+    const isCoopKey = autoKey === "BROKER_COOP_SHARED_POOL" || autoKey === "BROKER_COOP_EACH_SIDE";
 
     // Persist the rental commission mode ONLY for templates whose clause needs it
     // (interested rental/both + owner service-order rental/both). The interested
@@ -558,7 +581,7 @@ export async function POST(request: Request) {
     }
 
     if (autoKey) {
-      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_SERVICE_ORDER_RENTAL" | "OWNER_SERVICE_ORDER_SALE" | "OWNER_SERVICE_ORDER_BOTH" | "OWNER_EXCLUSIVE_ONLY" | "BROKER_COOP_SHARED_POOL";
+      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_SERVICE_ORDER_RENTAL" | "OWNER_SERVICE_ORDER_SALE" | "OWNER_SERVICE_ORDER_BOTH" | "OWNER_EXCLUSIVE_ONLY" | "BROKER_COOP_SHARED_POOL" | "BROKER_COOP_EACH_SIDE";
       const templateLang = language as "HE" | "EN" | "FR" | "RU" | "AR";
 
       // Resolve by (templateKey + language), fallback to HE if not found
@@ -579,7 +602,7 @@ export async function POST(request: Request) {
           // client/broker identity mixing bug (phone/idNumber mismatch between the
           // client details card and the legal document).
           client: { name: client.name, idNumber: client.idNumber || "", phone: client.phone, email: client.email || "", address: client.address ?? null },
-          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: effectiveCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, rentalCommissionMonths: resolvedRentalMonths, saleCommissionMode: resolvedSaleMode, saleCommissionPercent: resolvedSalePercent, templateKey: autoKey, exclusivityStartsAt: resolvedExclusivityStart, exclusivityEndsAt: resolvedExclusivityEnd, counterpartyBrokerLicenseNumber: autoKey === "BROKER_COOP_SHARED_POOL" ? coopLicense : null, createdAt: new Date() },
+          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: effectiveCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, rentalCommissionMonths: resolvedRentalMonths, saleCommissionMode: resolvedSaleMode, saleCommissionPercent: resolvedSalePercent, templateKey: autoKey, exclusivityStartsAt: resolvedExclusivityStart, exclusivityEndsAt: resolvedExclusivityEnd, counterpartyBrokerLicenseNumber: isCoopKey ? coopLicense : null, createdAt: new Date() },
         });
         generatedText = resolveTemplate(tpl.content, ctx);
         resolvedTemplateId = tpl.id;
@@ -622,9 +645,9 @@ export async function POST(request: Request) {
           propertyCity,
           propertyPrice: validatedPropertyPrice,
           commission: effectiveCommission,
-          // Broker cooperation: optional counterparty (Broker B) license —
-          // persisted so sign-time regeneration keeps the party-line suffix.
-          ...(autoKey === "BROKER_COOP_SHARED_POOL" && coopLicense
+          // Broker cooperation (either subtype): optional counterparty (Broker B)
+          // license — persisted so sign-time regeneration keeps the party-line suffix.
+          ...(isCoopKey && coopLicense
             ? { counterpartyBrokerLicenseNumber: coopLicense }
             : {}),
           ...(validatedCommissionSale !== null ? { commissionSale: validatedCommissionSale } : {}),
