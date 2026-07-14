@@ -377,7 +377,29 @@ export async function POST(request: Request) {
     // other category/subtype is ignored, never a 400. Requirement + error
     // responses are enforced below, only once the resolved key is
     // BROKER_COOP_BUYER_TO_SELLER.
-    const vTransferPct = parseOptionalPositiveFloat(brokerCoopTransferPercent, "אחוז ההעברה", 100);
+    // Normalization: strings are trimmed first so a whitespace-only value is
+    // treated as MISSING (required-value 400), not as an invalid format.
+    const normalizedTransferPercent =
+      typeof brokerCoopTransferPercent === "string"
+        ? brokerCoopTransferPercent.trim()
+        : brokerCoopTransferPercent;
+    const transferPercentMissing =
+      normalizedTransferPercent === null ||
+      normalizedTransferPercent === undefined ||
+      normalizedTransferPercent === "";
+    // Strict legal-decimal format (matches the client-side rule): JSON numbers
+    // are inherently clean (JSON has no 0x/+/suffix numerals — a raw 1e2
+    // literal is normalized to 100 by JSON.parse before the route sees it),
+    // but bare Number() coercion would accept "1e2"→100, "0x10"→16, "+2"→2,
+    // true→1, ["2"]→2 — so a PRESENT value must be either a finite number or
+    // a plain digits[.digits] string.
+    const transferPercentFormatOk =
+      transferPercentMissing ||
+      (typeof normalizedTransferPercent === "number" &&
+        Number.isFinite(normalizedTransferPercent)) ||
+      (typeof normalizedTransferPercent === "string" &&
+        /^\d+(?:\.\d+)?$/.test(normalizedTransferPercent));
+    const vTransferPct = parseOptionalPositiveFloat(normalizedTransferPercent, "אחוז ההעברה", 100);
 
     // ── BOTH deal type: validate commissionSale (sale-side commission) ────────
     // SALE and RENTAL contracts must NOT include commissionSale.
@@ -530,6 +552,13 @@ export async function POST(request: Request) {
     // every other key.
     const isBuyerToSeller = autoKey === "BROKER_COOP_BUYER_TO_SELLER";
     if (isBuyerToSeller) {
+      // Order is load-bearing: (1) strict-format 400 for present-but-malformed
+      // values, (2) the validator's range/positive errors, (3) the required-
+      // value 400 (missing values are format-exempt via transferPercentMissing,
+      // so ""/whitespace-only reach the required message, not the format one).
+      if (!transferPercentFormatOk) {
+        return NextResponse.json({ error: "אחוז ההעברה אינו מספר תקין" }, { status: 400 });
+      }
       if (!vTransferPct.ok) return NextResponse.json({ error: vTransferPct.error }, { status: 400 });
       if (vTransferPct.value == null) {
         return NextResponse.json({ error: "יש להזין את אחוז ההעברה למתווך המוכר" }, { status: 400 });

@@ -91,8 +91,14 @@ interface FormState {
   counterpartyBrokerLicense: string;
   // Broker cooperation only: which cooperation agreement is created. Sent as
   // coopType for the cooperation category only; the route resolves sharedPool →
-  // BROKER_COOP_SHARED_POOL (default), eachSide → BROKER_COOP_EACH_SIDE.
-  coopType: "sharedPool" | "eachSide";
+  // BROKER_COOP_SHARED_POOL (default), eachSide → BROKER_COOP_EACH_SIDE,
+  // buyerToSeller → BROKER_COOP_BUYER_TO_SELLER.
+  coopType: "sharedPool" | "eachSide" | "buyerToSeller";
+  // Buyer-to-seller subtype only: the required transfer percent of the deal
+  // price (decimal string, e.g. "0.5", "1.5"); strictly parsed to a number at
+  // submit. Hidden-but-preserved when another subtype is selected — the
+  // payload gate guarantees it is only ever sent for buyerToSeller.
+  brokerCoopTransferPercent: string;
   // ── Structured property address ───────────────────────────────────────────
   // Street + number are stored in `propertyAddress` as "<street> <number>".
   // Floor and apartment are appended with "||" separators and rendered as
@@ -150,6 +156,7 @@ const INITIAL: FormState = {
   skipEmailId:               false,
   counterpartyBrokerLicense: "",
   coopType:                  "sharedPool",
+  brokerCoopTransferPercent: "",
   propertyStreet:            "",
   propertyNumber:            "",
   propertyFloor:             "",
@@ -1031,6 +1038,7 @@ function categoryDefaults(id: ContractTypeId): Partial<FormState> {
     ownerMode: "serviceOnly" as const,
     counterpartyBrokerLicense: "",
     coopType: "sharedPool" as const,
+    brokerCoopTransferPercent: "",
   };
   if (id === "exclusivity") {
     // Owner flow (service-order first) defaults to RENTAL; SALE and BOTH are
@@ -1433,6 +1441,23 @@ export function NewContractForm({ subscription, initialContractType = "intereste
         }
       }
     }
+    // ── Buyer-to-seller transfer percent — required only for that subtype ────
+    // Strict format: only a plain positive decimal (digits + optional decimal
+    // point) is a valid legal-document percent. parseFloat would accept
+    // "1.5abc"/"2%", and even Number() accepts non-standard numeric formats —
+    // Number("1e2") === 100, Number("0x10") === 16, Number("+2") === 2 — so the
+    // regex rejects those first; Number() then only converts an already-clean
+    // decimal string. Must match the API contract (> 0, ≤ 100, decimals).
+    if (isCoop && form.coopType === "buyerToSeller") {
+      const rawPercent = form.brokerCoopTransferPercent.trim();
+      const isDecimalFormat = /^\d+(?:\.\d+)?$/.test(rawPercent);
+      const pct = Number(rawPercent);
+      if (!rawPercent) {
+        e.brokerCoopTransferPercent = "יש להזין את אחוז ההעברה למתווך המוכר";
+      } else if (!isDecimalFormat || !Number.isFinite(pct) || pct <= 0 || pct > 100) {
+        e.brokerCoopTransferPercent = "אחוז ההעברה חייב להיות מספר גדול מ-0 ועד 100";
+      }
+    }
     // ── Exclusivity period — required by both exclusivity modes ──────────────
     if (isOwner && form.ownerMode !== "serviceOnly") {
       if (!form.exclusivityStart) {
@@ -1572,9 +1597,16 @@ export function NewContractForm({ subscription, initialContractType = "intereste
           }
         : {}),
       // Cooperation subtype — resolves the template key server-side
-      // (sharedPool → BROKER_COOP_SHARED_POOL, eachSide → BROKER_COOP_EACH_SIDE).
-      // Sent only for the cooperation category.
+      // (sharedPool → BROKER_COOP_SHARED_POOL, eachSide → BROKER_COOP_EACH_SIDE,
+      // buyerToSeller → BROKER_COOP_BUYER_TO_SELLER). Sent only for the
+      // cooperation category.
       ...(isCoop ? { coopType: form.coopType } : {}),
+      // Buyer-to-seller transfer percent — strict numeric (validation already
+      // guaranteed it is finite and in range); omitted entirely for every
+      // other subtype/category, so a hidden preserved value can never leak.
+      ...(isCoop && form.coopType === "buyerToSeller"
+        ? { brokerCoopTransferPercent: Number(form.brokerCoopTransferPercent.trim()) }
+        : {}),
       // Broker cooperation — Broker B's license number (optional free text).
       // Omitted when empty/whitespace; the API trims it, persists it only for
       // the cooperation keys, and renders the party-line suffix from it.
@@ -1688,27 +1720,55 @@ export function NewContractForm({ subscription, initialContractType = "intereste
         {/* ══ 1a. Cooperation subtype — which cooperation agreement is created ═ */}
         {/* sharedPool: fees pooled and split equally (BROKER_COOP_SHARED_POOL).
             eachSide: each broker collects only from the client they represent
-            (BROKER_COOP_EACH_SIDE). Both subtypes share the entire surrounding
-            form (party fields, license, deal type, fee-free behavior) — the
-            selector changes only the resolved template. */}
+            (BROKER_COOP_EACH_SIDE). buyerToSeller: the buyer-side broker
+            transfers an agreed percent of the deal price to the seller-side
+            broker (BROKER_COOP_BUYER_TO_SELLER) — the only subtype with an
+            extra input (the transfer percent below). All subtypes share the
+            entire surrounding form (party fields, license, deal type, fee-free
+            behavior) — the selector changes only the resolved template.
+            Switching subtypes preserves a typed percent (payload-gated) but
+            clears its validation error so it can never block other subtypes. */}
         {isCoop && (
           <Section title="סוג שיתוף פעולה">
-            <div className="flex flex-wrap gap-2">
-              {([
-                { id: "sharedPool", label: "קופה משותפת"              },
-                { id: "eachSide",   label: "כל מתווך גובה מהצד שלו" },
-              ] as const).map((o) => (
-                <button key={o.id} type="button"
-                  onClick={() => set("coopType", o.id)}
-                  className={[
-                    "px-3 py-2 rounded-xl border text-xs font-semibold transition-all",
-                    form.coopType === o.id
-                      ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
-                      : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
-                  ].join(" ")}>
-                  {o.label}
-                </button>
-              ))}
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-2">
+                {([
+                  { id: "sharedPool",    label: "קופה משותפת"                       },
+                  { id: "eachSide",      label: "כל מתווך גובה מהצד שלו"          },
+                  { id: "buyerToSeller", label: "מתווך הקונה מעביר למתווך המוכר" },
+                ] as const).map((o) => (
+                  <button key={o.id} type="button"
+                    onClick={() => {
+                      set("coopType", o.id);
+                      setErrors((prev) => { const n = { ...prev }; delete n.brokerCoopTransferPercent; return n; });
+                    }}
+                    className={[
+                      "px-3 py-2 rounded-xl border text-xs font-semibold transition-all",
+                      form.coopType === o.id
+                        ? "border-indigo-300 bg-indigo-50 text-indigo-700 ring-1 ring-indigo-300"
+                        : "border-gray-200 bg-white text-gray-600 hover:border-indigo-200",
+                    ].join(" ")}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Transfer percent — required for the buyer-to-seller document
+                  (its opening paragraph renders ל־X% ממחיר העסקה; the API
+                  rejects creation without it). */}
+              {form.coopType === "buyerToSeller" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel htmlFor="brokerCoopTransferPercent">אחוז ההעברה ממחיר העסקה</FieldLabel>
+                    <TextInput id="brokerCoopTransferPercent" value={form.brokerCoopTransferPercent}
+                      onChange={(v) => set("brokerCoopTransferPercent", v)}
+                      placeholder="1.5" error={errors.brokerCoopTransferPercent} />
+                    <p className="text-xs text-gray-400 mt-1">
+                      האחוז שמתווך הקונה/השוכר יעביר למתווך המוכר/המשכיר ממחיר העסקה.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </Section>
         )}
