@@ -782,28 +782,28 @@ describe("buildContext — counterparty broker license suffix", () => {
   });
 });
 
-// ─── buildContext — broker coop transfer values ────────────────────────────────
-// Buyer-to-seller documents (BROKER_COOP_BUYER_TO_SELLER): the two agreed
-// dynamic values render as plain strings — the percent via the
-// saleCommissionPercent convention (trailing zeros stripped: 0.5→"0.5",
-// 1→"1", 1.5→"1.5", 2→"2"), the days as an integer string. Route validation
-// requires both for that key, so absence renders EMPTY strings, never a dash —
-// the document must never show "—%" or "— ימים".
+// ─── buildContext — broker coop transfer percent ───────────────────────────────
+// Buyer-to-seller documents (BROKER_COOP_BUYER_TO_SELLER): the agreed transfer
+// percent renders as a plain string via the saleCommissionPercent convention
+// (trailing zeros stripped: 0.5→"0.5", 1→"1", 1.5→"1.5", 2→"2"). Route
+// validation requires it for that key, so absence renders an EMPTY string,
+// never a dash — the document must never show "—%". (The due-days value was
+// removed in Phase 4B.1: clause 5 makes the transfer due במעמד החתימה, so the
+// clause carries no placeholder at all.)
 
-describe("buildContext — broker coop transfer values (BROKER_COOP_BUYER_TO_SELLER)", () => {
-  it("renders a decimal percent and integer days", () => {
+describe("buildContext — broker coop transfer percent (BROKER_COOP_BUYER_TO_SELLER)", () => {
+  it("renders a decimal percent", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
-      contract: { ...CONTRACT, brokerCoopTransferPercent: 1.5, brokerCoopTransferDueDays: 30 },
+      contract: { ...CONTRACT, brokerCoopTransferPercent: 1.5 },
     });
     expect(ctx.brokerCoopTransferPercent).toBe("1.5");
-    expect(ctx.brokerCoopTransferDueDays).toBe("30");
   });
 
   it("renders a sub-1 percent", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
-      contract: { ...CONTRACT, brokerCoopTransferPercent: 0.5, brokerCoopTransferDueDays: 14 },
+      contract: { ...CONTRACT, brokerCoopTransferPercent: 0.5 },
     });
     expect(ctx.brokerCoopTransferPercent).toBe("0.5");
   });
@@ -811,28 +811,28 @@ describe("buildContext — broker coop transfer values (BROKER_COOP_BUYER_TO_SEL
   it("renders a whole percent without decimals", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
-      contract: { ...CONTRACT, brokerCoopTransferPercent: 2, brokerCoopTransferDueDays: 45 },
+      contract: { ...CONTRACT, brokerCoopTransferPercent: 2 },
     });
     expect(ctx.brokerCoopTransferPercent).toBe("2");
   });
 
-  it("renders empty strings when the values are absent — never a dash", () => {
+  it("renders an empty string when the percent is absent — never a dash", () => {
     const ctx = buildContext({ broker: BROKER, client: CLIENT, contract: CONTRACT });
     expect(ctx.brokerCoopTransferPercent).toBe("");
-    expect(ctx.brokerCoopTransferDueDays).toBe("");
     expect(ctx.brokerCoopTransferPercent).not.toContain("—");
-    expect(ctx.brokerCoopTransferDueDays).not.toContain("—");
   });
 
-  it("round-trips both clause fragments", () => {
+  it("round-trips the percent fragment; the new clause 5 passes through unchanged", () => {
     const ctx = buildContext({
       broker: BROKER, client: CLIENT,
-      contract: { ...CONTRACT, brokerCoopTransferPercent: 1.5, brokerCoopTransferDueDays: 30 },
+      contract: { ...CONTRACT, brokerCoopTransferPercent: 1.5 },
     });
     expect(resolveTemplate("סך השווה ל־{{brokerCoopTransferPercent}}% ממחיר העסקה", ctx))
       .toBe("סך השווה ל־1.5% ממחיר העסקה");
-    expect(resolveTemplate("בתוך {{brokerCoopTransferDueDays}} ימים ממועד גביית דמי התיווך בפועל", ctx))
-      .toBe("בתוך 30 ימים ממועד גביית דמי התיווך בפועל");
+    // Phase 4B.1 clause 5 — transfer due at signing; no placeholder, so the
+    // clause must pass through resolveTemplate byte-identically.
+    const clause5 = "5. עם חתימת הסכם מחייב ביחס לנכס, יעביר מתווך הקונה/השוכר למתווך המוכר/המשכיר את הסכום המוסכם כאמור לעיל במעמד החתימה, אלא אם סוכם אחרת בכתב.";
+    expect(resolveTemplate(clause5, ctx)).toBe(clause5);
   });
 });
 

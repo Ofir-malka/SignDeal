@@ -329,19 +329,18 @@ model Contract {
   counterpartyBrokerLicenseNumber String?
 
   // Broker-cooperation buyer-to-seller documents (BROKER_COOP_BUYER_TO_SELLER):
-  // the two agreed dynamic values of the transfer clauses — a document-level
-  // snapshot persisted (not just embedded in generatedText) so sign-time
-  // regeneration rebuilds both clauses deterministically.
+  // the agreed dynamic value of the transfer clause — a document-level snapshot
+  // persisted (not just embedded in generatedText) so sign-time regeneration
+  // rebuilds the clause deterministically.
   // • brokerCoopTransferPercent — human percent of the DEAL PRICE (0.5, 1, 1.5,
   //   2 …) that the buyer/tenant-side broker transfers to the seller/landlord-
   //   side broker, plus VAT per the legal text. Float matches the established
   //   percent convention (saleCommissionPercent); the document renders only the
   //   percent, never a computed ₪ amount.
-  // • brokerCoopTransferDueDays — agreed number of days from ACTUAL collection
-  //   of the brokerage fee to the transfer (clause 5).
-  // Both null for every other template key.
+  // (brokerCoopTransferDueDays was removed in Phase 4B.1 — the transfer is due
+  // upon signing the binding agreement, not within a configurable day count.)
+  // Null for every other template key.
   brokerCoopTransferPercent Float?
-  brokerCoopTransferDueDays Int?
 
   // Dates
   createdAt       DateTime        @default(now())

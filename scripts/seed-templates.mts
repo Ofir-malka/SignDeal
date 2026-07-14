@@ -639,22 +639,29 @@ const TEMPLATES: Array<{
     // ── BROKER_COOP_BUYER_TO_SELLER · HE ──────────────────────────────────────
     // Broker cooperation — buyer-side broker transfers to the seller-side broker
     // ("מתווך הקונה מעביר למתווך המוכר"), the THIRD subtype of the cooperation
-    // family. The buyer/tenant-side broker collects the brokerage fee from the
-    // client it represents and, from those fees, transfers to the seller/
-    // landlord-side broker an agreed percent of the DEAL PRICE plus VAT, within
-    // an agreed number of days from actual collection. Same signer model as the
-    // other subtypes (Broker A = the SignDeal user; Broker B = the external
+    // family. The buyer/tenant-side broker is responsible for collecting the
+    // brokerage fee from the client it represents and transfers to the seller/
+    // landlord-side broker an agreed percent of the DEAL PRICE plus VAT, due
+    // upon signing the binding agreement. Same signer model as the other
+    // subtypes (Broker A = the SignDeal user; Broker B = the external
     // cooperating broker, modeled through the Client relation and signing via
     // the standard link). Resolved by (contractType "הסכם שיתוף פעולה בין
     // מתווכים" + coopType "buyerToSeller"); every dealType maps to this key.
-    // Source: "מתווך הקונה מעביר למתווך המוכר .txt" (lawyer text), verbatim —
-    // the source's two blanks are the ONLY substitutions:
+    // Source: "מתווך הקונה מעביר למתווך המוכר .txt" (lawyer text) with the
+    // percent blank substituted:
     //   ________%  → {{brokerCoopTransferPercent}}%   (opening paragraph)
-    //   ________ ימים → {{brokerCoopTransferDueDays}} ימים   (clause 5)
-    // Both values are REQUIRED by route validation for this key and persisted on
-    // Contract (brokerCoopTransferPercent / brokerCoopTransferDueDays) so
-    // sign-time regeneration rebuilds both clauses deterministically — the
-    // document never renders "—%" or "— ימים".
+    // The percent is REQUIRED by route validation for this key and persisted on
+    // Contract.brokerCoopTransferPercent so sign-time regeneration rebuilds the
+    // clause deterministically — the document never renders "—%".
+    // • ⚖️ LAWYER-REVIEW (Phase 4B.1 legal-text changes vs the lawyer source —
+    //   product decision: the transfer is due at signing, not within N days of
+    //   actual collection; the due-days field was removed platform-wide):
+    //   1. Opening paragraph: "יגבה את דמי התיווך… ומתוכם יעביר" →
+    //      "יהיה אחראי לגביית דמי התיווך… ויעביר" — removes the dependency
+    //      between actual fee collection and the transfer obligation.
+    //   2. Clause 5: the source's "וגביית דמי התיווך בפועל" precondition and
+    //      "וזאת בתוך ___ ימים ממועד גביית דמי התיווך בפועל" deadline were
+    //      replaced with an at-signing due time — "במעמד החתימה".
     // • PUNCTUATION NOTE: a final period was added at the end of clause 10 for
     //   punctuation consistency with the sibling templates' identical closing
     //   clause — the legal wording itself is unchanged from the source.
@@ -677,13 +684,13 @@ const TEMPLATES: Array<{
 
 סוג שיתוף הפעולה: העברת חלק מדמי התיווך ממתווך הקונה למתווך המוכר
 
-מוסכם בין הצדדים כי שיתוף הפעולה יתבצע במתכונת שבה מתווך הקונה/השוכר יגבה את דמי התיווך מהלקוח המיוצג על ידו, ומתוכם יעביר למתווך המוכר/המשכיר סך השווה ל־{{brokerCoopTransferPercent}}% ממחיר העסקה בתוספת מע״מ כדין.
+מוסכם בין הצדדים כי שיתוף הפעולה יתבצע במתכונת שבה מתווך הקונה/השוכר יהיה אחראי לגביית דמי התיווך מהלקוח המיוצג על ידו, ויעביר למתווך המוכר/המשכיר סך השווה ל־{{brokerCoopTransferPercent}}% ממחיר העסקה בתוספת מע״מ כדין.
 
 1. הצדדים מתחייבים לפעול זה כלפי זה בשקיפות, בהגינות, בתום לב ובנאמנות, ולשתף פעולה לצורך קידום העסקה.
 2. כל צד מתחייב שלא למסור, להעביר או לחשוף לצד שלישי כלשהו, לרבות מתווך אחר, את פרטי הנכס, פרטי בעל הנכס, פרטי הקונה/השוכר ו/או כל מידע שהתקבל במסגרת שיתוף הפעולה, אלא לאחר קבלת אישור מראש ובכתב מהצד השני.
 3. מוסכם כי כל קשר עם בעל הנכס ו/או עם הקונה/השוכר יתבצע באמצעות הנציג המייצג את אותו צד, אלא אם סוכם אחרת מראש ובכתב.
 4. מתווך הקונה/השוכר יהיה אחראי לגביית דמי התיווך מהלקוח המיוצג על ידו, בהתאם להסכמות שנחתמו בינו לבין אותו לקוח.
-5. עם חתימת הסכם מחייב ביחס לנכס וגביית דמי התיווך בפועל, יעביר מתווך הקונה/השוכר למתווך המוכר/המשכיר את הסכום המוסכם כאמור לעיל, וזאת בתוך {{brokerCoopTransferDueDays}} ימים ממועד גביית דמי התיווך בפועל, אלא אם סוכם אחרת בכתב.
+5. עם חתימת הסכם מחייב ביחס לנכס, יעביר מתווך הקונה/השוכר למתווך המוכר/המשכיר את הסכום המוסכם כאמור לעיל במעמד החתימה, אלא אם סוכם אחרת בכתב.
 6. מובהר כי התחייבות ההעברה בין המתווכים תחול לגבי כל עסקה שתיווצר בקשר לנכס ו/או ללקוח נשוא הסכמה זו, לרבות עסקה שתבוצע במעורבות מתווך, נציג או צד שלישי נוסף, ובלבד שמקורה במידע, בפנייה או בקשר שנוצרו במסגרת שיתוף פעולה זה.
 7. כל צד מתחייב שלא לבצע פעולה שיש בה כדי לעקוף את הצד השני, לפגוע בזכאותו לתשלום או לסכל את חלקו בשיתוף הפעולה.
 8. הסכם זה חל אך ורק על הנכס/ים ו/או הלקוח/ות שיפורטו במסמך זה, ואינו חל על נכסים, לקוחות או עסקאות אחרות, אלא אם הוסכם אחרת ובכתב.

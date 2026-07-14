@@ -594,12 +594,11 @@ export async function PATCH(
                 // Broker cooperation: keeps the מתווך ב׳ license suffix
                 // deterministic across sign-time regeneration.
                 counterpartyBrokerLicenseNumber: contract.counterpartyBrokerLicenseNumber,
-                // Buyer-to-seller subtype: keeps the transfer percent/days
-                // clauses deterministic across sign-time regeneration —
-                // omitting these would regenerate the document with empty
-                // "%"/"ימים" blanks after signer detail completion.
+                // Buyer-to-seller subtype: keeps the transfer percent clause
+                // deterministic across sign-time regeneration — omitting it
+                // would regenerate the document with an empty "%" blank after
+                // signer detail completion.
                 brokerCoopTransferPercent: contract.brokerCoopTransferPercent,
-                brokerCoopTransferDueDays: contract.brokerCoopTransferDueDays,
                 createdAt:       contract.createdAt,
               },
             });

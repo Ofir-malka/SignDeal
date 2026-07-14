@@ -289,7 +289,6 @@ export async function POST(request: Request) {
       counterpartyBrokerLicenseNumber, // broker cooperation only — optional Broker B license number
       coopType,               // broker cooperation only — "sharedPool" (default) | "eachSide" | "buyerToSeller"
       brokerCoopTransferPercent, // buyer-to-seller subtype only — required % of the deal price (0.5, 1, 1.5, 2 …)
-      brokerCoopTransferDueDays, // buyer-to-seller subtype only — required days from actual collection (1-365)
       language: rawLanguage,
     } = body;
 
@@ -373,12 +372,12 @@ export async function POST(request: Request) {
     const resolvedCoopType: "sharedPool" | "eachSide" | "buyerToSeller" =
       (isBrokerCoop && vCoopType.ok ? vCoopType.value : null) ?? "sharedPool";
 
-    // Buyer-to-seller transfer terms — parsed leniently here (NOT in the global
-    // firstError chain, mirroring coopType) so stray values on any other
-    // category/subtype are ignored, never a 400. Requirement + error responses
-    // are enforced below, only once the resolved key is BROKER_COOP_BUYER_TO_SELLER.
-    const vTransferPct  = parseOptionalPositiveFloat(brokerCoopTransferPercent, "אחוז ההעברה", 100);
-    const vTransferDays = parseOptionalInt(brokerCoopTransferDueDays, "מספר ימי ההעברה", 1, 365);
+    // Buyer-to-seller transfer percent — parsed leniently here (NOT in the
+    // global firstError chain, mirroring coopType) so a stray value on any
+    // other category/subtype is ignored, never a 400. Requirement + error
+    // responses are enforced below, only once the resolved key is
+    // BROKER_COOP_BUYER_TO_SELLER.
+    const vTransferPct = parseOptionalPositiveFloat(brokerCoopTransferPercent, "אחוז ההעברה", 100);
 
     // ── BOTH deal type: validate commissionSale (sale-side commission) ────────
     // SALE and RENTAL contracts must NOT include commissionSale.
@@ -523,23 +522,20 @@ export async function POST(request: Request) {
       || autoKey === "BROKER_COOP_EACH_SIDE"
       || autoKey === "BROKER_COOP_BUYER_TO_SELLER";
 
-    // Buyer-to-seller transfer terms — REQUIRED for this key: the legal text's
-    // two blanks ({{brokerCoopTransferPercent}}% / {{brokerCoopTransferDueDays}}
-    // ימים) must never render empty, so creation is blocked without both values.
-    // Null (never persisted) for every other key.
+    // Buyer-to-seller transfer percent — REQUIRED for this key: the legal
+    // text's percent blank ({{brokerCoopTransferPercent}}%) must never render
+    // empty, so creation is blocked without it. (The due-days concept was
+    // removed in Phase 4B.1 — the transfer is due upon signing the binding
+    // agreement, so no day count is collected.) Null (never persisted) for
+    // every other key.
     const isBuyerToSeller = autoKey === "BROKER_COOP_BUYER_TO_SELLER";
     if (isBuyerToSeller) {
-      if (!vTransferPct.ok)  return NextResponse.json({ error: vTransferPct.error },  { status: 400 });
-      if (!vTransferDays.ok) return NextResponse.json({ error: vTransferDays.error }, { status: 400 });
+      if (!vTransferPct.ok) return NextResponse.json({ error: vTransferPct.error }, { status: 400 });
       if (vTransferPct.value == null) {
         return NextResponse.json({ error: "יש להזין את אחוז ההעברה למתווך המוכר" }, { status: 400 });
       }
-      if (vTransferDays.value == null) {
-        return NextResponse.json({ error: "יש להזין את מספר הימים להעברת התשלום" }, { status: 400 });
-      }
     }
-    const resolvedTransferPercent = isBuyerToSeller && vTransferPct.ok  ? vTransferPct.value  : null;
-    const resolvedTransferDueDays = isBuyerToSeller && vTransferDays.ok ? vTransferDays.value : null;
+    const resolvedTransferPercent = isBuyerToSeller && vTransferPct.ok ? vTransferPct.value : null;
 
     // Persist the rental commission mode ONLY for templates whose clause needs it
     // (interested rental/both + owner service-order rental/both). The interested
@@ -635,7 +631,7 @@ export async function POST(request: Request) {
           // client/broker identity mixing bug (phone/idNumber mismatch between the
           // client details card and the legal document).
           client: { name: client.name, idNumber: client.idNumber || "", phone: client.phone, email: client.email || "", address: client.address ?? null },
-          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: effectiveCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, rentalCommissionMonths: resolvedRentalMonths, saleCommissionMode: resolvedSaleMode, saleCommissionPercent: resolvedSalePercent, templateKey: autoKey, exclusivityStartsAt: resolvedExclusivityStart, exclusivityEndsAt: resolvedExclusivityEnd, counterpartyBrokerLicenseNumber: isCoopKey ? coopLicense : null, brokerCoopTransferPercent: resolvedTransferPercent, brokerCoopTransferDueDays: resolvedTransferDueDays, createdAt: new Date() },
+          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: effectiveCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, rentalCommissionMonths: resolvedRentalMonths, saleCommissionMode: resolvedSaleMode, saleCommissionPercent: resolvedSalePercent, templateKey: autoKey, exclusivityStartsAt: resolvedExclusivityStart, exclusivityEndsAt: resolvedExclusivityEnd, counterpartyBrokerLicenseNumber: isCoopKey ? coopLicense : null, brokerCoopTransferPercent: resolvedTransferPercent, createdAt: new Date() },
         });
         generatedText = resolveTemplate(tpl.content, ctx);
         resolvedTemplateId = tpl.id;
@@ -683,11 +679,11 @@ export async function POST(request: Request) {
           ...(isCoopKey && coopLicense
             ? { counterpartyBrokerLicenseNumber: coopLicense }
             : {}),
-          // Buyer-to-seller transfer terms — persisted ONLY for that key (both
-          // values are validated-required above) so sign-time regeneration
-          // rebuilds the percent/days clauses deterministically.
+          // Buyer-to-seller transfer percent — persisted ONLY for that key
+          // (validated-required above) so sign-time regeneration rebuilds the
+          // percent clause deterministically.
           ...(isBuyerToSeller
-            ? { brokerCoopTransferPercent: resolvedTransferPercent, brokerCoopTransferDueDays: resolvedTransferDueDays }
+            ? { brokerCoopTransferPercent: resolvedTransferPercent }
             : {}),
           ...(validatedCommissionSale !== null ? { commissionSale: validatedCommissionSale } : {}),
           ...(validatedPropertySalePrice !== null ? { propertySalePrice: validatedPropertySalePrice } : {}),
