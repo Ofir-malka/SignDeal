@@ -104,7 +104,7 @@ const p = prisma as any;
 // All {{placeholders}} listed above are supported.
 
 const TEMPLATES: Array<{
-  key: "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_SERVICE_ORDER_RENTAL" | "OWNER_SERVICE_ORDER_SALE" | "OWNER_SERVICE_ORDER_BOTH" | "OWNER_EXCLUSIVE_GENERAL" | "OWNER_EXCLUSIVE_ONLY" | "BROKER_COOP_SHARED_POOL" | "BROKER_COOP_EACH_SIDE";
+  key: "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_SERVICE_ORDER_RENTAL" | "OWNER_SERVICE_ORDER_SALE" | "OWNER_SERVICE_ORDER_BOTH" | "OWNER_EXCLUSIVE_GENERAL" | "OWNER_EXCLUSIVE_ONLY" | "BROKER_COOP_SHARED_POOL" | "BROKER_COOP_EACH_SIDE" | "BROKER_COOP_BUYER_TO_SELLER";
   language: "HE" | "EN" | "FR" | "RU" | "AR";
   title: string;
   content: string;
@@ -636,6 +636,61 @@ const TEMPLATES: Array<{
 9. כל שינוי, ויתור או חריגה מהוראות הסכם זה יהיו תקפים רק אם נערכו בכתב ואושרו על ידי שני הצדדים.`,
     },
 
+    // ── BROKER_COOP_BUYER_TO_SELLER · HE ──────────────────────────────────────
+    // Broker cooperation — buyer-side broker transfers to the seller-side broker
+    // ("מתווך הקונה מעביר למתווך המוכר"), the THIRD subtype of the cooperation
+    // family. The buyer/tenant-side broker collects the brokerage fee from the
+    // client it represents and, from those fees, transfers to the seller/
+    // landlord-side broker an agreed percent of the DEAL PRICE plus VAT, within
+    // an agreed number of days from actual collection. Same signer model as the
+    // other subtypes (Broker A = the SignDeal user; Broker B = the external
+    // cooperating broker, modeled through the Client relation and signing via
+    // the standard link). Resolved by (contractType "הסכם שיתוף פעולה בין
+    // מתווכים" + coopType "buyerToSeller"); every dealType maps to this key.
+    // Source: "מתווך הקונה מעביר למתווך המוכר .txt" (lawyer text), verbatim —
+    // the source's two blanks are the ONLY substitutions:
+    //   ________%  → {{brokerCoopTransferPercent}}%   (opening paragraph)
+    //   ________ ימים → {{brokerCoopTransferDueDays}} ימים   (clause 5)
+    // Both values are REQUIRED by route validation for this key and persisted on
+    // Contract (brokerCoopTransferPercent / brokerCoopTransferDueDays) so
+    // sign-time regeneration rebuilds both clauses deterministically — the
+    // document never renders "—%" or "— ימים".
+    // • PUNCTUATION NOTE: a final period was added at the end of clause 10 for
+    //   punctuation consistency with the sibling templates' identical closing
+    //   clause — the legal wording itself is unchanged from the source.
+    // • Fee-free for platform chrome: the document states an inter-broker
+    //   transfer formula, never a SignDeal commission amount — commission is
+    //   forced 0 by the route and fee chrome is suppressed (hidesFeeChrome
+    //   shows "—", not ₪0).
+    // • Broker B's license is optional: {{counterpartyBrokerLicenseSuffix}}
+    //   renders ", רישיון תיווך מס׳ X" or an empty string — never a dangling dash.
+    // • The "נכס/ים ו/או הלקוח/ות" wording (clause 8) is kept as-is.
+    {
+      key: "BROKER_COOP_BUYER_TO_SELLER",
+      language: "HE",
+      title: "הסכם שיתוף פעולה בין מתווכים — מתווך הקונה מעביר למתווך המוכר",
+      content: `הסכם שיתוף פעולה בין מתווכים — מתווך הקונה מעביר למתווך המוכר
+בהתאם לחוק המתווכים במקרקעין התשנ״ו-1996
+
+מתווך א׳: {{brokerName}}, ת.ז {{brokerIdNumber}}, רישיון מתווך מס׳ {{brokerLicense}}, טלפון {{brokerPhone}}
+מתווך ב׳: {{clientName}}, ת.ז {{clientIdNumber}}, טלפון {{clientPhone}}, דוא״ל {{clientEmail}}{{counterpartyBrokerLicenseSuffix}}
+
+סוג שיתוף הפעולה: העברת חלק מדמי התיווך ממתווך הקונה למתווך המוכר
+
+מוסכם בין הצדדים כי שיתוף הפעולה יתבצע במתכונת שבה מתווך הקונה/השוכר יגבה את דמי התיווך מהלקוח המיוצג על ידו, ומתוכם יעביר למתווך המוכר/המשכיר סך השווה ל־{{brokerCoopTransferPercent}}% ממחיר העסקה בתוספת מע״מ כדין.
+
+1. הצדדים מתחייבים לפעול זה כלפי זה בשקיפות, בהגינות, בתום לב ובנאמנות, ולשתף פעולה לצורך קידום העסקה.
+2. כל צד מתחייב שלא למסור, להעביר או לחשוף לצד שלישי כלשהו, לרבות מתווך אחר, את פרטי הנכס, פרטי בעל הנכס, פרטי הקונה/השוכר ו/או כל מידע שהתקבל במסגרת שיתוף הפעולה, אלא לאחר קבלת אישור מראש ובכתב מהצד השני.
+3. מוסכם כי כל קשר עם בעל הנכס ו/או עם הקונה/השוכר יתבצע באמצעות הנציג המייצג את אותו צד, אלא אם סוכם אחרת מראש ובכתב.
+4. מתווך הקונה/השוכר יהיה אחראי לגביית דמי התיווך מהלקוח המיוצג על ידו, בהתאם להסכמות שנחתמו בינו לבין אותו לקוח.
+5. עם חתימת הסכם מחייב ביחס לנכס וגביית דמי התיווך בפועל, יעביר מתווך הקונה/השוכר למתווך המוכר/המשכיר את הסכום המוסכם כאמור לעיל, וזאת בתוך {{brokerCoopTransferDueDays}} ימים ממועד גביית דמי התיווך בפועל, אלא אם סוכם אחרת בכתב.
+6. מובהר כי התחייבות ההעברה בין המתווכים תחול לגבי כל עסקה שתיווצר בקשר לנכס ו/או ללקוח נשוא הסכמה זו, לרבות עסקה שתבוצע במעורבות מתווך, נציג או צד שלישי נוסף, ובלבד שמקורה במידע, בפנייה או בקשר שנוצרו במסגרת שיתוף פעולה זה.
+7. כל צד מתחייב שלא לבצע פעולה שיש בה כדי לעקוף את הצד השני, לפגוע בזכאותו לתשלום או לסכל את חלקו בשיתוף הפעולה.
+8. הסכם זה חל אך ורק על הנכס/ים ו/או הלקוח/ות שיפורטו במסמך זה, ואינו חל על נכסים, לקוחות או עסקאות אחרות, אלא אם הוסכם אחרת ובכתב.
+9. לכל סכום שישולם מכוח הסכם זה יתווסף מע״מ כדין, ככל שחל.
+10. כל שינוי, ויתור או חריגה מהוראות הסכם זה יהיו תקפים רק אם נערכו בכתב ואושרו על ידי שני הצדדים.`,
+    },
+
     // ── INTERESTED_BUYER · EN ─────────────────────────────────────────────────
     // English legal text aligned with Israeli Real Estate Brokerage Law 1996
     {
@@ -765,7 +820,7 @@ async function upsertTemplates() {
 
   // ── Sanity check: each HE template must have exactly 1 active row ─────────
   console.log("\n── Sanity check (HE templates) ───────────────────────────────");
-  for (const key of ["INTERESTED_BUYER", "OWNER_EXCLUSIVE", "INTERESTED_BUYER_RENTAL", "INTERESTED_BUYER_SALE", "INTERESTED_BUYER_BOTH", "OWNER_SERVICE_ORDER_RENTAL", "OWNER_SERVICE_ORDER_SALE", "OWNER_SERVICE_ORDER_BOTH", "OWNER_EXCLUSIVE_GENERAL", "OWNER_EXCLUSIVE_ONLY", "BROKER_COOP_SHARED_POOL", "BROKER_COOP_EACH_SIDE"] as const) {
+  for (const key of ["INTERESTED_BUYER", "OWNER_EXCLUSIVE", "INTERESTED_BUYER_RENTAL", "INTERESTED_BUYER_SALE", "INTERESTED_BUYER_BOTH", "OWNER_SERVICE_ORDER_RENTAL", "OWNER_SERVICE_ORDER_SALE", "OWNER_SERVICE_ORDER_BOTH", "OWNER_EXCLUSIVE_GENERAL", "OWNER_EXCLUSIVE_ONLY", "BROKER_COOP_SHARED_POOL", "BROKER_COOP_EACH_SIDE", "BROKER_COOP_BUYER_TO_SELLER"] as const) {
     const rows = await p.contractTemplate.findMany({
       where: { templateKey: key, language: "HE", isActive: true },
       select: { id: true },

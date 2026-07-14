@@ -89,6 +89,11 @@ export interface TemplateContext {
   // Counterparty broker license (broker-cooperation documents) — inline suffix
   // for the מתווך ב׳ party line: ", רישיון תיווך מס׳ X" or "" when absent
   counterpartyBrokerLicenseSuffix: string;
+  // Buyer-to-seller transfer terms (BROKER_COOP_BUYER_TO_SELLER only) — human
+  // percent string ("0.5", "1", "1.5", "2") and integer days string; "" when
+  // absent (never "—": the document must not render "—%" or "— ימים")
+  brokerCoopTransferPercent: string;
+  brokerCoopTransferDueDays: string;
   // Dates
   today:           string;   // DD.MM.YYYY
   contractId:      string;   // last 8 chars of id, uppercased
@@ -164,10 +169,15 @@ export function buildContext(opts: {
     // fills {{serviceOrderNumber}} / {{serviceOrderDate}} on the general
     // exclusivity document (OWNER_EXCLUSIVE_GENERAL).
     serviceOrder?: { id: string; createdAt: Date | string } | null;
-    // Counterparty (cooperating) broker license — broker-cooperation documents
-    // (BROKER_COOP_SHARED_POOL and BROKER_COOP_EACH_SIDE); optional, from
-    // Contract.counterpartyBrokerLicenseNumber. The suffix is key-agnostic.
+    // Counterparty (cooperating) broker license — all broker-cooperation
+    // subtypes; optional, from Contract.counterpartyBrokerLicenseNumber.
+    // The suffix is key-agnostic.
     counterpartyBrokerLicenseNumber?: string | null;
+    // Buyer-to-seller transfer terms (BROKER_COOP_BUYER_TO_SELLER) — required
+    // by route validation for that key; from Contract.brokerCoopTransferPercent
+    // / Contract.brokerCoopTransferDueDays. Null for every other key.
+    brokerCoopTransferPercent?: number | null;
+    brokerCoopTransferDueDays?: number | null;
     createdAt:       Date | string;
   };
 }): TemplateContext {
@@ -286,6 +296,18 @@ export function buildContext(opts: {
     // document never renders a dangling "רישיון תיווך מס׳ —".
     counterpartyBrokerLicenseSuffix: opts.contract.counterpartyBrokerLicenseNumber?.trim()
       ? `, רישיון תיווך מס׳ ${opts.contract.counterpartyBrokerLicenseNumber.trim()}`
+      : "",
+    // Buyer-to-seller transfer terms — the percent reuses the
+    // saleCommissionPercent formatting convention (toFixed(2) then Number
+    // strips trailing zeros: 0.5→"0.5", 1→"1", 1.5→"1.5", 2→"2"). Route
+    // validation requires both for BROKER_COOP_BUYER_TO_SELLER, so null only
+    // occurs for templates that never reference these placeholders — rendered
+    // as empty strings, never "—" (the document must not show "—%"/"— ימים").
+    brokerCoopTransferPercent: opts.contract.brokerCoopTransferPercent != null
+      ? String(Number(opts.contract.brokerCoopTransferPercent.toFixed(2)))
+      : "",
+    brokerCoopTransferDueDays: opts.contract.brokerCoopTransferDueDays != null
+      ? String(opts.contract.brokerCoopTransferDueDays)
       : "",
     today:           isoToDateStr(opts.contract.createdAt),
     contractId:      String(opts.contract.id).slice(-8).toUpperCase(),

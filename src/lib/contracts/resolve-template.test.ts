@@ -782,11 +782,66 @@ describe("buildContext — counterparty broker license suffix", () => {
   });
 });
 
+// ─── buildContext — broker coop transfer values ────────────────────────────────
+// Buyer-to-seller documents (BROKER_COOP_BUYER_TO_SELLER): the two agreed
+// dynamic values render as plain strings — the percent via the
+// saleCommissionPercent convention (trailing zeros stripped: 0.5→"0.5",
+// 1→"1", 1.5→"1.5", 2→"2"), the days as an integer string. Route validation
+// requires both for that key, so absence renders EMPTY strings, never a dash —
+// the document must never show "—%" or "— ימים".
+
+describe("buildContext — broker coop transfer values (BROKER_COOP_BUYER_TO_SELLER)", () => {
+  it("renders a decimal percent and integer days", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, brokerCoopTransferPercent: 1.5, brokerCoopTransferDueDays: 30 },
+    });
+    expect(ctx.brokerCoopTransferPercent).toBe("1.5");
+    expect(ctx.brokerCoopTransferDueDays).toBe("30");
+  });
+
+  it("renders a sub-1 percent", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, brokerCoopTransferPercent: 0.5, brokerCoopTransferDueDays: 14 },
+    });
+    expect(ctx.brokerCoopTransferPercent).toBe("0.5");
+  });
+
+  it("renders a whole percent without decimals", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, brokerCoopTransferPercent: 2, brokerCoopTransferDueDays: 45 },
+    });
+    expect(ctx.brokerCoopTransferPercent).toBe("2");
+  });
+
+  it("renders empty strings when the values are absent — never a dash", () => {
+    const ctx = buildContext({ broker: BROKER, client: CLIENT, contract: CONTRACT });
+    expect(ctx.brokerCoopTransferPercent).toBe("");
+    expect(ctx.brokerCoopTransferDueDays).toBe("");
+    expect(ctx.brokerCoopTransferPercent).not.toContain("—");
+    expect(ctx.brokerCoopTransferDueDays).not.toContain("—");
+  });
+
+  it("round-trips both clause fragments", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, brokerCoopTransferPercent: 1.5, brokerCoopTransferDueDays: 30 },
+    });
+    expect(resolveTemplate("סך השווה ל־{{brokerCoopTransferPercent}}% ממחיר העסקה", ctx))
+      .toBe("סך השווה ל־1.5% ממחיר העסקה");
+    expect(resolveTemplate("בתוך {{brokerCoopTransferDueDays}} ימים ממועד גביית דמי התיווך בפועל", ctx))
+      .toBe("בתוך 30 ימים ממועד גביית דמי התיווך בפועל");
+  });
+});
+
 // ─── hidesFeeChrome — fee-chrome suppression gate ──────────────────────────────
 // True ONLY for the fee-free documents: the two exclusivity documents (linked
-// GENERAL + standalone ONLY) and both broker-cooperation subtypes (shared-pool
-// division terms + each-side own-collection terms, no amounts); every
-// fee-carrying document (and legacy/unknown keys) must keep its fee chrome.
+// GENERAL + standalone ONLY) and all broker-cooperation subtypes (shared-pool
+// division terms, each-side own-collection terms, buyer-to-seller transfer
+// formula — no SignDeal commission amounts); every fee-carrying document (and
+// legacy/unknown keys) must keep its fee chrome.
 
 describe("hidesFeeChrome", () => {
   it("returns true for every fee-free document key", () => {
@@ -794,6 +849,7 @@ describe("hidesFeeChrome", () => {
     expect(hidesFeeChrome("OWNER_EXCLUSIVE_ONLY")).toBe(true);
     expect(hidesFeeChrome("BROKER_COOP_SHARED_POOL")).toBe(true);
     expect(hidesFeeChrome("BROKER_COOP_EACH_SIDE")).toBe(true);
+    expect(hidesFeeChrome("BROKER_COOP_BUYER_TO_SELLER")).toBe(true);
   });
 
   it("returns false for every fee-carrying document key", () => {
