@@ -1,0 +1,21 @@
+-- Migration: add BROKER_COOP_EACH_SIDE to the ContractTemplateKey enum
+--
+-- Second subtype of the broker-cooperation family ("הסכם שיתוף פעולה בין
+-- מתווכים — כל מתווך גובה מהצד שלו"): two brokers cooperate on a deal with NO
+-- shared pool — each broker represents their own side and collects brokerage
+-- fees only from the client they represent. Same signer model as the shared-
+-- pool subtype: Broker A is the SignDeal user, Broker B is the external
+-- cooperating broker who signs via the standard signing link (modeled through
+-- the existing Client relation). The document carries no fee amounts, so fee
+-- chrome is suppressed for it (hidesFeeChrome, wired in Phase 3B).
+-- Dormant until Phase 3B wires resolution + seed (coopType = "eachSide").
+--
+-- PostgreSQL does not allow ALTER TYPE ... ADD VALUE inside a transaction block.
+-- This file must be run outside a transaction (Prisma migrate deploy handles this;
+-- isolated as the only statement per house convention).
+--
+-- Additive only — no existing rows are affected. The IF NOT EXISTS guard makes
+-- this idempotent. Enum values cannot be dropped in PostgreSQL, so rollback is a
+-- forward migration; the unused value is harmless.
+
+ALTER TYPE "ContractTemplateKey" ADD VALUE IF NOT EXISTS 'BROKER_COOP_EACH_SIDE';

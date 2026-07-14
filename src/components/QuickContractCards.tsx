@@ -177,10 +177,10 @@ function IconTransfer() {
 
 // ── Card definitions ───────────────────────────────────────────────────────────
 //
-// "החתמת מתעניין" and "החתמת בעל נכס / בלעדיות" are wired to live contract
-// flows (the owner-exclusive card deep-links with ?type= so the form opens
-// preselected on that category). The remaining two are placeholders pending
-// lawyer-approved templates and are intentionally left disabled (no href).
+// The interested, owner-exclusive and broker-cooperation cards are wired to
+// live contract flows (the latter two deep-link with ?type= so the form opens
+// preselected on that category). The transfer card is a placeholder pending a
+// lawyer-approved template and is intentionally left disabled (no href).
 
 const CARDS: CardDef[] = [
   {
@@ -201,11 +201,13 @@ const CARDS: CardDef[] = [
     iconBg:   "bg-emerald-50 text-emerald-600",
   },
   {
-    // Disabled — template pending legal sign-off
-    icon:    <IconCooperation />,
-    title:   CONTRACT_TYPE.BROKER_COOP,
+    // Live — shared-pool broker cooperation (קופה משותפת) inside
+    // /contracts/new; this card deep-links straight into it.
+    href:     "/contracts/new?type=cooperation",
+    icon:     <IconCooperation />,
+    title:    CONTRACT_TYPE.BROKER_COOP,
     subtitle: "שיתוף עסקה עם מתווך שותף",
-    iconBg:  "bg-violet-50 text-violet-600",
+    iconBg:   "bg-violet-50 text-violet-600",
   },
   {
     // Disabled — not yet designed

@@ -249,6 +249,10 @@ enum ContractTemplateKey {
   OWNER_SERVICE_ORDER_BOTH   // הזמנת שירותי תיווך בעל נכס — מכירה והשכרה (dealType = BOTH)
   OWNER_EXCLUSIVE_GENERAL    // הסכם בלעדיות כללי — deal-type-agnostic, always the secondary doc
   OWNER_EXCLUSIVE_ONLY       // הסכם בלעדיות עצמאי — standalone, no owner fee obligation, never linked
+  // ── Broker cooperation family (Broker A = SignDeal user; Broker B signs) ───
+  BROKER_COOP_SHARED_POOL    // הסכם שיתוף פעולה — קופה משותפת (all dealTypes; equal split per legal text)
+  BROKER_COOP_EACH_SIDE      // הסכם שיתוף פעולה — כל מתווך גובה מהצד שלו (all dealTypes; each broker collects from own side, no shared pool)
+  BROKER_COOP_BUYER_TO_SELLER // הסכם שיתוף פעולה — מתווך הקונה מעביר למתווך המוכר (all dealTypes; buyer-side broker transfers agreed % of deal price)
 }
 
 // How the rental brokerage fee was chosen by the broker. Drives the dynamic
@@ -315,6 +319,28 @@ model Contract {
   // {{exclusivityEndDate}} in the frozen generatedText.
   exclusivityStartsAt DateTime?
   exclusivityEndsAt   DateTime?
+
+  // Broker-cooperation documents (BROKER_COOP_SHARED_POOL): the counterparty
+  // (cooperating) broker's license number — optional, a snapshot on the
+  // document itself. Lives on Contract, not Client: Client models the generic
+  // signer shared by every family, and this stays valid unchanged when the
+  // counterparty later becomes a real SignDeal user. Rendered conditionally
+  // via {{counterpartyBrokerLicenseSuffix}} (empty when absent — never "—").
+  counterpartyBrokerLicenseNumber String?
+
+  // Broker-cooperation buyer-to-seller documents (BROKER_COOP_BUYER_TO_SELLER):
+  // the agreed dynamic value of the transfer clause — a document-level snapshot
+  // persisted (not just embedded in generatedText) so sign-time regeneration
+  // rebuilds the clause deterministically.
+  // • brokerCoopTransferPercent — human percent of the DEAL PRICE (0.5, 1, 1.5,
+  //   2 …) that the buyer/tenant-side broker transfers to the seller/landlord-
+  //   side broker, plus VAT per the legal text. Float matches the established
+  //   percent convention (saleCommissionPercent); the document renders only the
+  //   percent, never a computed ₪ amount.
+  // (brokerCoopTransferDueDays was removed in Phase 4B.1 — the transfer is due
+  // upon signing the binding agreement, not within a configurable day count.)
+  // Null for every other template key.
+  brokerCoopTransferPercent Float?
 
   // Dates
   createdAt       DateTime        @default(now())

@@ -234,6 +234,14 @@ export function ContractDetail({ contract: c }: { contract: Contract }) {
                    c.signatureStatus === "ממתין לתשלום" ||
                    c.signatureStatus === "שולם";
 
+  // Cooperation documents (all subtypes): the signing party is Broker B, not a
+  // client — the client card shows a document-facing title (deliberately
+  // "פרטי המתווך", not the creation form's "פרטי המתווך השני").
+  const isCoopDoc =
+    c.templateKey === "BROKER_COOP_SHARED_POOL"
+    || c.templateKey === "BROKER_COOP_EACH_SIDE"
+    || c.templateKey === "BROKER_COOP_BUYER_TO_SELLER";
+
   return (
     <ContractDealWrapper
       contract={c}
@@ -243,7 +251,7 @@ export function ContractDetail({ contract: c }: { contract: Contract }) {
         {c.linkedPrimaryContractId && <LinkedPrimaryStrip primaryId={c.linkedPrimaryContractId} />}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mb-6">
           <InfoCard
-            title="פרטי לקוח"
+            title={isCoopDoc ? "פרטי המתווך" : "פרטי לקוח"}
             rows={[
               { label: "שם מלא",      value: c.client      },
               { label: "טלפון",       value: c.clientPhone  },

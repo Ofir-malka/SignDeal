@@ -286,6 +286,9 @@ export async function POST(request: Request) {
       exclusivityEndsAt,      // exclusivity period end   — required when the mode includes exclusivity
       includeExclusivity,     // LEGACY alias — true maps to ownerMode "serviceWithExclusivity"
       ownerMode,              // "serviceOnly" (default) | "serviceWithExclusivity" | "exclusivityOnly"
+      counterpartyBrokerLicenseNumber, // broker cooperation only — optional Broker B license number
+      coopType,               // broker cooperation only — "sharedPool" (default) | "eachSide" | "buyerToSeller"
+      brokerCoopTransferPercent, // buyer-to-seller subtype only — required % of the deal price (0.5, 1, 1.5, 2 …)
       language: rawLanguage,
     } = body;
 
@@ -344,15 +347,67 @@ export async function POST(request: Request) {
     const resolvedOwnerMode: "serviceOnly" | "serviceWithExclusivity" | "exclusivityOnly" =
       vOwnerMode.value ?? (includeExclusivity === true ? "serviceWithExclusivity" : "serviceOnly");
     const isExclusivityOnly = resolvedOwnerMode === "exclusivityOnly";
-    // The standalone exclusivity document carries no fee — commission forced 0.
-    const effectiveCommission = isExclusivityOnly ? 0 : validatedCommission;
+    // Broker-cooperation documents carry no fee amounts either (shared-pool
+    // division terms only) — same fee-free treatment as exclusivityOnly.
+    const isBrokerCoop = contractType === CONTRACT_TYPE.BROKER_COOP;
+    // Fee-free documents: commission forced 0 server-side regardless of the
+    // body value (the UI hiding the fields is not the guarantee).
+    const effectiveCommission = (isExclusivityOnly || isBrokerCoop) ? 0 : validatedCommission;
+    // Sanitized optional counterparty (Broker B) license — trimmed; empty/non-
+    // string becomes null. Persisted only for the cooperation key below.
+    const coopLicense =
+      typeof counterpartyBrokerLicenseNumber === "string" && counterpartyBrokerLicenseNumber.trim()
+        ? counterpartyBrokerLicenseNumber.trim()
+        : null;
+
+    // Cooperation subtype selector. Validated ONLY for the cooperation category:
+    // a stray coopType on any other category is ignored (never a 400), per the
+    // approved contract. parseOptionalEnum returns ok(null) for omitted/empty
+    // (→ sharedPool default) and err only for a non-empty invalid value (→ 400
+    // here). Applied to the resolved template key after autoKey is computed.
+    const vCoopType = parseOptionalEnum(coopType, ["sharedPool", "eachSide", "buyerToSeller"] as const, "סוג שיתוף הפעולה");
+    if (isBrokerCoop && !vCoopType.ok) {
+      return NextResponse.json({ error: vCoopType.error }, { status: 400 });
+    }
+    const resolvedCoopType: "sharedPool" | "eachSide" | "buyerToSeller" =
+      (isBrokerCoop && vCoopType.ok ? vCoopType.value : null) ?? "sharedPool";
+
+    // Buyer-to-seller transfer percent — parsed leniently here (NOT in the
+    // global firstError chain, mirroring coopType) so a stray value on any
+    // other category/subtype is ignored, never a 400. Requirement + error
+    // responses are enforced below, only once the resolved key is
+    // BROKER_COOP_BUYER_TO_SELLER.
+    // Normalization: strings are trimmed first so a whitespace-only value is
+    // treated as MISSING (required-value 400), not as an invalid format.
+    const normalizedTransferPercent =
+      typeof brokerCoopTransferPercent === "string"
+        ? brokerCoopTransferPercent.trim()
+        : brokerCoopTransferPercent;
+    const transferPercentMissing =
+      normalizedTransferPercent === null ||
+      normalizedTransferPercent === undefined ||
+      normalizedTransferPercent === "";
+    // Strict legal-decimal format (matches the client-side rule): JSON numbers
+    // are inherently clean (JSON has no 0x/+/suffix numerals — a raw 1e2
+    // literal is normalized to 100 by JSON.parse before the route sees it),
+    // but bare Number() coercion would accept "1e2"→100, "0x10"→16, "+2"→2,
+    // true→1, ["2"]→2 — so a PRESENT value must be either a finite number or
+    // a plain digits[.digits] string.
+    const transferPercentFormatOk =
+      transferPercentMissing ||
+      (typeof normalizedTransferPercent === "number" &&
+        Number.isFinite(normalizedTransferPercent)) ||
+      (typeof normalizedTransferPercent === "string" &&
+        /^\d+(?:\.\d+)?$/.test(normalizedTransferPercent));
+    const vTransferPct = parseOptionalPositiveFloat(normalizedTransferPercent, "אחוז ההעברה", 100);
 
     // ── BOTH deal type: validate commissionSale (sale-side commission) ────────
     // SALE and RENTAL contracts must NOT include commissionSale.
     // BOTH contracts must include a non-negative integer for the sale commission
-    // — except exclusivityOnly, whose document carries no fee (forced null).
+    // — except the fee-free documents (exclusivityOnly / broker cooperation),
+    // whose documents carry no fee amounts (forced null).
     let validatedCommissionSale: number | null = null;
-    if (validatedDealType === "BOTH" && !isExclusivityOnly) {
+    if (validatedDealType === "BOTH" && !isExclusivityOnly && !isBrokerCoop) {
       const vCommissionSale = parseNonNegativeInt(commissionSale, "עמלת מכירה");
       if (!vCommissionSale.ok) {
         return NextResponse.json({ error: vCommissionSale.error }, { status: 400 });
@@ -426,7 +481,9 @@ export async function POST(request: Request) {
     const CONTRACT_TYPE_TO_TEMPLATE_KEY: Record<string, string> = {
       [CONTRACT_TYPE.INTERESTED]:      "INTERESTED_BUYER",
       [CONTRACT_TYPE.OWNER_EXCLUSIVE]: "OWNER_EXCLUSIVE",
-      [CONTRACT_TYPE.BROKER_COOP]:     "BROKER_COOP",
+      // BROKER_COOP is intentionally absent: the legacy generic key is retired
+      // (never used in production) — every cooperation creation resolves via
+      // the dealType map below to BROKER_COOP_SHARED_POOL.
     };
     const TEMPLATE_KEY_BY_TYPE_AND_DEAL: Record<string, Partial<Record<string, string>>> = {
       [CONTRACT_TYPE.INTERESTED]: {
@@ -443,6 +500,15 @@ export async function POST(request: Request) {
         RENTAL: "OWNER_SERVICE_ORDER_RENTAL",
         SALE:   "OWNER_SERVICE_ORDER_SALE",
         BOTH:   "OWNER_SERVICE_ORDER_BOTH",
+      },
+      // Broker cooperation: the shared-pool agreement is the first production
+      // key of the family; every deal type resolves to it (dealType still
+      // drives the annex price rows). A future coopType selector slots in here
+      // when a second cooperation subtype ships (pattern: ownerMode).
+      [CONTRACT_TYPE.BROKER_COOP]: {
+        RENTAL: "BROKER_COOP_SHARED_POOL",
+        SALE:   "BROKER_COOP_SHARED_POOL",
+        BOTH:   "BROKER_COOP_SHARED_POOL",
       },
     };
 
@@ -461,6 +527,44 @@ export async function POST(request: Request) {
     if (isExclusivityOnly) {
       autoKey = "OWNER_EXCLUSIVE_ONLY";
     }
+    // Cooperation subtype: the shared-pool baseline (from the dealType map above)
+    // is overridden by coopType — "eachSide" / "buyerToSeller" select their
+    // templates; omitted/sharedPool keeps BROKER_COOP_SHARED_POOL — the default.
+    if (isBrokerCoop && resolvedCoopType === "eachSide") {
+      autoKey = "BROKER_COOP_EACH_SIDE";
+    }
+    if (isBrokerCoop && resolvedCoopType === "buyerToSeller") {
+      autoKey = "BROKER_COOP_BUYER_TO_SELLER";
+    }
+    // Whether the resolved key is a broker-cooperation document (any subtype).
+    // Gates the optional Broker B license persistence + buildContext pass below —
+    // all subtypes share the identical מתווך ב׳ party line.
+    const isCoopKey =
+      autoKey === "BROKER_COOP_SHARED_POOL"
+      || autoKey === "BROKER_COOP_EACH_SIDE"
+      || autoKey === "BROKER_COOP_BUYER_TO_SELLER";
+
+    // Buyer-to-seller transfer percent — REQUIRED for this key: the legal
+    // text's percent blank ({{brokerCoopTransferPercent}}%) must never render
+    // empty, so creation is blocked without it. (The due-days concept was
+    // removed in Phase 4B.1 — the transfer is due upon signing the binding
+    // agreement, so no day count is collected.) Null (never persisted) for
+    // every other key.
+    const isBuyerToSeller = autoKey === "BROKER_COOP_BUYER_TO_SELLER";
+    if (isBuyerToSeller) {
+      // Order is load-bearing: (1) strict-format 400 for present-but-malformed
+      // values, (2) the validator's range/positive errors, (3) the required-
+      // value 400 (missing values are format-exempt via transferPercentMissing,
+      // so ""/whitespace-only reach the required message, not the format one).
+      if (!transferPercentFormatOk) {
+        return NextResponse.json({ error: "אחוז ההעברה אינו מספר תקין" }, { status: 400 });
+      }
+      if (!vTransferPct.ok) return NextResponse.json({ error: vTransferPct.error }, { status: 400 });
+      if (vTransferPct.value == null) {
+        return NextResponse.json({ error: "יש להזין את אחוז ההעברה למתווך המוכר" }, { status: 400 });
+      }
+    }
+    const resolvedTransferPercent = isBuyerToSeller && vTransferPct.ok ? vTransferPct.value : null;
 
     // Persist the rental commission mode ONLY for templates whose clause needs it
     // (interested rental/both + owner service-order rental/both). The interested
@@ -535,7 +639,7 @@ export async function POST(request: Request) {
     }
 
     if (autoKey) {
-      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_SERVICE_ORDER_RENTAL" | "OWNER_SERVICE_ORDER_SALE" | "OWNER_SERVICE_ORDER_BOTH" | "OWNER_EXCLUSIVE_ONLY";
+      const templateKey = autoKey as "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_SERVICE_ORDER_RENTAL" | "OWNER_SERVICE_ORDER_SALE" | "OWNER_SERVICE_ORDER_BOTH" | "OWNER_EXCLUSIVE_ONLY" | "BROKER_COOP_SHARED_POOL" | "BROKER_COOP_EACH_SIDE" | "BROKER_COOP_BUYER_TO_SELLER";
       const templateLang = language as "HE" | "EN" | "FR" | "RU" | "AR";
 
       // Resolve by (templateKey + language), fallback to HE if not found
@@ -556,7 +660,7 @@ export async function POST(request: Request) {
           // client/broker identity mixing bug (phone/idNumber mismatch between the
           // client details card and the legal document).
           client: { name: client.name, idNumber: client.idNumber || "", phone: client.phone, email: client.email || "", address: client.address ?? null },
-          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: effectiveCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, rentalCommissionMonths: resolvedRentalMonths, saleCommissionMode: resolvedSaleMode, saleCommissionPercent: resolvedSalePercent, templateKey: autoKey, exclusivityStartsAt: resolvedExclusivityStart, exclusivityEndsAt: resolvedExclusivityEnd, createdAt: new Date() },
+          contract: { id: "pending", propertyAddress, propertyCity, propertyPrice: validatedPropertyPrice, dealType: validatedDealType, commission: effectiveCommission, commissionSale: validatedCommissionSale, rentalCommissionMode: resolvedRentalMode, rentalCommissionMonths: resolvedRentalMonths, saleCommissionMode: resolvedSaleMode, saleCommissionPercent: resolvedSalePercent, templateKey: autoKey, exclusivityStartsAt: resolvedExclusivityStart, exclusivityEndsAt: resolvedExclusivityEnd, counterpartyBrokerLicenseNumber: isCoopKey ? coopLicense : null, brokerCoopTransferPercent: resolvedTransferPercent, createdAt: new Date() },
         });
         generatedText = resolveTemplate(tpl.content, ctx);
         resolvedTemplateId = tpl.id;
@@ -599,6 +703,17 @@ export async function POST(request: Request) {
           propertyCity,
           propertyPrice: validatedPropertyPrice,
           commission: effectiveCommission,
+          // Broker cooperation (any subtype): optional counterparty (Broker B)
+          // license — persisted so sign-time regeneration keeps the party-line suffix.
+          ...(isCoopKey && coopLicense
+            ? { counterpartyBrokerLicenseNumber: coopLicense }
+            : {}),
+          // Buyer-to-seller transfer percent — persisted ONLY for that key
+          // (validated-required above) so sign-time regeneration rebuilds the
+          // percent clause deterministically.
+          ...(isBuyerToSeller
+            ? { brokerCoopTransferPercent: resolvedTransferPercent }
+            : {}),
           ...(validatedCommissionSale !== null ? { commissionSale: validatedCommissionSale } : {}),
           ...(validatedPropertySalePrice !== null ? { propertySalePrice: validatedPropertySalePrice } : {}),
           // exclusivityOnly: the standalone document itself carries the period

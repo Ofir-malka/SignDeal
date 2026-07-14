@@ -86,6 +86,13 @@ export interface TemplateContext {
   // Primary service-order sibling (OWNER_EXCLUSIVE_GENERAL only) — "—" when absent
   serviceOrderNumber:     string;   // sibling doc number, chrome format (last 8 chars, uppercased)
   serviceOrderDate:       string;   // sibling creation date, DD.MM.YYYY
+  // Counterparty broker license (broker-cooperation documents) — inline suffix
+  // for the מתווך ב׳ party line: ", רישיון תיווך מס׳ X" or "" when absent
+  counterpartyBrokerLicenseSuffix: string;
+  // Buyer-to-seller transfer percent (BROKER_COOP_BUYER_TO_SELLER only) — human
+  // percent string ("0.5", "1", "1.5", "2"); "" when absent (never "—": the
+  // document must not render "—%")
+  brokerCoopTransferPercent: string;
   // Dates
   today:           string;   // DD.MM.YYYY
   contractId:      string;   // last 8 chars of id, uppercased
@@ -161,6 +168,14 @@ export function buildContext(opts: {
     // fills {{serviceOrderNumber}} / {{serviceOrderDate}} on the general
     // exclusivity document (OWNER_EXCLUSIVE_GENERAL).
     serviceOrder?: { id: string; createdAt: Date | string } | null;
+    // Counterparty (cooperating) broker license — all broker-cooperation
+    // subtypes; optional, from Contract.counterpartyBrokerLicenseNumber.
+    // The suffix is key-agnostic.
+    counterpartyBrokerLicenseNumber?: string | null;
+    // Buyer-to-seller transfer percent (BROKER_COOP_BUYER_TO_SELLER) — required
+    // by route validation for that key; from Contract.brokerCoopTransferPercent.
+    // Null for every other key.
+    brokerCoopTransferPercent?: number | null;
     createdAt:       Date | string;
   };
 }): TemplateContext {
@@ -274,6 +289,21 @@ export function buildContext(opts: {
     // document's citation always matches what the sibling displays.
     serviceOrderNumber: opts.contract.serviceOrder ? String(opts.contract.serviceOrder.id).slice(-8).toUpperCase() : "—",
     serviceOrderDate:   opts.contract.serviceOrder ? isoToDateStr(opts.contract.serviceOrder.createdAt) : "—",
+    // Counterparty broker license (broker-cooperation documents) — inline
+    // suffix appended to the מתווך ב׳ party line; empty when absent, so the
+    // document never renders a dangling "רישיון תיווך מס׳ —".
+    counterpartyBrokerLicenseSuffix: opts.contract.counterpartyBrokerLicenseNumber?.trim()
+      ? `, רישיון תיווך מס׳ ${opts.contract.counterpartyBrokerLicenseNumber.trim()}`
+      : "",
+    // Buyer-to-seller transfer percent — reuses the saleCommissionPercent
+    // formatting convention (toFixed(2) then Number strips trailing zeros:
+    // 0.5→"0.5", 1→"1", 1.5→"1.5", 2→"2"). Route validation requires it for
+    // BROKER_COOP_BUYER_TO_SELLER, so null only occurs for templates that never
+    // reference the placeholder — rendered as an empty string, never "—" (the
+    // document must not show "—%").
+    brokerCoopTransferPercent: opts.contract.brokerCoopTransferPercent != null
+      ? String(Number(opts.contract.brokerCoopTransferPercent.toFixed(2)))
+      : "",
     today:           isoToDateStr(opts.contract.createdAt),
     contractId:      String(opts.contract.id).slice(-8).toUpperCase(),
   };

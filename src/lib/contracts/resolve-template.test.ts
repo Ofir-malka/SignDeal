@@ -738,15 +738,118 @@ describe("buildContext — service-order sibling reference", () => {
   });
 });
 
+// ─── buildContext — counterparty broker license suffix ────────────────────────
+// Broker-cooperation documents (BROKER_COOP_SHARED_POOL): the optional Broker B
+// license renders as an inline suffix on the מתווך ב׳ party line — a full
+// ", רישיון תיווך מס׳ X" when present, an EMPTY string when absent. The
+// document must never show a dangling "רישיון תיווך מס׳ —".
+
+describe("buildContext — counterparty broker license suffix", () => {
+  it("renders the exact suffix when a license is present", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, counterpartyBrokerLicenseNumber: "54321" },
+    });
+    expect(ctx.counterpartyBrokerLicenseSuffix).toBe(", רישיון תיווך מס׳ 54321");
+  });
+
+  it("renders an empty string when the license is missing", () => {
+    const ctx = buildContext({ broker: BROKER, client: CLIENT, contract: CONTRACT });
+    expect(ctx.counterpartyBrokerLicenseSuffix).toBe("");
+  });
+
+  it("renders an empty string when the license is whitespace-only", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, counterpartyBrokerLicenseNumber: "   " },
+    });
+    expect(ctx.counterpartyBrokerLicenseSuffix).toBe("");
+  });
+
+  it("party-line round-trip renders with and without the suffix (no dangling text)", () => {
+    const line = "מתווך ב׳: {{clientName}}, ת.ז {{clientIdNumber}}, טלפון {{clientPhone}}, דוא״ל {{clientEmail}}{{counterpartyBrokerLicenseSuffix}}";
+    const withLicense = resolveTemplate(line, buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, counterpartyBrokerLicenseNumber: "54321" },
+    }));
+    expect(withLicense).toBe(`מתווך ב׳: ${CLIENT.name}, ת.ז ${CLIENT.idNumber}, טלפון ${CLIENT.phone}, דוא״ל ${CLIENT.email}, רישיון תיווך מס׳ 54321`);
+    const withoutLicense = resolveTemplate(line, buildContext({
+      broker: BROKER, client: CLIENT, contract: CONTRACT,
+    }));
+    expect(withoutLicense).toBe(`מתווך ב׳: ${CLIENT.name}, ת.ז ${CLIENT.idNumber}, טלפון ${CLIENT.phone}, דוא״ל ${CLIENT.email}`);
+    expect(withoutLicense).not.toContain("רישיון תיווך מס׳");
+    expect(withoutLicense).not.toContain("—,");
+  });
+});
+
+// ─── buildContext — broker coop transfer percent ───────────────────────────────
+// Buyer-to-seller documents (BROKER_COOP_BUYER_TO_SELLER): the agreed transfer
+// percent renders as a plain string via the saleCommissionPercent convention
+// (trailing zeros stripped: 0.5→"0.5", 1→"1", 1.5→"1.5", 2→"2"). Route
+// validation requires it for that key, so absence renders an EMPTY string,
+// never a dash — the document must never show "—%". (The due-days value was
+// removed in Phase 4B.1: clause 5 makes the transfer due במעמד החתימה, so the
+// clause carries no placeholder at all.)
+
+describe("buildContext — broker coop transfer percent (BROKER_COOP_BUYER_TO_SELLER)", () => {
+  it("renders a decimal percent", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, brokerCoopTransferPercent: 1.5 },
+    });
+    expect(ctx.brokerCoopTransferPercent).toBe("1.5");
+  });
+
+  it("renders a sub-1 percent", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, brokerCoopTransferPercent: 0.5 },
+    });
+    expect(ctx.brokerCoopTransferPercent).toBe("0.5");
+  });
+
+  it("renders a whole percent without decimals", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, brokerCoopTransferPercent: 2 },
+    });
+    expect(ctx.brokerCoopTransferPercent).toBe("2");
+  });
+
+  it("renders an empty string when the percent is absent — never a dash", () => {
+    const ctx = buildContext({ broker: BROKER, client: CLIENT, contract: CONTRACT });
+    expect(ctx.brokerCoopTransferPercent).toBe("");
+    expect(ctx.brokerCoopTransferPercent).not.toContain("—");
+  });
+
+  it("round-trips the percent fragment; the new clause 5 passes through unchanged", () => {
+    const ctx = buildContext({
+      broker: BROKER, client: CLIENT,
+      contract: { ...CONTRACT, brokerCoopTransferPercent: 1.5 },
+    });
+    expect(resolveTemplate("סך השווה ל־{{brokerCoopTransferPercent}}% ממחיר העסקה", ctx))
+      .toBe("סך השווה ל־1.5% ממחיר העסקה");
+    // Phase 4B.1 clause 5 — transfer due at signing; no placeholder, so the
+    // clause must pass through resolveTemplate byte-identically.
+    const clause5 = "5. עם חתימת הסכם מחייב ביחס לנכס, יעביר מתווך הקונה/השוכר למתווך המוכר/המשכיר את הסכום המוסכם כאמור לעיל במעמד החתימה, אלא אם סוכם אחרת בכתב.";
+    expect(resolveTemplate(clause5, ctx)).toBe(clause5);
+  });
+});
+
 // ─── hidesFeeChrome — fee-chrome suppression gate ──────────────────────────────
-// True ONLY for the two exclusivity documents (linked GENERAL + standalone
-// ONLY); every fee-carrying document (and legacy/unknown keys) must keep its
-// fee chrome.
+// True ONLY for the fee-free documents: the two exclusivity documents (linked
+// GENERAL + standalone ONLY) and all broker-cooperation subtypes (shared-pool
+// division terms, each-side own-collection terms, buyer-to-seller transfer
+// formula — no SignDeal commission amounts); every fee-carrying document (and
+// legacy/unknown keys) must keep its fee chrome.
 
 describe("hidesFeeChrome", () => {
-  it("returns true for both exclusivity document keys", () => {
+  it("returns true for every fee-free document key", () => {
     expect(hidesFeeChrome("OWNER_EXCLUSIVE_GENERAL")).toBe(true);
     expect(hidesFeeChrome("OWNER_EXCLUSIVE_ONLY")).toBe(true);
+    expect(hidesFeeChrome("BROKER_COOP_SHARED_POOL")).toBe(true);
+    expect(hidesFeeChrome("BROKER_COOP_EACH_SIDE")).toBe(true);
+    expect(hidesFeeChrome("BROKER_COOP_BUYER_TO_SELLER")).toBe(true);
   });
 
   it("returns false for every fee-carrying document key", () => {

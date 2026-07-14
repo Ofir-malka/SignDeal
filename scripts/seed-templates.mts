@@ -104,7 +104,7 @@ const p = prisma as any;
 // All {{placeholders}} listed above are supported.
 
 const TEMPLATES: Array<{
-  key: "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "BROKER_COOP" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_SERVICE_ORDER_RENTAL" | "OWNER_SERVICE_ORDER_SALE" | "OWNER_SERVICE_ORDER_BOTH" | "OWNER_EXCLUSIVE_GENERAL" | "OWNER_EXCLUSIVE_ONLY";
+  key: "INTERESTED_BUYER" | "OWNER_EXCLUSIVE" | "INTERESTED_BUYER_RENTAL" | "INTERESTED_BUYER_SALE" | "INTERESTED_BUYER_BOTH" | "OWNER_SERVICE_ORDER_RENTAL" | "OWNER_SERVICE_ORDER_SALE" | "OWNER_SERVICE_ORDER_BOTH" | "OWNER_EXCLUSIVE_GENERAL" | "OWNER_EXCLUSIVE_ONLY" | "BROKER_COOP_SHARED_POOL" | "BROKER_COOP_EACH_SIDE" | "BROKER_COOP_BUYER_TO_SELLER";
   language: "HE" | "EN" | "FR" | "RU" | "AR";
   title: string;
   content: string;
@@ -540,23 +540,162 @@ const TEMPLATES: Array<{
 5. הסכם זה כפוף לחוק המתווכים במקרקעין, תשנ״ו-1996 ולכל דין רלוונטי. מסמך מס׳ {{contractId}}.`,
     },
 
-    // ── BROKER_COOP · HE ──────────────────────────────────────────────────────
+    // NOTE: the legacy generic BROKER_COOP entry was retired from this managed
+    // list (it was never used in production; BROKER_COOP_SHARED_POOL is the
+    // first production key of the cooperation family and every new BROKER_COOP
+    // creation resolves to it). Any existing dev-DB row for the legacy key is
+    // left untouched; the enum value stays for referential integrity.
+
+    // ── BROKER_COOP_SHARED_POOL · HE ──────────────────────────────────────────
+    // Broker cooperation — shared pool ("קופה משותפת"), the first production
+    // key of the cooperation family. Broker A is the SignDeal user; Broker B
+    // (the cooperating broker) is the external signer, modeled through the
+    // Client relation and signing via the standard link. Resolved by
+    // (contractType "הסכם שיתוף פעולה בין מתווכים" + any dealType).
+    // Source: "הסכם שיתוף פעולה קופה משותפת .txt" (2026-07-12 lawyer text),
+    // verbatim; the trailing "<This message was edited>" copy artifact stripped.
+    // • Fees from both sides form one shared pool split EQUALLY per the legal
+    //   text ("אלא אם הוסכם אחרת ובכתב") — the wording is static: no split
+    //   fields, no fee amounts. commission is forced 0 by the route and fee
+    //   chrome is suppressed for this key (hidesFeeChrome shows "—", not ₪0).
+    // • Broker B's license is optional: {{counterpartyBrokerLicenseSuffix}}
+    //   renders ", רישיון תיווך מס׳ X" from Contract.counterpartyBrokerLicenseNumber
+    //   or an empty string — the line never shows a dangling dash.
+    // • Property facts render via PropertyTable as the annex (clause 5's
+    //   "שיפורטו במסמך זה"); the "נכס/ים ו/או לקוח/ות" wording is kept as-is.
+    // • The contract number is chrome-only; API-reachable after Phase 1B, the
+    //   /contracts/new card activates in Phase 2.
     {
-      key: "BROKER_COOP",
+      key: "BROKER_COOP_SHARED_POOL",
       language: "HE",
-      title: "הסכם שיתוף פעולה בין מתווכים",
-      content: `הסכם שיתוף פעולה בין מתווכים
-בהתאם לחוק המתווכים במקרקעין התשנ״ו 1996
+      title: "הסכם שיתוף פעולה בין מתווכים — קופה משותפת",
+      content: `הסכם שיתוף פעולה בין מתווכים — קופה משותפת
+בהתאם לחוק המתווכים במקרקעין התשנ״ו-1996
 
-נערך ונחתם ביום {{today}} בין:
+מתווך א׳: {{brokerName}}, ת.ז {{brokerIdNumber}}, רישיון מתווך מס׳ {{brokerLicense}}, טלפון {{brokerPhone}}
+מתווך ב׳: {{clientName}}, ת.ז {{clientIdNumber}}, טלפון {{clientPhone}}, דוא״ל {{clientEmail}}{{counterpartyBrokerLicenseSuffix}}
 
-מתווך א׳: {{brokerName}}, מס׳ רישיון {{brokerLicense}}, ת״ז {{brokerIdNumber}}, טל׳ {{brokerPhone}}
-מתווך ב׳: {{clientName}}, ת״ז {{clientIdNumber}}, טל׳ {{clientPhone}}
+סוג שיתוף הפעולה: קופה משותפת
 
-1. הצדדים מסכימים לשתף פעולה בשיווק ומכירת / השכרת הנכס ב-{{propertyAddress}}, {{propertyCity}}. סוג העסקה: {{dealType}}. מחיר העסקה: {{propertyPrice}}.
-2. העמלה הכוללת בגין העסקה הינה {{commission}}. הצדדים מסכימים לחלק את העמלה שווה בשווה, כל אחד 50%, אלא אם הוסכם אחרת בכתב.
-3. כל אחד מהצדדים הינו בעל רישיון תיווך בתוקף בהתאם לחוק המתווכים במקרקעין, תשנ״ו-1996.
-4. הסכם זה אינו יוצר שותפות, אלא שיתוף פעולה חד-פעמי לצורך עסקה זו בלבד. מסמך מס׳ {{contractId}}.`,
+מוסכם בין הצדדים כי שיתוף הפעולה יתבצע במתכונת של קופה משותפת, כך שדמי התיווך שייגבו מצד המוכר/המשכיר ומצד הקונה/השוכר, לפי העניין, יאוחדו לסכום כולל אחד, ולאחר גבייתם בפועל יחולקו בין הצדדים בחלקים שווים, אלא אם הוסכם אחרת ובכתב.
+
+1. הצדדים מתחייבים לפעול זה כלפי זה בשקיפות, בהגינות, בתום לב ובנאמנות, ולשתף פעולה לצורך קידום העסקה.
+2. כל צד מתחייב שלא להעביר, לחשוף או למסור לצד שלישי כלשהו, לרבות מתווך אחר, את פרטי הנכס, פרטי הלקוח, פרטי הקונה/השוכר ו/או כל מידע שהתקבל במסגרת שיתוף הפעולה, אלא לאחר קבלת אישור מראש ובכתב מהצד השני.
+3. מוסכם כי כל קשר עם בעל הנכס ו/או עם הקונה/השוכר יתבצע באמצעות הנציג המייצג את אותו צד, אלא אם ניתנה הסכמה מפורשת אחרת מראש ובכתב.
+4. הסכם שיתוף פעולה זה יחול על כל עסקה שתיווצר בקשר לנכס ו/או ללקוח נשוא הסכמה זו, לרבות עסקה שתבוצע במעורבות מתווך, נציג או צד שלישי נוסף, ובלבד שמקורה במידע, בפנייה או בקשר שנוצרו במסגרת שיתוף פעולה זה.
+5. מובהר כי הסכם זה חל אך ורק על הנכס/ים ו/או הלקוח/ות שיפורטו במסמך זה, ואינו חל על נכסים, לקוחות או עסקאות אחרות, אלא אם הוסכם אחרת ובכתב.
+6. לכל סכום שישולם מכוח הסכם זה יתווסף מע״מ כדין, ככל שחל.
+7. חלוקת דמי התיווך בין הצדדים תבוצע רק לאחר גבייתם בפועל מהלקוח/ות, אלא אם סוכם אחרת ובכתב.`,
+    },
+
+    // ── BROKER_COOP_EACH_SIDE · HE ────────────────────────────────────────────
+    // Broker cooperation — each broker collects from its own side ("כל מתווך
+    // גובה מהצד שלו"), the SECOND subtype of the cooperation family. Two brokers
+    // cooperate on a deal with NO shared pool: each represents its own side and
+    // collects brokerage fees only from the client it represents; the agreement
+    // exists to protect trust and prevent bypassing / client-contact poaching.
+    // Same signer model as the shared-pool subtype (Broker A = the SignDeal
+    // user; Broker B = the external cooperating broker, modeled through the
+    // Client relation and signing via the standard link). Resolved by
+    // (contractType "הסכם שיתוף פעולה בין מתווכים" + coopType "eachSide"); every
+    // dealType maps to this key.
+    // Source: "כל אחד מהצד שלו .txt" (lawyer text), verbatim — the stray first-
+    // line "ו" copy artifact stripped; clauses 1–9 kept as written.
+    // • Fee-free: no shared pool and no fee amounts — each side handles its own
+    //   fee collection (clauses 4–5). commission is forced 0 by the route and
+    //   fee chrome is suppressed for this key (hidesFeeChrome shows "—", not ₪0).
+    // • Broker B's license is optional: {{counterpartyBrokerLicenseSuffix}}
+    //   renders ", רישיון תיווך מס׳ X" from Contract.counterpartyBrokerLicenseNumber
+    //   or an empty string — the line never shows a dangling dash.
+    // • LAWYER-AWARENESS: clause 2 here lists "פרטי בעל הנכס" where the shared-
+    //   pool clause 2 lists "פרטי הלקוח". This divergence is kept VERBATIM from
+    //   each lawyer draft — intentionally NOT reconciled. Flag for legal review.
+    // • The "נכס/ים ו/או הלקוח/ות" wording (clause 7) is kept as-is.
+    {
+      key: "BROKER_COOP_EACH_SIDE",
+      language: "HE",
+      title: "הסכם שיתוף פעולה בין מתווכים — כל מתווך גובה מהצד שלו",
+      content: `הסכם שיתוף פעולה בין מתווכים — כל מתווך גובה מהצד שלו
+בהתאם לחוק המתווכים במקרקעין התשנ״ו-1996
+
+מתווך א׳: {{brokerName}}, ת.ז {{brokerIdNumber}}, רישיון מתווך מס׳ {{brokerLicense}}, טלפון {{brokerPhone}}
+מתווך ב׳: {{clientName}}, ת.ז {{clientIdNumber}}, טלפון {{clientPhone}}, דוא״ל {{clientEmail}}{{counterpartyBrokerLicenseSuffix}}
+
+סוג שיתוף הפעולה: כל מתווך גובה מהצד שלו
+
+מוסכם בין הצדדים כי שיתוף הפעולה יתבצע במתכונת שבה כל מתווך יהיה אחראי לגביית דמי התיווך מהלקוח אותו הוא מייצג, בהתאם להסכמה שנערכה בינו לבין אותו לקוח. אין באמור כדי ליצור קופה משותפת בין הצדדים, אלא אם הוסכם אחרת במפורש ובכתב.
+
+1. הצדדים מתחייבים לפעול זה כלפי זה בשקיפות, בהגינות, בתום לב ובנאמנות, ולשתף פעולה לצורך קידום העסקה.
+2. כל צד מתחייב שלא להעביר, לחשוף או למסור לצד שלישי כלשהו, לרבות מתווך אחר, את פרטי הנכס, פרטי בעל הנכס, פרטי הקונה/השוכר ו/או כל מידע שהתקבל במסגרת שיתוף הפעולה, אלא בכפוף לקבלת אישור מראש ובכתב מהצד השני.
+3. מוסכם כי כל קשר עם בעל הנכס ו/או עם הקונה/השוכר יתבצע באמצעות הנציג המייצג את אותו צד, אלא אם ניתנה הסכמה מפורשת אחרת מראש ובכתב.
+4. כל צד יהיה זכאי לדמי התיווך שייגבו מהלקוח המיוצג על ידו בלבד, בהתאם להסכם או להזמנת שירותי התיווך שנחתמו בינו לבין אותו לקוח.
+5. כל צד יישא באחריות הבלעדית להסדרת זכאותו לדמי תיווך מול הלקוח אותו הוא מייצג, לרבות חתימה על הזמנת שירותי תיווך כדין, גביית התשלום והוצאת חשבונית מס כדין.
+6. הסכם שיתוף פעולה זה יחול על כל עסקה שתיווצר בקשר לנכס ו/או ללקוח נשוא הסכמה זו, לרבות עסקה שתבוצע במעורבות מתווך, נציג או צד שלישי נוסף, ובלבד שמקורה במידע, בפנייה או בקשר שנוצרו במסגרת שיתוף פעולה זה.
+7. מובהר כי הסכם זה חל אך ורק על הנכס/ים ו/או הלקוח/ות שיפורטו במסמך זה, ואינו חל על נכסים, לקוחות או עסקאות אחרות, אלא אם הוסכם אחרת ובכתב.
+8. לכל סכום שישולם מכוח הסכם זה יתווסף מע״מ כדין, ככל שחל.
+9. כל שינוי, ויתור או חריגה מהוראות הסכם זה יהיו תקפים רק אם נערכו בכתב ואושרו על ידי שני הצדדים.`,
+    },
+
+    // ── BROKER_COOP_BUYER_TO_SELLER · HE ──────────────────────────────────────
+    // Broker cooperation — buyer-side broker transfers to the seller-side broker
+    // ("מתווך הקונה מעביר למתווך המוכר"), the THIRD subtype of the cooperation
+    // family. The buyer/tenant-side broker is responsible for collecting the
+    // brokerage fee from the client it represents and transfers to the seller/
+    // landlord-side broker an agreed percent of the DEAL PRICE plus VAT, due
+    // upon signing the binding agreement. Same signer model as the other
+    // subtypes (Broker A = the SignDeal user; Broker B = the external
+    // cooperating broker, modeled through the Client relation and signing via
+    // the standard link). Resolved by (contractType "הסכם שיתוף פעולה בין
+    // מתווכים" + coopType "buyerToSeller"); every dealType maps to this key.
+    // Source: "מתווך הקונה מעביר למתווך המוכר .txt" (lawyer text) with the
+    // percent blank substituted:
+    //   ________%  → {{brokerCoopTransferPercent}}%   (opening paragraph)
+    // The percent is REQUIRED by route validation for this key and persisted on
+    // Contract.brokerCoopTransferPercent so sign-time regeneration rebuilds the
+    // clause deterministically — the document never renders "—%".
+    // • ⚖️ LAWYER-REVIEW (Phase 4B.1 legal-text changes vs the lawyer source —
+    //   product decision: the transfer is due at signing, not within N days of
+    //   actual collection; the due-days field was removed platform-wide):
+    //   1. Opening paragraph: "יגבה את דמי התיווך… ומתוכם יעביר" →
+    //      "יהיה אחראי לגביית דמי התיווך… ויעביר" — removes the dependency
+    //      between actual fee collection and the transfer obligation.
+    //   2. Clause 5: the source's "וגביית דמי התיווך בפועל" precondition and
+    //      "וזאת בתוך ___ ימים ממועד גביית דמי התיווך בפועל" deadline were
+    //      replaced with an at-signing due time — "במעמד החתימה".
+    // • PUNCTUATION NOTE: a final period was added at the end of clause 10 for
+    //   punctuation consistency with the sibling templates' identical closing
+    //   clause — the legal wording itself is unchanged from the source.
+    // • Fee-free for platform chrome: the document states an inter-broker
+    //   transfer formula, never a SignDeal commission amount — commission is
+    //   forced 0 by the route and fee chrome is suppressed (hidesFeeChrome
+    //   shows "—", not ₪0).
+    // • Broker B's license is optional: {{counterpartyBrokerLicenseSuffix}}
+    //   renders ", רישיון תיווך מס׳ X" or an empty string — never a dangling dash.
+    // • The "נכס/ים ו/או הלקוח/ות" wording (clause 8) is kept as-is.
+    {
+      key: "BROKER_COOP_BUYER_TO_SELLER",
+      language: "HE",
+      title: "הסכם שיתוף פעולה בין מתווכים — מתווך הקונה מעביר למתווך המוכר",
+      content: `הסכם שיתוף פעולה בין מתווכים — מתווך הקונה מעביר למתווך המוכר
+בהתאם לחוק המתווכים במקרקעין התשנ״ו-1996
+
+מתווך א׳: {{brokerName}}, ת.ז {{brokerIdNumber}}, רישיון מתווך מס׳ {{brokerLicense}}, טלפון {{brokerPhone}}
+מתווך ב׳: {{clientName}}, ת.ז {{clientIdNumber}}, טלפון {{clientPhone}}, דוא״ל {{clientEmail}}{{counterpartyBrokerLicenseSuffix}}
+
+סוג שיתוף הפעולה: העברת חלק מדמי התיווך ממתווך הקונה למתווך המוכר
+
+מוסכם בין הצדדים כי שיתוף הפעולה יתבצע במתכונת שבה מתווך הקונה/השוכר יהיה אחראי לגביית דמי התיווך מהלקוח המיוצג על ידו, ויעביר למתווך המוכר/המשכיר סך השווה ל־{{brokerCoopTransferPercent}}% ממחיר העסקה בתוספת מע״מ כדין.
+
+1. הצדדים מתחייבים לפעול זה כלפי זה בשקיפות, בהגינות, בתום לב ובנאמנות, ולשתף פעולה לצורך קידום העסקה.
+2. כל צד מתחייב שלא למסור, להעביר או לחשוף לצד שלישי כלשהו, לרבות מתווך אחר, את פרטי הנכס, פרטי בעל הנכס, פרטי הקונה/השוכר ו/או כל מידע שהתקבל במסגרת שיתוף הפעולה, אלא לאחר קבלת אישור מראש ובכתב מהצד השני.
+3. מוסכם כי כל קשר עם בעל הנכס ו/או עם הקונה/השוכר יתבצע באמצעות הנציג המייצג את אותו צד, אלא אם סוכם אחרת מראש ובכתב.
+4. מתווך הקונה/השוכר יהיה אחראי לגביית דמי התיווך מהלקוח המיוצג על ידו, בהתאם להסכמות שנחתמו בינו לבין אותו לקוח.
+5. עם חתימת הסכם מחייב ביחס לנכס, יעביר מתווך הקונה/השוכר למתווך המוכר/המשכיר את הסכום המוסכם כאמור לעיל במעמד החתימה, אלא אם סוכם אחרת בכתב.
+6. מובהר כי התחייבות ההעברה בין המתווכים תחול לגבי כל עסקה שתיווצר בקשר לנכס ו/או ללקוח נשוא הסכמה זו, לרבות עסקה שתבוצע במעורבות מתווך, נציג או צד שלישי נוסף, ובלבד שמקורה במידע, בפנייה או בקשר שנוצרו במסגרת שיתוף פעולה זה.
+7. כל צד מתחייב שלא לבצע פעולה שיש בה כדי לעקוף את הצד השני, לפגוע בזכאותו לתשלום או לסכל את חלקו בשיתוף הפעולה.
+8. הסכם זה חל אך ורק על הנכס/ים ו/או הלקוח/ות שיפורטו במסמך זה, ואינו חל על נכסים, לקוחות או עסקאות אחרות, אלא אם הוסכם אחרת ובכתב.
+9. לכל סכום שישולם מכוח הסכם זה יתווסף מע״מ כדין, ככל שחל.
+10. כל שינוי, ויתור או חריגה מהוראות הסכם זה יהיו תקפים רק אם נערכו בכתב ואושרו על ידי שני הצדדים.`,
     },
 
     // ── INTERESTED_BUYER · EN ─────────────────────────────────────────────────
@@ -688,7 +827,7 @@ async function upsertTemplates() {
 
   // ── Sanity check: each HE template must have exactly 1 active row ─────────
   console.log("\n── Sanity check (HE templates) ───────────────────────────────");
-  for (const key of ["INTERESTED_BUYER", "OWNER_EXCLUSIVE", "BROKER_COOP", "INTERESTED_BUYER_RENTAL", "INTERESTED_BUYER_SALE", "INTERESTED_BUYER_BOTH", "OWNER_SERVICE_ORDER_RENTAL", "OWNER_SERVICE_ORDER_SALE", "OWNER_SERVICE_ORDER_BOTH", "OWNER_EXCLUSIVE_GENERAL", "OWNER_EXCLUSIVE_ONLY"] as const) {
+  for (const key of ["INTERESTED_BUYER", "OWNER_EXCLUSIVE", "INTERESTED_BUYER_RENTAL", "INTERESTED_BUYER_SALE", "INTERESTED_BUYER_BOTH", "OWNER_SERVICE_ORDER_RENTAL", "OWNER_SERVICE_ORDER_SALE", "OWNER_SERVICE_ORDER_BOTH", "OWNER_EXCLUSIVE_GENERAL", "OWNER_EXCLUSIVE_ONLY", "BROKER_COOP_SHARED_POOL", "BROKER_COOP_EACH_SIDE", "BROKER_COOP_BUYER_TO_SELLER"] as const) {
     const rows = await p.contractTemplate.findMany({
       where: { templateKey: key, language: "HE", isActive: true },
       select: { id: true },

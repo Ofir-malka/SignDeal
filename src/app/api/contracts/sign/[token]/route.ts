@@ -591,6 +591,14 @@ export async function PATCH(
                 exclusivityStartsAt: contract.exclusivityStartsAt,
                 exclusivityEndsAt:   contract.exclusivityEndsAt,
                 serviceOrder:    contract.relatedContract ?? null,
+                // Broker cooperation: keeps the מתווך ב׳ license suffix
+                // deterministic across sign-time regeneration.
+                counterpartyBrokerLicenseNumber: contract.counterpartyBrokerLicenseNumber,
+                // Buyer-to-seller subtype: keeps the transfer percent clause
+                // deterministic across sign-time regeneration — omitting it
+                // would regenerate the document with an empty "%" blank after
+                // signer detail completion.
+                brokerCoopTransferPercent: contract.brokerCoopTransferPercent,
                 createdAt:       contract.createdAt,
               },
             });
